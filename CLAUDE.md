@@ -31,10 +31,11 @@ review comments.
 
 ## Design rule
 
-- A table's bytes change only with the tables' version, the one line of `src/case_annotation/tables-version.txt`. The
-  version changes when a column of a table is renamed, retyped or removed, or when its meaning changes. A table, a
-  column or a manifest key that is added leaves the version as it is, because a reader of the Parquet tables by column
-  name, or of the manifest as plain JSON, finds what it knew as before.
+- The tables have one version, the one line of `src/case_annotation/tables-version.txt`. Without a new version, no
+  existing column of a table changes its name, its type or its meaning, and a query on existing columns returns the rows
+  it returned before. The version changes when a column of a table is renamed, retyped or removed, or when its meaning
+  changes. A table, a column or a manifest key that is added leaves the version as it is, because a reader of the
+  Parquet tables by column name, or of the manifest as plain JSON, finds what it knew as before.
 
 ## Working norms
 
