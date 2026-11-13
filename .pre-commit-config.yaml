@@ -1,0 +1,51 @@
+# lint.yml runs `pre-commit run --all-files`, so this config is the CI gate too: a hook added here is gated in CI with
+# no workflow edit. pytest stays a separate CI job (tests.yml).
+default_language_version:
+  python: python3.12
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-json
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: debug-statements
+      - id: check-added-large-files
+
+  # ruff and pyright run in the lint env via `uv run`. ruff's version is then the one in uv.lock, which Dependabot moves
+  # and the editor runs. The ruff hooks copy ruff-pre-commit's definitions. pyright needs the package's dependencies to
+  # resolve imports; it is whole-project, so pass_filenames: false, and fires on any staged .py.
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run --group lint ruff check --force-exclude
+        language: system
+        types_or: [python, pyi, jupyter]
+        require_serial: true
+      - id: ruff-format
+        name: ruff format
+        entry: uv run --group lint ruff format --force-exclude
+        language: system
+        types_or: [python, pyi, jupyter, markdown]
+        require_serial: true
+      - id: pyright
+        name: pyright
+        entry: uv run --group lint pyright
+        language: system
+        files: \.py$
+        pass_filenames: false
+
+  # CommonMark-strict, so intraword `_` in snake_case identifiers stays literal. Prose wrapped at 120.
+  - repo: https://github.com/hukkin/mdformat
+    rev: 1.0.0
+    hooks:
+      - id: mdformat
+        args: ["--wrap", "120"]
+        additional_dependencies:
+          - mdformat-gfm==1.0.0
