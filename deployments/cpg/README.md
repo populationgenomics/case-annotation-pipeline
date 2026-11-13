@@ -23,7 +23,8 @@ lands. [Annotation](../../docs/annotation.md) explains what the workflows do.
 
 - The tools image is built from [containers/tools/Dockerfile](../../containers/tools/Dockerfile) at a release tag, and
   the Dockerfile shows the command. The params file pins it by digest, so a new tag means a new build and a new digest
-  there.
+  there. Until the image of the first tag is pushed, the line holds a placeholder in place of the digest, and a task
+  that needs the tools image fails to pull one: every run of `family_tables.nf`, and an `annotate` run with `regions`.
 
 - The licence is CPG's DRAGEN licence, whose API key the Annotator takes as an API key file. The dataset's accounts can
   read the key, in the project `rd-benchmark-220215`. The dataset's analysis group can add and disable versions, and
@@ -135,8 +136,8 @@ and the VCFs of its larger variants where it has them
 writes one, and [contract/examples/families.csv](../../contract/examples/families.csv) is an invented one.
 
 The params are the ones that [contract/workflow.json](../../contract/workflow.json) lists for `family_tables.nf`. Every
-line of `test.annotator.params.yaml` is one of them. A run adds CPG's reference and archive, and its own sheet, group
-and catalog:
+line of `test.annotator.params.yaml` is one of them, and its tools image needs its digest filled in. A run adds CPG's
+reference and archive, and its own sheet, group and catalog:
 
 ```sh
 cp deployments/cpg/test.annotator.params.yaml <run>.params.yaml

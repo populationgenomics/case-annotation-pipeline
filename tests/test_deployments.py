@@ -29,10 +29,14 @@ def test_a_deployment_has_a_params_file() -> None:
 @pytest.mark.parametrize('path', PARAMS_FILES, ids=lambda path: str(path.relative_to(REPOSITORY)))
 def test_a_deployments_params_file_gives_params_that_its_workflow_declares(path: pathlib.Path) -> None:
     _level, workflow, _params_suffix, _yaml = path.name.split('.')
-    declared = {param['name']: param for param in contract.workflows()['workflows'][f'{workflow}.nf']['params']}
+    workflows = contract.workflows()['workflows']
+    declared = {param['name']: param for param in workflows[f'{workflow}.nf']['params']}
     given = _params(path)
     names = [name for name, _value in given]
     assert len(set(names)) == len(names)
     assert set(names) <= declared.keys()
+    # A run of family_tables.nf starts from a copy of the Annotator's file, so that file gives it no param that it
+    # does not declare.
+    assert workflow != 'annotator' or set(names) <= {param['name'] for param in workflows['family_tables.nf']['params']}
     # A value that names files and folders has the form its workflow accepts.
     assert all(re.fullmatch(declared[name]['pattern'], value) for name, value in given if 'pattern' in declared[name])
