@@ -204,10 +204,9 @@ process SUBSET_VCF {
     """
 }
 
-// The command that fetches the licence key into /tmp/dragen-api-key, which only the task's user can read. No task of
-// this pipeline uses the folder /tmp/dragen that it also makes.
+// The command that fetches the licence key into /tmp/dragen-api-key, which only the task's user can read.
 def fetchKey(api_key_secret) {
-    return "mkdir -p /tmp/dragen\n(umask 077 && gcp-secret ${api_key_secret} > /tmp/dragen-api-key)"
+    return "(umask 077 && gcp-secret ${api_key_secret} > /tmp/dragen-api-key)"
 }
 
 // The shell every Annotator task starts with: the key fetched into /tmp, a scratch folder for the Annotator removed

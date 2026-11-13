@@ -64,6 +64,10 @@ review comments.
 - The `lint` and `tests` workflows pass before it merges. A pull request lists their checks as `lint / pre-commit` and
   `tests / pytest`, and the API names the check runs `pre-commit` and `pytest`. They run
   `uv run pre-commit run --all-files` and `uv run pytest`, so run both before pushing.
+- The `nextflow` workflow passes too. A pull request lists its checks as `nextflow / stub-runs`, `nextflow / annotator`
+  and `nextflow / family-tables`, and the API names the check runs `stub-runs`, `annotator` and `family-tables`. They
+  run both workflows in stub mode and their processes in Docker on invented inputs, with the commands in
+  `.github/workflows/nextflow.yml`.
 - An agent reviews its own pull request by `REVIEW.md`, fixes what the review finds and reviews again. It stops after
   two reviews in a row with no Important finding, and then says that the pull request is ready for a maintainer.
 - A maintainer decides each merge, and every merge is a squash, so that `main` holds one commit for each pull request.

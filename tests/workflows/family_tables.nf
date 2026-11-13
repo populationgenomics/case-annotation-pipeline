@@ -30,6 +30,7 @@
 // sites, SV_UNION writes their union and its map, INVENTED_SV_ANNOTATION writes an invented annotation of the union in
 // the Annotator's layout, SV_ANNOTATION_TABLES converts it, and FAMILY_TABLES reads family A's records' annotation from
 // it. A deletion written as a sequence without INFO END (sv-no-end.vcf) is refused when the union is written.
+// The ##source line of the VCFs of the larger variants names build/tests/family.nf, which means this file.
 // Refused inputs must fail, and so must Annotator outputs without the group's annotation. The case-annotation and
 // echtvar steps run in the tools image, built first. Run with Docker from the repository's root, with this folder's
 // config alone (-C), because a run from the root would otherwise read the pipeline's nextflow.config over it:
