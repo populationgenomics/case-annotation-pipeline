@@ -12,7 +12,7 @@ import importlib.metadata
 import json
 import pathlib
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, Literal
 
 import pyarrow as pa
 import pydantic.json_schema
@@ -106,19 +106,16 @@ def families_sheet() -> dict[str, Any]:
     }
 
 
-def _param(
-    name: str, kind: str, *default: object, required: bool = False, pattern: str | None = None
-) -> dict[str, Any]:
+def _param(name: str, kind: str, *default: object, required: bool = False, **rules: str) -> dict[str, Any]:
     """One param as a workflow declares it: `name: Type` (required), `name: Type?` or `name: Type = default`.
 
-    A pattern is matched against the whole value, and against each value of a list.
+    Its rules are a `pattern`, which is matched against the whole value and against each value of a list, and an
+    `index_suffix`, for a file with an index beside it that is named as the file with the suffix.
     """
     declared: dict[str, Any] = {'name': name, 'type': kind, 'required': required}
     if default:
         (declared['default'],) = default
-    if pattern is not None:
-        declared['pattern'] = pattern
-    return declared
+    return declared | rules
 
 
 def _family_tables_workflow() -> dict[str, Any]:
@@ -127,7 +124,7 @@ def _family_tables_workflow() -> dict[str, Any]:
         'params': [
             _param('families', 'Path', required=True),
             _param('group', 'String', required=True, pattern=NAME),
-            _param('reference', 'Path', required=True),
+            _param('reference', 'Path', required=True, index_suffix='.fai'),
             _param('catalog', 'String', required=True, pattern=NAME),
             _param('annotation_data', 'Path', required=True),
             _param('sources', 'List<String>', [], pattern=ILLUMINA_NAME),
@@ -195,12 +192,13 @@ def _annotator_workflow() -> dict[str, Any]:
             _param('output_dir', 'String'),
             _param('arGuid', 'String'),
         ],
-        # What a run of each value of `mode` needs beside the required params, and where it publishes. The data
-        # directory that a download publishes is what `annotation_data` takes.
+        # The params that a run of each value of `mode` needs a value of beside the required ones, a list at least
+        # one, and where the run publishes. The data directory that a download publishes is what `annotation_data`
+        # takes.
         'modes': {
             'list': {'needs': [], 'publishes': {'folder': 'annotation/list/{date}'}},
             'download': {
-                'needs': ['catalog'],
+                'needs': ['catalog', 'categories'],
                 'publishes': {'folder': _DATA_FOLDER, 'data_directory': f'{_DATA_FOLDER}/{{assembly}}'},
             },
             'annotate': {
@@ -296,6 +294,15 @@ _EXAMPLE_ROWS: Sequence[Mapping[str, str]] = (
 )
 
 
+# The four fields of gnomAD's joint release that the tables read, as an archive's configuration could encode them.
+_EXAMPLE_ARCHIVE: Sequence[tuple[str, str, Literal['Integer', 'Float'], int, int]] = (
+    ('AC_joint', 'gnomad_AC', 'Integer', 1, -2147483648),
+    ('AF_joint', 'gnomad_AF', 'Float', 2_000_000, 0),
+    ('nhomalt_joint', 'gnomad_HomAlt', 'Integer', 1, -2147483648),
+    ('fafmax_faf95_max_joint', 'gnomad_faf95max', 'Float', 2_000_000, 0),
+)
+
+
 def example_sheet() -> str:
     """An invented families sheet, whose first row is the family of the example manifest."""
     names = [column['name'] for column in families_sheet()['columns']]
@@ -373,23 +380,16 @@ def example_manifest() -> family_tables.FamilyManifest:
             bytes=1_000_000,
             sha256='a' * 64,
             echtvar_version='0.2.4',
-            fields=(
+            fields=tuple(
                 gnomad_joint.ArchiveField(
-                    field='AC_joint',
-                    alias='gnomad_AC',
-                    ftype='Integer',
-                    multiplier=1,
-                    missing_value=-2147483648,
+                    field=field,
+                    alias=alias,
+                    ftype=ftype,
+                    multiplier=multiplier,
+                    missing_value=missing_value,
                     missing_string='MISSING',
-                ),
-                gnomad_joint.ArchiveField(
-                    field='AF_joint',
-                    alias='gnomad_AF',
-                    ftype='Float',
-                    multiplier=2_000_000,
-                    missing_value=0,
-                    missing_string='MISSING',
-                ),
+                )
+                for field, alias, ftype, multiplier, missing_value in _EXAMPLE_ARCHIVE
             ),
         ),
         omitted_columns=annotation_tables.SOURCE_COLUMNS['dbSNP'],

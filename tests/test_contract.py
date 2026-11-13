@@ -23,7 +23,7 @@ import structural_vcfs
 import test_family_tables
 
 import case_annotation
-from case_annotation import cli, contract, family_tables
+from case_annotation import cli, contract, family_tables, gnomad_joint
 
 REPOSITORY = pathlib.Path(__file__).parent.parent
 CONTRACT = REPOSITORY / 'contract'
@@ -130,6 +130,8 @@ def test_the_example_manifest_is_one_that_the_model_reads_and_writes() -> None:
     for omitted, table in ((manifest.omitted_columns, 'variants'), (manifest.sv_omitted_columns, 'sv')):
         sources = family_tables.TABLES[table].sources
         assert omitted == tuple(c for source, columns in sources.items() if source not in named for c in columns)
+    # Its archive holds the fields that a run reads gnomAD's joint values from.
+    assert gnomad_joint.column_fields(manifest.gnomad_joint.fields, pathlib.Path(manifest.gnomad_joint.archive))
     assert manifest.sv_annotation is not None
     assert (manifest.sv_annotation.catalog, manifest.sv_annotation.sources) == (
         manifest.annotation.catalog,
@@ -273,7 +275,17 @@ def _params(workflow: str) -> list[dict[str, Any]]:
 
 @pytest.mark.parametrize(('workflow', 'text'), [('family_tables.nf', FAMILY_TABLES), ('annotator.nf', ANNOTATOR)])
 def test_the_params_are_the_ones_each_workflow_declares(workflow: str, text: str) -> None:
-    assert [{k: v for k, v in param.items() if k != 'pattern'} for param in _params(workflow)] == _declared(text)
+    declaration = ('name', 'type', 'required', 'default')
+    assert [{k: v for k, v in param.items() if k in declaration} for param in _params(workflow)] == _declared(text)
+
+
+def test_the_reference_has_the_index_the_workflow_looks_for_beside_it() -> None:
+    indexed = {param['name']: param['index_suffix'] for param in _params('family_tables.nf') if 'index_suffix' in param}
+    (name, suffix), *others = indexed.items()
+    assert not others
+    beside = f'params.{name}.resolveSibling("${{params.{name}.name}}{suffix}")'
+    assert re.search(rf'def (\w+) = {re.escape(beside)}\n\s+if \(!\1\.exists\(\)\) \{{\n\s+error\(', FAMILY_TABLES)
+    assert FAMILY_TABLES.count('.resolveSibling(') == 1
 
 
 def test_the_patterns_of_the_family_tables_params_are_the_ones_the_workflow_matches() -> None:
@@ -438,14 +450,15 @@ def test_each_mode_of_the_annotator_needs_the_params_the_workflow_requires() -> 
     branches = _mode_branches()
     assert list(modes) == list(branches)
     assert f'give {", ".join(list(modes)[:-1])} or {list(modes)[-1]}' in ANNOTATOR
-    assert "require(params.catalog, 'catalog')" in _function(ANNOTATOR, 'requireCatalog')
+    assert re.findall(r'require\(params\.(\w+)', _function(ANNOTATOR, 'requireCatalog')) == ['catalog']
     declared = {param['name']: param for param in _params('annotator.nf')}
     for mode, branch in branches.items():
-        # What the branch requires outright, in its order: the catalog, each param that it must be given, and sources
-        # to annotate with.
-        needs = ['catalog'] if '\n        requireCatalog()\n' in branch else []
-        needs += re.findall(r"\n        require\(params\.(\w+), '\1'\)", branch)
-        needs += ['sources'] if '\n        if (!params.sources) {\n            error(' in branch else []
+        # What the branch requires outright, in its order: the catalog, each param that it must be given, and each
+        # that an empty value of stops.
+        outright = (
+            r"\n        (?:(requireCatalog)\(\)|require\(params\.(\w+), '\2'\)|if \(!params\.(\w+)\) \{\n +error\()"
+        )
+        needs = ['catalog' if catalog else given or valued for catalog, given, valued in re.findall(outright, branch)]
         assert modes[mode]['needs'] == needs
         # And what it requires with another param.
         nested = re.findall(r"\n        if \(params\.(\w+)\) \{\n            require\(params\.(\w+), '\2'\)", branch)
