@@ -32,6 +32,7 @@ The image runs the three processes that start the Annotator: `ILLUMINA_LIST`, `I
 | `jq`                                      | on the `PATH`. A download joins the categories' run configs into one with it, and an annotation cuts the bundle's run config down to the sources named                                                              |
 | bash                                      | the tasks' scripts use arrays, `[[ ]]` and `pipefail`                                                                                                                                                               |
 | GNU coreutils, findutils and grep, an awk | `mktemp`, `tee`, `date`, `sort`, `cp -t` and `du --exclude`; `find -printf` and `xargs -0 -r`; `grep -F -f`; and `awk`, with which a task redacts the key from the Annotator's output before it is written or shown |
+| `ps`                                      | Nextflow reads a task's resource use with it where a run collects task metrics. A base image can lack it, and the package that holds it is `procps-ng` on a system compatible with RHEL                             |
 
 The Annotator caches its runtime and its licence under `HOME`. A task points `HOME` at a scratch folder under `/tmp` and
 deletes the folder when it ends, so the image needs no home directory prepared and nothing in `/tmp` kept.
@@ -39,10 +40,10 @@ deletes the folder when it ends, so the image needs no home directory prepared a
 An image that meets the table is built in three steps.
 
 1. Start from an operating system that DRAGEN supports, such as one compatible with RHEL 9. Its base image has bash and
-   the GNU tools of the last two rows.
+   the GNU tools of the table.
 1. Run Illumina's installer of DRAGEN Software Mode, which holds the Annotator. DRAGEN 4.6 installs DRAGEN Annotation
    4.0 at `share/nirvana/Annotator` under its own folder.
-1. Install `jq` and copy the helper onto the `PATH`.
+1. Install `jq` and `procps-ng`, and copy the helper onto the `PATH`.
 
 > [!IMPORTANT]
 >
@@ -83,7 +84,8 @@ curl -sSf -H "Authorization: Bearer ${token}" "https://secretmanager.googleapis.
 ```
 
 The service account that the tasks run as needs permission to read that secret version, and the VMs need outbound access
-to the secret manager. A listing and a download also fetch from Illumina's servers.
+to the secret manager. They need it to Illumina's servers as well: a listing and a download fetch from them, and an
+annotation starts without a cached licence.
 
 The workflows call the helper by this one name and pass `license_secret` on as it is given. With another secret manager,
 a script of the same name that takes the value of `license_secret` and prints the key serves in its place.
