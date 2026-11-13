@@ -32,13 +32,14 @@ names VCFs that each have an index beside them, named as the VCF with the suffix
 VCFs of one field.
 
 In `workflow.json`, a param is `required` where its workflow declares it without a default, and a `pattern` on a list
-param holds for each of its values. A mode's `needs` are the params that a run of the mode must have a value of beside
-the required ones, and for a list at least one value. The workflows check more than the file states, such as the catalog
-alias `LATEST` and the index beside `input` in a run with `regions`;
-[Checks that stop a run](../docs/annotation.md#checks-that-stop-a-run) lists them. A folder is relative to `output_dir`,
-and the names in braces are the run's values: its params, a family's id from the sheet, the tables' version, and the
-date on which a listing run started. A file with `row_names_any_of` is in a family's folder when the family's row names
-a VCF in one of those columns. A file with `some_row_names_any_of` is read when any row of the sheet does.
+param holds for each of its values. A param with an `index_suffix` names a file that has an index beside it, as in the
+sheet. A mode's `needs` are the params that a run of the mode must have a value of beside the required ones, and for a
+list at least one value. The workflows check more than the file states, such as the catalog alias `LATEST` and the index
+beside `input` in a run with `regions`; [Checks that stop a run](../docs/annotation.md#checks-that-stop-a-run) lists
+them. A folder is relative to `output_dir`, and the names in braces are the run's values: its params, a family's id from
+the sheet, the tables' version, and the date on which a listing run started. A file with `row_names_any_of` is in a
+family's folder when the family's row names a VCF in one of those columns. A file with `some_row_names_any_of` is read
+when any row of the sheet does.
 
 In `tables.json`, a `type` is the name of an Arrow type, `list` with its `element`, or `struct` with its `fields`. The
 tables `variants`, `sv` and `repeats` end with one column for each sequenced member, named as the member's sample, and
