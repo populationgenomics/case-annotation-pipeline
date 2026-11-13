@@ -1,0 +1,9 @@
+# The image builds from the repository root, for the lock; it needs only the lock, the package it installs and the
+# README that the package's metadata names.
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!src
+**/__pycache__
+**/.venv
