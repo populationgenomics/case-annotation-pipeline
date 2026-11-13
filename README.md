@@ -8,7 +8,8 @@ where the family has them, its VCFs of structural variants, copy number segments
 pipeline writes one folder of tables, with a manifest that describes them.
 
 The pipeline's own steps are the Python package `case-annotation-tools` in `src/case_annotation/`, which installs the
-`case-annotation` command with one subcommand for each step. The workflows and the documentation follow in the next
+`case-annotation` command with one subcommand for each step. The steps run in the tools image, which
+[containers/tools](containers/tools/README.md) says how to build. The workflows and the documentation follow in the next
 changes.
 
 ## Development
