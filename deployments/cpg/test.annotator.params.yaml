@@ -1,0 +1,11 @@
+# CPG's params for annotator.nf at the test access level: the Annotator inside the pinned DRAGEN image, with the
+# DRAGEN licence. A run adds its mode and its own params to a copy of this file; see README.md.
+annotator_container: australia-southeast1-docker.pkg.dev/cpg-common/images-dev/dragen@sha256:b96473267b1d27cc98138b4bcd01f1ef085450c03f34cef9a2fe1e6b76c9ec17
+annotator: /opt/dragen/share/nirvana/Annotator
+annotator_version: 4.0.0
+license_secret: projects/rd-benchmark-220215/secrets/dragen-api-key/versions/latest
+# The tools image (containers/tools), which cuts a VCF to regions for a small annotation run and runs every step of
+# family_tables.nf but the Annotator's. It is pinned by the digest of the image built at the release tag. Until that
+# digest stands here, the placeholder after `sha256:` is no digest, so a task that needs the image fails to pull one.
+tools_container: australia-southeast1-docker.pkg.dev/cpg-common/images-dev/case-annotation-tools@sha256:digest-of-the-image-built-at-the-release-tag
+output_dir: gs://cpg-rd-benchmark-test

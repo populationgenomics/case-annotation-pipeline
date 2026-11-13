@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.resources
 import pathlib
 import re
+import tomllib
 
 import pytest
 
@@ -23,3 +24,11 @@ def test_the_tables_version_is_the_one_line_of_its_file() -> None:
     text = importlib.resources.files(case_annotation).joinpath('tables-version.txt').read_text()
     assert re.fullmatch(r'\d+\.\d+\.\d+\n', text)
     assert text.removesuffix('\n') == family_tables.SCHEMA_VERSION
+
+
+def test_the_pipelines_version_is_the_packages() -> None:
+    repository = pathlib.Path(__file__).parent.parent
+    config = (repository / 'nextflow.config').read_text('utf-8')
+    (manifest,) = re.findall(r'^manifest \{\n(.*?)^\}', config, flags=re.MULTILINE | re.DOTALL)
+    (version,) = re.findall(r"^    version = '([^']+)'$", manifest, flags=re.MULTILINE)
+    assert version == tomllib.loads((repository / 'pyproject.toml').read_text('utf-8'))['project']['version']

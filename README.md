@@ -34,6 +34,9 @@ runs in an image that the organisation running the pipeline builds itself.
 | [Glossary](docs/glossary.md)                       | everyone                                      | each word that the documents use                                                                                                               |
 | [The contract](contract/README.md)                 | a program that launches or reads a run        | the manifest's JSON Schema, and the sheet's columns, the workflows' params and the tables' columns as JSON                                     |
 
+`deployments/<organisation>/` holds an organisation's own params files and its runbook.
+[deployments/cpg/](deployments/cpg/README.md) is that of the Centre for Population Genomics.
+
 ## Development
 
 The Python package and its checks need [uv](https://docs.astral.sh/uv/). Set up the environment and the commit hooks
