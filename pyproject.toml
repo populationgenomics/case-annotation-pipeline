@@ -5,7 +5,10 @@ description = "The Python steps of the case annotation pipeline, which write a f
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["duckdb>=2.0.0", "pyarrow>=26.0.0", "pydantic>=2.11", "pysam>=0.24.1"]
+
+[project.scripts]
+case-annotation = "case_annotation.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.13,<0.14"]
@@ -15,8 +18,12 @@ build-backend = "uv_build"
 # Supply-chain age gate: never resolve a version younger than 7 days. Declared in-repo so CI and contributors resolve
 # the same lock; .github/dependabot.yml mirrors it with a matching cooldown.
 exclude-newer = "7 days"
+# Holds pydantic at the version that the tables were last compared with, byte for byte. Remove the constraint once the
+# tables of the first tagged version have passed that comparison, so that Dependabot can move pydantic again.
+constraint-dependencies = ["pydantic==2.14.2"]
 
 [tool.uv.build-backend]
+# uv_build packs every file in the module's folder, so a wheel holds tables-version.txt and py.typed.
 module-name = "case_annotation"
 
 [dependency-groups]
