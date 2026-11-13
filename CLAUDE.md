@@ -9,6 +9,7 @@ uv run pytest
 uv run pytest tests/test_package.py
 uv run pytest tests/test_package.py::test_the_package_declares_its_inline_types
 uv run pre-commit run --all-files
+uv run case-annotation contract --out contract
 ```
 
 ## This repository will be public

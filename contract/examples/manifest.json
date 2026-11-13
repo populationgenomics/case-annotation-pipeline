@@ -1,0 +1,249 @@
+{
+  "schema_version": "0.4.0",
+  "family": "family-a",
+  "members": [
+    {
+      "sample_id": "S0101",
+      "father": null,
+      "mother": null,
+      "sex": "male",
+      "affected": false,
+      "sequenced": true,
+      "role": "father"
+    },
+    {
+      "sample_id": "S0102",
+      "father": null,
+      "mother": null,
+      "sex": "female",
+      "affected": false,
+      "sequenced": true,
+      "role": "mother"
+    },
+    {
+      "sample_id": "S0103",
+      "father": "S0101",
+      "mother": "S0102",
+      "sex": "female",
+      "affected": true,
+      "sequenced": true,
+      "role": "proband"
+    }
+  ],
+  "tables": [
+    {
+      "table": "variants",
+      "path": "variants.parquet",
+      "rows": 5000000,
+      "bytes": 200000000,
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "table": "transcripts",
+      "path": "transcripts.parquet",
+      "rows": 55000000,
+      "bytes": 2200000000,
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    {
+      "table": "sv",
+      "path": "sv.parquet",
+      "rows": 12000,
+      "bytes": 480000,
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    {
+      "table": "sv_transcripts",
+      "path": "sv_transcripts.parquet",
+      "rows": 30000,
+      "bytes": 1200000,
+      "sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    {
+      "table": "repeats",
+      "path": "repeats.parquet",
+      "rows": 60,
+      "bytes": 2400,
+      "sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+    }
+  ],
+  "sv_callers": [
+    "sv",
+    "cnv"
+  ],
+  "alleles": 5000000,
+  "annotation": {
+    "annotator": "Invented Annotator 1.0",
+    "json_schema_version": 6,
+    "assembly": "GRCh38",
+    "catalog": "209901",
+    "sources": [
+      "Ensembl",
+      "clinvar",
+      "gnomad"
+    ],
+    "source_versions": [
+      {
+        "source": "Ensembl",
+        "annotation_type": "GeneModels",
+        "version": "1"
+      },
+      {
+        "source": "clinvar",
+        "annotation_type": "SmallVariant",
+        "version": "20990101"
+      },
+      {
+        "source": "clinvar",
+        "annotation_type": "StructuralVariant",
+        "version": "20990101"
+      },
+      {
+        "source": "gnomad",
+        "annotation_type": "SmallVariant",
+        "version": "1"
+      },
+      {
+        "source": "gnomad",
+        "annotation_type": "StructuralVariant",
+        "version": "1"
+      }
+    ],
+    "data_sources": [
+      {
+        "name": "Ensembl",
+        "version": "1",
+        "release_date": null
+      },
+      {
+        "name": "ClinVar",
+        "version": "20990101",
+        "release_date": "2099-01-01"
+      },
+      {
+        "name": "gnomAD",
+        "version": "1",
+        "release_date": "2099-01-01"
+      }
+    ],
+    "omitted": [
+      {
+        "source": "REVEL",
+        "reason": "current"
+      },
+      {
+        "source": "dbSNP",
+        "reason": "dated"
+      }
+    ]
+  },
+  "gnomad_joint": {
+    "archive": "gnomad-joint.invented.zip",
+    "bytes": 1000000,
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "echtvar_version": "0.2.4",
+    "fields": [
+      {
+        "field": "AC_joint",
+        "alias": "gnomad_AC",
+        "ftype": "Integer",
+        "multiplier": 1,
+        "missing_value": -2147483648,
+        "missing_string": "MISSING"
+      },
+      {
+        "field": "AF_joint",
+        "alias": "gnomad_AF",
+        "ftype": "Float",
+        "multiplier": 2000000,
+        "missing_value": 0,
+        "missing_string": "MISSING"
+      },
+      {
+        "field": "nhomalt_joint",
+        "alias": "gnomad_HomAlt",
+        "ftype": "Integer",
+        "multiplier": 1,
+        "missing_value": -2147483648,
+        "missing_string": "MISSING"
+      },
+      {
+        "field": "fafmax_faf95_max_joint",
+        "alias": "gnomad_faf95max",
+        "ftype": "Float",
+        "multiplier": 2000000,
+        "missing_value": 0,
+        "missing_string": "MISSING"
+      }
+    ]
+  },
+  "omitted_columns": [
+    "rsids"
+  ],
+  "sv_annotation": {
+    "annotator": "Invented Annotator 1.0",
+    "json_schema_version": 6,
+    "assembly": "GRCh38",
+    "catalog": "209901",
+    "sources": [
+      "Ensembl",
+      "clinvar",
+      "gnomad"
+    ],
+    "source_versions": [
+      {
+        "source": "Ensembl",
+        "annotation_type": "GeneModels",
+        "version": "1"
+      },
+      {
+        "source": "clinvar",
+        "annotation_type": "SmallVariant",
+        "version": "20990101"
+      },
+      {
+        "source": "clinvar",
+        "annotation_type": "StructuralVariant",
+        "version": "20990101"
+      },
+      {
+        "source": "gnomad",
+        "annotation_type": "SmallVariant",
+        "version": "1"
+      },
+      {
+        "source": "gnomad",
+        "annotation_type": "StructuralVariant",
+        "version": "1"
+      }
+    ],
+    "data_sources": [
+      {
+        "name": "Ensembl",
+        "version": "1",
+        "release_date": null
+      },
+      {
+        "name": "ClinVar",
+        "version": "20990101",
+        "release_date": "2099-01-01"
+      },
+      {
+        "name": "gnomAD",
+        "version": "1",
+        "release_date": "2099-01-01"
+      }
+    ],
+    "omitted": [
+      {
+        "source": "REVEL",
+        "reason": "current"
+      },
+      {
+        "source": "dbSNP",
+        "reason": "dated"
+      }
+    ]
+  },
+  "sv_omitted_columns": []
+}

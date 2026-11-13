@@ -1,0 +1,3 @@
+family,vcf,ped,proband,sv_vcf,cnv_vcf,repeat_vcfs
+family-a,families/family-a/family-a.vcf.gz,families/family-a/family-a.ped,S0103,families/family-a/family-a.sv.vcf.gz,families/family-a/family-a.cnv.vcf.gz,families/family-a/S0101.repeats.vcf.gz;families/family-a/S0102.repeats.vcf.gz;families/family-a/S0103.repeats.vcf.gz
+family-b,families/family-b/family-b.vcf.gz,families/family-b/family-b.ped,,,,

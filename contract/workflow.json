@@ -1,0 +1,333 @@
+{
+  "pipeline_version": "0.1.0",
+  "tables_version": "0.4.0",
+  "workflows": {
+    "family_tables.nf": {
+      "params": [
+        {
+          "name": "families",
+          "type": "Path",
+          "required": true
+        },
+        {
+          "name": "group",
+          "type": "String",
+          "required": true,
+          "pattern": "[A-Za-z0-9][A-Za-z0-9._-]*"
+        },
+        {
+          "name": "reference",
+          "type": "Path",
+          "required": true,
+          "index_suffix": ".fai"
+        },
+        {
+          "name": "catalog",
+          "type": "String",
+          "required": true,
+          "pattern": "[A-Za-z0-9][A-Za-z0-9._-]*"
+        },
+        {
+          "name": "annotation_data",
+          "type": "Path",
+          "required": true
+        },
+        {
+          "name": "sources",
+          "type": "List<String>",
+          "required": false,
+          "default": [],
+          "pattern": "[A-Za-z0-9][A-Za-z0-9 ._()-]*"
+        },
+        {
+          "name": "workers",
+          "type": "Integer",
+          "required": false,
+          "default": 8
+        },
+        {
+          "name": "annotator_container",
+          "type": "String",
+          "required": false
+        },
+        {
+          "name": "annotator",
+          "type": "String",
+          "required": false
+        },
+        {
+          "name": "annotator_version",
+          "type": "String",
+          "required": false
+        },
+        {
+          "name": "license_secret",
+          "type": "String",
+          "required": false
+        },
+        {
+          "name": "annotated",
+          "type": "Path",
+          "required": false
+        },
+        {
+          "name": "gnomad_joint",
+          "type": "Path",
+          "required": true
+        },
+        {
+          "name": "tools_container",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "output_dir",
+          "type": "String",
+          "required": false
+        },
+        {
+          "name": "arGuid",
+          "type": "String",
+          "required": false
+        }
+      ],
+      "annotation": {
+        "annotate": {
+          "needs": [
+            "sources",
+            "annotator_container",
+            "annotator",
+            "annotator_version",
+            "license_secret"
+          ],
+          "refuses": [
+            "annotated"
+          ]
+        },
+        "reuse": {
+          "needs": [
+            "annotated"
+          ],
+          "refuses": [
+            "sources"
+          ],
+          "reads": [
+            {
+              "path": "out/{group}.json.gz"
+            },
+            {
+              "path": "run.json"
+            },
+            {
+              "path": "out/{group}.sv.json.gz",
+              "some_row_names_any_of": [
+                "sv_vcf",
+                "cnv_vcf"
+              ]
+            }
+          ]
+        }
+      },
+      "publishes": {
+        "family": {
+          "folder": "annotations/{family}/tables-{tables_version}-illumina-{catalog}",
+          "files": [
+            {
+              "name": "variants.parquet"
+            },
+            {
+              "name": "transcripts.parquet"
+            },
+            {
+              "name": "manifest.json"
+            },
+            {
+              "name": "sv.parquet",
+              "row_names_any_of": [
+                "sv_vcf",
+                "cnv_vcf"
+              ]
+            },
+            {
+              "name": "sv_transcripts.parquet",
+              "row_names_any_of": [
+                "sv_vcf",
+                "cnv_vcf"
+              ]
+            },
+            {
+              "name": "repeats.parquet",
+              "row_names_any_of": [
+                "repeat_vcfs"
+              ]
+            }
+          ]
+        },
+        "union": {
+          "folder": "annotation-unions/{group}/tables-{tables_version}-illumina-{catalog}"
+        },
+        "annotator": {
+          "folder": "annotation-unions/{group}/tables-{tables_version}-illumina-{catalog}/annotator"
+        }
+      }
+    },
+    "annotator.nf": {
+      "params": [
+        {
+          "name": "mode",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "annotator_container",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "annotator",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "annotator_version",
+          "type": "String",
+          "required": true,
+          "pattern": "[A-Za-z0-9][A-Za-z0-9._-]*"
+        },
+        {
+          "name": "license_secret",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "assembly",
+          "type": "String",
+          "required": false,
+          "default": "GRCh38",
+          "pattern": "[A-Za-z0-9][A-Za-z0-9._-]*"
+        },
+        {
+          "name": "sources",
+          "type": "List<String>",
+          "required": false,
+          "default": [],
+          "pattern": "[A-Za-z0-9][A-Za-z0-9 ._()-]*"
+        },
+        {
+          "name": "catalogs",
+          "type": "List<String>",
+          "required": false,
+          "default": [],
+          "pattern": "[A-Za-z0-9][A-Za-z0-9 ._()-]*"
+        },
+        {
+          "name": "catalog",
+          "type": "String",
+          "required": false,
+          "pattern": "[A-Za-z0-9][A-Za-z0-9._-]*"
+        },
+        {
+          "name": "categories",
+          "type": "List<String>",
+          "required": false,
+          "default": [
+            "basic",
+            "premium"
+          ],
+          "pattern": "[A-Za-z0-9][A-Za-z0-9 ._()-]*"
+        },
+        {
+          "name": "exclude_sources",
+          "type": "List<String>",
+          "required": false,
+          "default": [],
+          "pattern": "[A-Za-z0-9][A-Za-z0-9 ._()-]*"
+        },
+        {
+          "name": "annotation_data",
+          "type": "Path",
+          "required": false
+        },
+        {
+          "name": "input",
+          "type": "Path",
+          "required": false
+        },
+        {
+          "name": "name",
+          "type": "String",
+          "required": false,
+          "pattern": "[A-Za-z0-9][A-Za-z0-9._-]*"
+        },
+        {
+          "name": "regions",
+          "type": "Path",
+          "required": false
+        },
+        {
+          "name": "label",
+          "type": "String",
+          "required": false,
+          "pattern": "[A-Za-z0-9][A-Za-z0-9._-]*"
+        },
+        {
+          "name": "workers",
+          "type": "Integer",
+          "required": false,
+          "default": 8
+        },
+        {
+          "name": "tools_container",
+          "type": "String",
+          "required": false
+        },
+        {
+          "name": "output_dir",
+          "type": "String",
+          "required": false
+        },
+        {
+          "name": "arGuid",
+          "type": "String",
+          "required": false
+        }
+      ],
+      "modes": {
+        "list": {
+          "needs": [],
+          "publishes": {
+            "folder": "annotation/list/{date}"
+          }
+        },
+        "download": {
+          "needs": [
+            "catalog",
+            "categories"
+          ],
+          "publishes": {
+            "folder": "references/dragen-annotation/{annotator_version}/{catalog}",
+            "data_directory": "references/dragen-annotation/{annotator_version}/{catalog}/{assembly}"
+          }
+        },
+        "annotate": {
+          "needs": [
+            "catalog",
+            "annotation_data",
+            "input",
+            "name",
+            "sources"
+          ],
+          "needs_with": {
+            "regions": [
+              "tools_container"
+            ]
+          },
+          "publishes": {
+            "folder": "annotations/{name}/illumina-{catalog}",
+            "folder_with_label": "annotations/{name}/illumina-{catalog}-{label}"
+          }
+        }
+      }
+    }
+  }
+}

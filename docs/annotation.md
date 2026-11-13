@@ -811,6 +811,9 @@ gnomAD's joint values through echtvar, from the archive the open pipeline reads
 
 ## Reference
 
+[The contract](../contract/README.md) states the sheet's columns, the params and the published folders of this section
+as JSON, for a program that writes a sheet or launches a run.
+
 ### Params of `family_tables.nf`
 
 | Param                                                                     | Holds                                                                                                                                |

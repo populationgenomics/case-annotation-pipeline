@@ -145,6 +145,33 @@ ROW_COLUMNS: Mapping[str, pa.Schema] = {
 }
 
 
+@dataclasses.dataclass(frozen=True)
+class Table:
+    """One of a family's tables as its file declares it, whatever the family's samples and the run's sources.
+
+    `columns` are the columns that say what a row is of, in the file's order. In a table that holds the members' calls
+    a column of each sequenced member follows them, named as the member's sample, in the order of the family's VCF and
+    never null, and `member` is the type of each. `sources` gives the columns that hold a dated source's data, by the
+    source's name in a run config: the table of a run that did not name the source lacks them.
+    """
+
+    columns: pa.Schema
+    member: pa.StructType | None
+    sources: Mapping[str, tuple[str, ...]]
+
+
+# Every table that a family's folder can hold, in the manifest's order. transcripts is written as DuckDB returns the
+# union's rows of the family's alleles, with no declared schema to cast them to (_write), so its file declares every
+# column nullable, also the ones that hold a value in every row.
+TABLES: Mapping[str, Table] = {
+    'variants': Table(ALLELE, CALL, annotation_tables.SOURCE_COLUMNS),
+    'transcripts': Table(pa.schema([f.with_nullable(True) for f in annotation_tables.TRANSCRIPTS]), None, {}),
+    'sv': Table(sv_schema(()), sv_tables.CALL, sv_annotation.SOURCE_COLUMNS),
+    'sv_transcripts': Table(sv_tables.transcripts_schema(sv_annotation.TRANSCRIPT_COLUMNS), None, {}),
+    'repeats': Table(repeat_tables.LOCUS, repeat_tables.CALL, {}),
+}
+
+
 def check_column_names(samples: Sequence[str]) -> None:
     """Fails unless each sample can name its column in every table that holds one column per member (ROW_COLUMNS).
 
