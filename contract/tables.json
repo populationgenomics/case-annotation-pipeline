@@ -1,0 +1,1399 @@
+{
+  "tables_version": "0.4.0",
+  "tables": [
+    {
+      "name": "variants",
+      "file": "variants.parquet",
+      "columns": [
+        {
+          "name": "chrom",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "pos",
+          "type": "int32",
+          "nullable": false
+        },
+        {
+          "name": "ref",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "alt",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "variant_id",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "variant_type",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "hgvsg",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "rsids",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "string",
+            "nullable": true
+          },
+          "source": "dbSNP"
+        },
+        {
+          "name": "worst_consequence",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "worst_impact",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "worst_transcript_id",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "gene_symbol",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "gene_id",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "hgnc_ids",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "int32",
+            "nullable": true
+          }
+        },
+        {
+          "name": "mane_select_transcript_id",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "mane_select_consequence",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "mane_select_hgvsc",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "mane_select_hgvsp",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_genomes_af",
+          "type": "float32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_genomes_ac",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_genomes_an",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_genomes_hom",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_genomes_failed_filter",
+          "type": "bool",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_exomes_af",
+          "type": "float32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_exomes_ac",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_exomes_an",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_exomes_hom",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_exomes_failed_filter",
+          "type": "bool",
+          "nullable": true
+        },
+        {
+          "name": "alphamissense_max",
+          "type": "float64",
+          "nullable": true
+        },
+        {
+          "name": "alphamissense_max_class",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "revel",
+          "type": "float64",
+          "nullable": true
+        },
+        {
+          "name": "spliceai_max",
+          "type": "float64",
+          "nullable": true
+        },
+        {
+          "name": "primateai3d_max",
+          "type": "float64",
+          "nullable": true
+        },
+        {
+          "name": "dann",
+          "type": "float64",
+          "nullable": true
+        },
+        {
+          "name": "phylop",
+          "type": "float64",
+          "nullable": true
+        },
+        {
+          "name": "gerp",
+          "type": "float64",
+          "nullable": true
+        },
+        {
+          "name": "clinvar_accession",
+          "type": "string",
+          "nullable": true,
+          "source": "clinvar"
+        },
+        {
+          "name": "clinvar_classification",
+          "type": "string",
+          "nullable": true,
+          "source": "clinvar"
+        },
+        {
+          "name": "clinvar_review_status",
+          "type": "string",
+          "nullable": true,
+          "source": "clinvar"
+        },
+        {
+          "name": "clinvar_stars",
+          "type": "int8",
+          "nullable": true,
+          "source": "clinvar"
+        },
+        {
+          "name": "clinvar_conditions",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "string",
+            "nullable": true
+          },
+          "source": "clinvar"
+        },
+        {
+          "name": "clinvar_last_evaluated",
+          "type": "string",
+          "nullable": true,
+          "source": "clinvar"
+        },
+        {
+          "name": "clinvar_records",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "struct",
+            "nullable": true,
+            "fields": [
+              {
+                "name": "accession",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "version",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "record_type",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "variant_type",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "classification",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "review_status",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "stars",
+                "type": "int8",
+                "nullable": true
+              },
+              {
+                "name": "last_evaluated",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "conditions",
+                "type": "list",
+                "nullable": true,
+                "element": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            ]
+          },
+          "source": "clinvar"
+        },
+        {
+          "name": "gnomad_joint_af",
+          "type": "float32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_joint_ac",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_joint_hom",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_joint_faf95_max",
+          "type": "float32",
+          "nullable": true
+        },
+        {
+          "name": "qual",
+          "type": "float64",
+          "nullable": true
+        },
+        {
+          "name": "filters",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      ],
+      "member": {
+        "type": "struct",
+        "nullable": false,
+        "fields": [
+          {
+            "name": "gt",
+            "type": "string",
+            "nullable": false
+          },
+          {
+            "name": "carries",
+            "type": "bool",
+            "nullable": false
+          },
+          {
+            "name": "zygosity",
+            "type": "string",
+            "nullable": true
+          },
+          {
+            "name": "gq",
+            "type": "int32",
+            "nullable": true
+          },
+          {
+            "name": "dp",
+            "type": "int32",
+            "nullable": true
+          },
+          {
+            "name": "pl",
+            "type": "list",
+            "nullable": true,
+            "element": {
+              "type": "int32",
+              "nullable": true
+            }
+          },
+          {
+            "name": "ad_ref",
+            "type": "int32",
+            "nullable": true
+          },
+          {
+            "name": "ad_alt",
+            "type": "int32",
+            "nullable": true
+          },
+          {
+            "name": "allele_balance",
+            "type": "float64",
+            "nullable": true
+          },
+          {
+            "name": "ps",
+            "type": "int32",
+            "nullable": true
+          },
+          {
+            "name": "ft",
+            "type": "string",
+            "nullable": true
+          },
+          {
+            "name": "dn",
+            "type": "string",
+            "nullable": true
+          },
+          {
+            "name": "dq",
+            "type": "float64",
+            "nullable": true
+          },
+          {
+            "name": "msc",
+            "type": "int32",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "transcripts",
+      "file": "transcripts.parquet",
+      "columns": [
+        {
+          "name": "chrom",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "pos",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "variant_id",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "transcript_id",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "biotype",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "gene_symbol",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "gene_id",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "hgnc_id",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "consequences",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        {
+          "name": "worst_consequence",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "impact",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "hgvsc",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "hgvsp",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "protein_id",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "is_mane_select",
+          "type": "bool",
+          "nullable": true
+        },
+        {
+          "name": "is_canonical",
+          "type": "bool",
+          "nullable": true
+        },
+        {
+          "name": "exon",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "intron",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "cdna_pos",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "cds_pos",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "protein_pos",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "codons",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "amino_acids",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "alphamissense_pathogenicity",
+          "type": "float64",
+          "nullable": true
+        },
+        {
+          "name": "alphamissense_class",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "primateai3d_score",
+          "type": "float64",
+          "nullable": true
+        },
+        {
+          "name": "spliceai_max",
+          "type": "float64",
+          "nullable": true
+        },
+        {
+          "name": "promoterai_score",
+          "type": "float64",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "sv",
+      "file": "sv.parquet",
+      "columns": [
+        {
+          "name": "chrom",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "pos",
+          "type": "int32",
+          "nullable": false
+        },
+        {
+          "name": "end_pos",
+          "type": "int32",
+          "nullable": false
+        },
+        {
+          "name": "sv_id",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "caller",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "sv_type",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "svlen",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "ref",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "alt",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "qual",
+          "type": "float64",
+          "nullable": true
+        },
+        {
+          "name": "filters",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        {
+          "name": "imprecise",
+          "type": "bool",
+          "nullable": false
+        },
+        {
+          "name": "cipos",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "int32",
+            "nullable": true
+          }
+        },
+        {
+          "name": "ciend",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "int32",
+            "nullable": true
+          }
+        },
+        {
+          "name": "mate_id",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "mate_chrom",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "mate_pos",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "bnd_extends",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "mate_extends",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "event_id",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "small_variant_id",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "annotated_as",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "annotated_pos",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "annotated_end_pos",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "hgnc_ids",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "int32",
+            "nullable": true
+          }
+        },
+        {
+          "name": "gnomad_sv_id",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_sv_af",
+          "type": "float32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_sv_ac",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_sv_an",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_sv_hom",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_sv_failed_filter",
+          "type": "bool",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_sv_overlap",
+          "type": "float32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_sv_distance",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_sv_max_af",
+          "type": "float32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_sv_matches",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "struct",
+            "nullable": true,
+            "fields": [
+              {
+                "name": "id",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "variant_type",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "pos",
+                "type": "int32",
+                "nullable": true
+              },
+              {
+                "name": "end_pos",
+                "type": "int32",
+                "nullable": true
+              },
+              {
+                "name": "af",
+                "type": "float32",
+                "nullable": true
+              },
+              {
+                "name": "ac",
+                "type": "int32",
+                "nullable": true
+              },
+              {
+                "name": "an",
+                "type": "int32",
+                "nullable": true
+              },
+              {
+                "name": "hom",
+                "type": "int32",
+                "nullable": true
+              },
+              {
+                "name": "failed_filter",
+                "type": "bool",
+                "nullable": true
+              },
+              {
+                "name": "reciprocal_overlap",
+                "type": "float32",
+                "nullable": true
+              },
+              {
+                "name": "annotation_overlap",
+                "type": "float32",
+                "nullable": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "onekg_sv_id",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "onekg_sv_af",
+          "type": "float32",
+          "nullable": true
+        },
+        {
+          "name": "onekg_sv_ac",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "onekg_sv_an",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "onekg_sv_overlap",
+          "type": "float32",
+          "nullable": true
+        },
+        {
+          "name": "onekg_sv_distance",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_cnv_id",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_cnv_sf",
+          "type": "float32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_cnv_failed_filter",
+          "type": "bool",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_cnv_overlap",
+          "type": "float32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_genomes_af",
+          "type": "float32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_genomes_ac",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_genomes_an",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_genomes_hom",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_genomes_failed_filter",
+          "type": "bool",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_exomes_af",
+          "type": "float32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_exomes_ac",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_exomes_an",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_exomes_hom",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_exomes_failed_filter",
+          "type": "bool",
+          "nullable": true
+        },
+        {
+          "name": "clinvar_accession",
+          "type": "string",
+          "nullable": true,
+          "source": "clinvar"
+        },
+        {
+          "name": "clinvar_classification",
+          "type": "string",
+          "nullable": true,
+          "source": "clinvar"
+        },
+        {
+          "name": "clinvar_review_status",
+          "type": "string",
+          "nullable": true,
+          "source": "clinvar"
+        },
+        {
+          "name": "clinvar_stars",
+          "type": "int8",
+          "nullable": true,
+          "source": "clinvar"
+        },
+        {
+          "name": "clinvar_conditions",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "string",
+            "nullable": true
+          },
+          "source": "clinvar"
+        },
+        {
+          "name": "clinvar_last_evaluated",
+          "type": "string",
+          "nullable": true,
+          "source": "clinvar"
+        },
+        {
+          "name": "clinvar_overlap",
+          "type": "float32",
+          "nullable": true,
+          "source": "clinvar"
+        },
+        {
+          "name": "clinvar_records",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "struct",
+            "nullable": true,
+            "fields": [
+              {
+                "name": "accession",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "version",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "record_type",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "variant_type",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "classification",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "review_status",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "stars",
+                "type": "int8",
+                "nullable": true
+              },
+              {
+                "name": "last_evaluated",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "conditions",
+                "type": "list",
+                "nullable": true,
+                "element": {
+                  "type": "string",
+                  "nullable": true
+                }
+              },
+              {
+                "name": "pos",
+                "type": "int32",
+                "nullable": true
+              },
+              {
+                "name": "end_pos",
+                "type": "int32",
+                "nullable": true
+              },
+              {
+                "name": "reciprocal_overlap",
+                "type": "float32",
+                "nullable": true
+              },
+              {
+                "name": "annotation_overlap",
+                "type": "float32",
+                "nullable": true
+              }
+            ]
+          },
+          "source": "clinvar"
+        }
+      ],
+      "member": {
+        "type": "struct",
+        "nullable": false,
+        "fields": [
+          {
+            "name": "gt",
+            "type": "string",
+            "nullable": false
+          },
+          {
+            "name": "carries",
+            "type": "bool",
+            "nullable": false
+          },
+          {
+            "name": "zygosity",
+            "type": "string",
+            "nullable": true
+          },
+          {
+            "name": "gq",
+            "type": "int32",
+            "nullable": true
+          },
+          {
+            "name": "pl",
+            "type": "list",
+            "nullable": true,
+            "element": {
+              "type": "int32",
+              "nullable": true
+            }
+          },
+          {
+            "name": "pr_ref",
+            "type": "int32",
+            "nullable": true
+          },
+          {
+            "name": "pr_alt",
+            "type": "int32",
+            "nullable": true
+          },
+          {
+            "name": "sr_ref",
+            "type": "int32",
+            "nullable": true
+          },
+          {
+            "name": "sr_alt",
+            "type": "int32",
+            "nullable": true
+          },
+          {
+            "name": "vf_ref",
+            "type": "int32",
+            "nullable": true
+          },
+          {
+            "name": "vf_alt",
+            "type": "int32",
+            "nullable": true
+          },
+          {
+            "name": "cn",
+            "type": "int32",
+            "nullable": true
+          },
+          {
+            "name": "sm",
+            "type": "float64",
+            "nullable": true
+          },
+          {
+            "name": "bc",
+            "type": "int32",
+            "nullable": true
+          },
+          {
+            "name": "pe_start",
+            "type": "int32",
+            "nullable": true
+          },
+          {
+            "name": "pe_end",
+            "type": "int32",
+            "nullable": true
+          },
+          {
+            "name": "qs",
+            "type": "int32",
+            "nullable": true
+          },
+          {
+            "name": "ft",
+            "type": "string",
+            "nullable": true
+          },
+          {
+            "name": "dn",
+            "type": "string",
+            "nullable": true
+          },
+          {
+            "name": "dq",
+            "type": "float64",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "sv_transcripts",
+      "file": "sv_transcripts.parquet",
+      "columns": [
+        {
+          "name": "chrom",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "pos",
+          "type": "int32",
+          "nullable": false
+        },
+        {
+          "name": "end_pos",
+          "type": "int32",
+          "nullable": false
+        },
+        {
+          "name": "sv_id",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "variant_type",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "transcript_id",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "biotype",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "gene_symbol",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "gene_id",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "hgnc_id",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "consequences",
+          "type": "list",
+          "nullable": false,
+          "element": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        {
+          "name": "protein_id",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "is_mane_select",
+          "type": "bool",
+          "nullable": false
+        },
+        {
+          "name": "is_canonical",
+          "type": "bool",
+          "nullable": false
+        },
+        {
+          "name": "complete_overlap",
+          "type": "bool",
+          "nullable": false
+        },
+        {
+          "name": "exon",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "intron",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "cdna_pos",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "protein_pos",
+          "type": "string",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "repeats",
+      "file": "repeats.parquet",
+      "columns": [
+        {
+          "name": "chrom",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "pos",
+          "type": "int32",
+          "nullable": false
+        },
+        {
+          "name": "end_pos",
+          "type": "int32",
+          "nullable": false
+        },
+        {
+          "name": "repeat_id",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "repeat_unit",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "ref_copies",
+          "type": "int32",
+          "nullable": true
+        }
+      ],
+      "member": {
+        "type": "struct",
+        "nullable": false,
+        "fields": [
+          {
+            "name": "gt",
+            "type": "string",
+            "nullable": false
+          },
+          {
+            "name": "repcn",
+            "type": "list",
+            "nullable": true,
+            "element": {
+              "type": "int32",
+              "nullable": true
+            }
+          },
+          {
+            "name": "repci_lower",
+            "type": "list",
+            "nullable": true,
+            "element": {
+              "type": "int32",
+              "nullable": true
+            }
+          },
+          {
+            "name": "repci_upper",
+            "type": "list",
+            "nullable": true,
+            "element": {
+              "type": "int32",
+              "nullable": true
+            }
+          },
+          {
+            "name": "so",
+            "type": "list",
+            "nullable": true,
+            "element": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "adsp",
+            "type": "list",
+            "nullable": true,
+            "element": {
+              "type": "int32",
+              "nullable": true
+            }
+          },
+          {
+            "name": "adfl",
+            "type": "list",
+            "nullable": true,
+            "element": {
+              "type": "int32",
+              "nullable": true
+            }
+          },
+          {
+            "name": "adir",
+            "type": "list",
+            "nullable": true,
+            "element": {
+              "type": "int32",
+              "nullable": true
+            }
+          },
+          {
+            "name": "lc",
+            "type": "float64",
+            "nullable": true
+          },
+          {
+            "name": "filters",
+            "type": "list",
+            "nullable": true,
+            "element": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1682,7 +1682,8 @@ a small variant on one copy of a gene and a deletion on the other.
 ## Reference: files, columns and manifest
 
 This section defines what a family's folder holds. [Annotation](annotation.md#family-tables) explains how
-`family_tables.nf` writes it.
+`family_tables.nf` writes it. [The contract](../contract/README.md) has the manifest's JSON Schema and each table's
+columns with their types as JSON, for a program that reads a folder.
 
 ### The folder and its files
 

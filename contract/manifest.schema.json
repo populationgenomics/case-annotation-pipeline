@@ -1,0 +1,429 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "AnnotationInfo": {
+      "description": "What annotated the union.\n\nThe Annotator, the catalog, the sources the run named and the versions they pinned, the data sources the JSON\nheader records, and the bundle's sources the run left out.",
+      "properties": {
+        "annotator": {
+          "title": "Annotator",
+          "type": "string"
+        },
+        "json_schema_version": {
+          "title": "Json Schema Version",
+          "type": "integer"
+        },
+        "assembly": {
+          "title": "Assembly",
+          "type": "string"
+        },
+        "catalog": {
+          "title": "Catalog",
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Sources",
+          "type": "array"
+        },
+        "source_versions": {
+          "items": {
+            "$ref": "#/$defs/SourceVersion"
+          },
+          "title": "Source Versions",
+          "type": "array"
+        },
+        "data_sources": {
+          "items": {
+            "$ref": "#/$defs/DataSource"
+          },
+          "title": "Data Sources",
+          "type": "array"
+        },
+        "omitted": {
+          "items": {
+            "$ref": "#/$defs/OmittedSource"
+          },
+          "title": "Omitted",
+          "type": "array"
+        }
+      },
+      "required": [
+        "annotator",
+        "json_schema_version",
+        "assembly",
+        "catalog",
+        "sources",
+        "source_versions",
+        "data_sources",
+        "omitted"
+      ],
+      "title": "AnnotationInfo",
+      "type": "object"
+    },
+    "ArchiveField": {
+      "description": "One field of an echtvar archive, as the configuration embedded in the archive records it.",
+      "properties": {
+        "field": {
+          "title": "Field",
+          "type": "string"
+        },
+        "alias": {
+          "title": "Alias",
+          "type": "string"
+        },
+        "ftype": {
+          "enum": [
+            "Integer",
+            "Float",
+            "Categorical",
+            "Flag"
+          ],
+          "title": "Ftype",
+          "type": "string"
+        },
+        "multiplier": {
+          "title": "Multiplier",
+          "type": "integer"
+        },
+        "missing_value": {
+          "title": "Missing Value",
+          "type": "integer"
+        },
+        "missing_string": {
+          "title": "Missing String",
+          "type": "string"
+        }
+      },
+      "required": [
+        "field",
+        "alias",
+        "ftype",
+        "multiplier",
+        "missing_value",
+        "missing_string"
+      ],
+      "title": "ArchiveField",
+      "type": "object"
+    },
+    "Caller": {
+      "enum": [
+        "sv",
+        "cnv"
+      ],
+      "type": "string"
+    },
+    "DataSource": {
+      "description": "One data source as the JSON header records it.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        },
+        "release_date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Release Date"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "release_date"
+      ],
+      "title": "DataSource",
+      "type": "object"
+    },
+    "FamilyMember": {
+      "properties": {
+        "sample_id": {
+          "title": "Sample Id",
+          "type": "string"
+        },
+        "father": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Father"
+        },
+        "mother": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Mother"
+        },
+        "sex": {
+          "$ref": "#/$defs/Sex"
+        },
+        "affected": {
+          "title": "Affected",
+          "type": "boolean"
+        },
+        "sequenced": {
+          "title": "Sequenced",
+          "type": "boolean"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Role"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "sample_id",
+        "father",
+        "mother",
+        "sex",
+        "affected",
+        "sequenced",
+        "role"
+      ],
+      "title": "FamilyMember",
+      "type": "object"
+    },
+    "GnomadJointInfo": {
+      "description": "The echtvar archive the joint values come from, and the echtvar that read it.",
+      "properties": {
+        "archive": {
+          "title": "Archive",
+          "type": "string"
+        },
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "echtvar_version": {
+          "minLength": 1,
+          "title": "Echtvar Version",
+          "type": "string"
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/ArchiveField"
+          },
+          "title": "Fields",
+          "type": "array"
+        }
+      },
+      "required": [
+        "archive",
+        "bytes",
+        "sha256",
+        "echtvar_version",
+        "fields"
+      ],
+      "title": "GnomadJointInfo",
+      "type": "object"
+    },
+    "OmissionReason": {
+      "enum": [
+        "dated",
+        "not_applicable",
+        "current",
+        "unplaced"
+      ],
+      "type": "string"
+    },
+    "OmittedSource": {
+      "description": "A source of the downloaded bundle that the run did not name, and why.\n\nThe reason is `dated` for a dated source, which the deployment left out;\n`not_applicable` for one that does not apply to germline small variants; `current` for a current source the run did\nnot name; and `unplaced` for a source docs/annotation.md does not place, which counts as dated.",
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "#/$defs/OmissionReason"
+        }
+      },
+      "required": [
+        "source",
+        "reason"
+      ],
+      "title": "OmittedSource",
+      "type": "object"
+    },
+    "Role": {
+      "enum": [
+        "proband",
+        "father",
+        "mother"
+      ],
+      "type": "string"
+    },
+    "Sex": {
+      "enum": [
+        "male",
+        "female",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "SourceVersion": {
+      "description": "One version the run config pins: a source, an annotation type and its version.",
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "annotation_type": {
+          "title": "Annotation Type",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "annotation_type",
+        "version"
+      ],
+      "title": "SourceVersion",
+      "type": "object"
+    },
+    "TableFile": {
+      "properties": {
+        "table": {
+          "title": "Table",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "rows": {
+          "title": "Rows",
+          "type": "integer"
+        },
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "table",
+        "path",
+        "rows",
+        "bytes",
+        "sha256"
+      ],
+      "title": "TableFile",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "family": {
+      "title": "Family",
+      "type": "string"
+    },
+    "members": {
+      "items": {
+        "$ref": "#/$defs/FamilyMember"
+      },
+      "title": "Members",
+      "type": "array"
+    },
+    "tables": {
+      "items": {
+        "$ref": "#/$defs/TableFile"
+      },
+      "title": "Tables",
+      "type": "array"
+    },
+    "sv_callers": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Caller"
+      },
+      "title": "Sv Callers",
+      "type": "array"
+    },
+    "alleles": {
+      "title": "Alleles",
+      "type": "integer"
+    },
+    "annotation": {
+      "$ref": "#/$defs/AnnotationInfo"
+    },
+    "gnomad_joint": {
+      "$ref": "#/$defs/GnomadJointInfo"
+    },
+    "omitted_columns": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Omitted Columns",
+      "type": "array"
+    },
+    "sv_annotation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AnnotationInfo"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "sv_omitted_columns": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Sv Omitted Columns",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "family",
+    "members",
+    "tables",
+    "alleles",
+    "annotation",
+    "gnomad_joint",
+    "omitted_columns"
+  ],
+  "title": "FamilyManifest",
+  "type": "object"
+}

@@ -7,7 +7,7 @@ import json
 import pathlib
 from collections.abc import Callable, Sequence
 
-from case_annotation import annotation_tables, family_tables, gnomad_joint, sv_annotation, sv_sites
+from case_annotation import annotation_tables, contract, family_tables, gnomad_joint, sv_annotation, sv_sites
 
 
 def _proband_arguments(parser: argparse.ArgumentParser) -> None:
@@ -250,6 +250,19 @@ def _family_tables(args: argparse.Namespace) -> None:
     )
 
 
+def _contract_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        '--out',
+        type=pathlib.Path,
+        required=True,
+        help="the folder to write the contract's files into, which replace those of the same names",
+    )
+
+
+def _contract(args: argparse.Namespace) -> None:
+    contract.write(args.out)
+
+
 # Each subcommand: its help text, a function that adds its arguments to its parser, and the function that runs it.
 _SUBCOMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callable[[argparse.Namespace], None]]] = {
     'family-check': (
@@ -298,6 +311,15 @@ _SUBCOMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Ca
         ),
         _family_tables_arguments,
         _family_tables,
+    ),
+    'contract': (
+        (
+            "writes the pipeline's published contract (contract/): the JSON Schema of a family's manifest, the "
+            "families sheet's columns, the workflows' params and published folders, the tables' columns and their "
+            'version, and an invented sheet and manifest'
+        ),
+        _contract_arguments,
+        _contract,
     ),
 }
 

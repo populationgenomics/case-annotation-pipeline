@@ -1,0 +1,50 @@
+{
+  "format": "csv",
+  "header": true,
+  "columns": [
+    {
+      "name": "family",
+      "column_required": true,
+      "value_required": true,
+      "pattern": "[A-Za-z0-9][A-Za-z0-9._-]*",
+      "unique": true
+    },
+    {
+      "name": "vcf",
+      "column_required": true,
+      "value_required": true
+    },
+    {
+      "name": "ped",
+      "column_required": true,
+      "value_required": true
+    },
+    {
+      "name": "proband",
+      "column_required": true,
+      "value_required": false,
+      "pattern": "[A-Za-z0-9][A-Za-z0-9._-]*",
+      "empty_means": "no proband is designated in the family, so no member has a role in the manifest"
+    },
+    {
+      "name": "sv_vcf",
+      "column_required": false,
+      "value_required": false,
+      "index_suffix": ".tbi"
+    },
+    {
+      "name": "cnv_vcf",
+      "column_required": false,
+      "value_required": false,
+      "index_suffix": ".tbi"
+    },
+    {
+      "name": "repeat_vcfs",
+      "column_required": false,
+      "value_required": false,
+      "index_suffix": ".tbi",
+      "separator": ";"
+    }
+  ],
+  "other_columns": "refused"
+}

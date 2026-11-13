@@ -32,7 +32,7 @@ runs in an image that the organisation running the pipeline builds itself.
 | [Annotation](docs/annotation.md)                   | the operator who runs the pipeline            | the Annotator's modes and its licence, which sources are dated, what a families sheet holds, the steps, what a run publishes and what stops it |
 | [The Annotator's image](docs/annotator-image.md)   | whoever builds the image of the Annotator     | what the image has to hold, and how a task fetches the licence key                                                                             |
 | [Glossary](docs/glossary.md)                       | everyone                                      | each word that the documents use                                                                                                               |
-| [contract/](contract/)                             | a program that consumes a run's output        | the manifest's JSON Schema, and the sheet's columns, the workflows' params and the tables' columns as JSON                                     |
+| [The contract](contract/README.md)                 | a program that launches or reads a run        | the manifest's JSON Schema, and the sheet's columns, the workflows' params and the tables' columns as JSON                                     |
 
 ## Development
 
@@ -50,6 +50,10 @@ A pull request has to pass two checks, which run the same commands as these:
 uv run pre-commit run --all-files
 uv run pytest
 ```
+
+A change to the interface changes [the contract](contract/README.md) too.
+`uv run case-annotation contract --out contract` writes it again, and `pytest` fails while the committed folder differs
+from what the command writes.
 
 The `nextflow` workflow runs on a pull request too. It runs both workflows in stub mode, and it runs their processes in
 Docker on invented inputs, which are the tests in `tests/workflows/`. The comment that opens each test gives its
