@@ -1,0 +1,93 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Virtual environments (uv creates .venv)
+.venv/
+
+# Build and packaging artefacts
+/build/
+/dist/
+*.egg-info/
+
+# Nextflow run state and outputs
+.nextflow/
+.nextflow.log*
+work/
+results/
+
+# Test coverage
+.coverage
+.coverage.*
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Local environment and secrets. .env.example holds placeholder values only, so it may be committed.
+.env
+.env.*
+!.env.example
+.envrc
+.direnv/
+
+# Claude Code: one person's own settings and notes
+**/.claude/settings.local.json
+CLAUDE.local.md
+
+# Genomic data: the repository holds none. Read, reference, alignment and variant files are ignored, with the files
+# named after them (compressed forms and indexes), and so are Parquet tables. Under a tests/ folder at any depth they
+# stay visible to git, for invented fixtures. Each exception names its format: one exception for all of tests/ would
+# also switch off a person's own ignore file there, because a match in this file ends git's search.
+*.fastq
+*.fastq.*
+*.fq
+*.fq.*
+*.fa
+*.fa.*
+*.fasta
+*.fasta.*
+*.sam
+*.sam.*
+*.bam
+*.bam.*
+*.cram
+*.cram.*
+*.bai
+*.crai
+*.vcf
+*.vcf.*
+*.gvcf
+*.gvcf.*
+*.bcf
+*.bcf.*
+*.parquet
+!**/tests/**/*.fastq
+!**/tests/**/*.fastq.*
+!**/tests/**/*.fq
+!**/tests/**/*.fq.*
+!**/tests/**/*.fa
+!**/tests/**/*.fa.*
+!**/tests/**/*.fasta
+!**/tests/**/*.fasta.*
+!**/tests/**/*.sam
+!**/tests/**/*.sam.*
+!**/tests/**/*.bam
+!**/tests/**/*.bam.*
+!**/tests/**/*.cram
+!**/tests/**/*.cram.*
+!**/tests/**/*.bai
+!**/tests/**/*.crai
+!**/tests/**/*.vcf
+!**/tests/**/*.vcf.*
+!**/tests/**/*.gvcf
+!**/tests/**/*.gvcf.*
+!**/tests/**/*.bcf
+!**/tests/**/*.bcf.*
+!**/tests/**/*.parquet
+
+# macOS
+.DS_Store

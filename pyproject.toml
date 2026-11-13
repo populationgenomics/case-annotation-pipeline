@@ -1,0 +1,94 @@
+[project]
+name = "case-annotation-tools"
+version = "0.1.0"
+description = "The Python steps of the case annotation pipeline, which write a family's annotated variant calls as Parquet tables."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.13,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv]
+# Supply-chain age gate: never resolve a version younger than 7 days. Declared in-repo so CI and contributors resolve
+# the same lock; .github/dependabot.yml mirrors it with a matching cooldown.
+exclude-newer = "7 days"
+
+[tool.uv.build-backend]
+module-name = "case_annotation"
+
+[dependency-groups]
+test = ["pytest"]
+lint = ["pre-commit", "ruff", "pyright", { include-group = "test" }]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.ruff.lint]
+select = [
+    "A", "B", "C", "D", "E", "F", "G", "I", "N", "Q", "S", "W",
+    "ANN", "ARG", "BLE", "COM", "DTZ", "ERA", "EXE", "ICN", "ISC",
+    "PGH", "PIE", "PL", "PT", "PYI", "RET", "RSE", "RUF",
+    "SIM", "SLF", "T10", "TID", "UP", "YTT",
+]
+fixable = ["ALL"]
+ignore = [
+    "COM812",  # Trailing comma prohibited
+    # D1xx: docstring presence. Format is enforced when a docstring exists; presence is policy, not lint.
+    "D100",
+    "D101",
+    "D102",
+    "D103",
+    "D104",
+    "D105",
+    "D106",
+    "D107",
+    "PLR0913", # Too many arguments in function definition
+    "PLR2004", # Magic value used in comparison
+    "Q000",    # Single quotes found but double quotes preferred
+    "Q003",    # Change outer quotes (conflicts with single-quote formatter)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "S101",   # asserts are the standard pytest idiom
+    "SLF001", # tests legitimately reach into module privates
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+known-first-party = ["case_annotation"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 20
+
+[tool.ruff.lint.pylint]
+max-args = 10
+max-branches = 20
+max-returns = 10
+max-statements = 80
+max-locals = 25
+
+[tool.pyright]
+pythonVersion = "3.12"
+include = ["src", "tests"]
+# The tests import their shared helpers from tests/ by name.
+extraPaths = ["tests"]
+typeCheckingMode = "standard"
+reportImplicitOverride = "error"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The tests import their shared helpers from tests/ by name.
+pythonpath = ["tests"]
+# importlib: test modules in different folders may share a basename. strict-markers: a misspelled marker is a
+# collection error rather than a warning, so it cannot silently deselect tests.
+addopts = ["--import-mode=importlib", "--strict-markers"]

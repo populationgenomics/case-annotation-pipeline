@@ -1,0 +1,43 @@
+# Every cooldown mirrors `exclude-newer = "7 days"` in pyproject.toml. Dependabot does not read that setting, so without
+# the cooldown it would open PRs for versions the in-repo age gate cannot lock. Minor and patch updates are grouped into
+# one PR per ecosystem, so that each major version arrives as a PR of its own.
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    # The package's dependency ranges are what it supports; only the lock moves.
+    versioning-strategy: lockfile-only
+    groups:
+      uv:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: docker
+    directory: /containers/tools
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    ignore:
+      # A Python minor moves with requires-python and the lint and CI versions; bumped together with them.
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+    groups:
+      docker:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
