@@ -158,6 +158,22 @@
         "multiplier": 2000000,
         "missing_value": 0,
         "missing_string": "MISSING"
+      },
+      {
+        "field": "nhomalt_joint",
+        "alias": "gnomad_HomAlt",
+        "ftype": "Integer",
+        "multiplier": 1,
+        "missing_value": -2147483648,
+        "missing_string": "MISSING"
+      },
+      {
+        "field": "fafmax_faf95_max_joint",
+        "alias": "gnomad_faf95max",
+        "ftype": "Float",
+        "multiplier": 2000000,
+        "missing_value": 0,
+        "missing_string": "MISSING"
       }
     ]
   },

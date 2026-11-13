@@ -18,7 +18,8 @@
         {
           "name": "reference",
           "type": "Path",
-          "required": true
+          "required": true,
+          "index_suffix": ".fai"
         },
         {
           "name": "catalog",
@@ -300,7 +301,8 @@
         },
         "download": {
           "needs": [
-            "catalog"
+            "catalog",
+            "categories"
           ],
           "publishes": {
             "folder": "references/dragen-annotation/{annotator_version}/{catalog}",
