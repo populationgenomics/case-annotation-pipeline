@@ -1,0 +1,4 @@
+# Workflows and deployment files decide what CI and runs can do with cloud credentials, so a change to them needs a
+# code owner's review. Repository admins may merge without it.
+/.github/ @lgruen-cpg @folded
+/deployments/ @lgruen-cpg @folded
