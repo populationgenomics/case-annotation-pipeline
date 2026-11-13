@@ -1,0 +1,16 @@
+##fileformat=VCFv4.2
+##FILTER=<ID=PASS,Description="All filters passed">
+##contig=<ID=1,length=600>
+##contig=<ID=2,length=600>
+##contig=<ID=Un_test,length=100>
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=AD,Number=R,Type=Integer,Description="Allelic depths">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	A1	A2	A3
+1	100	.	G	A,C	50	PASS	.	GT:AD	1/2:10,10,10	0/1:10,10,10	0/0:10,10,10
+1	200	.	G	A,C	50	PASS	.	GT:AD	0/1:10,10,10	0/1:10,10,10	0/0:10,10,10
+1	300	.	T	*,A	50	PASS	.	GT:AD	1/2:10,10,10	0/0:10,10,10	0/2:10,10,10
+1	410	.	ACA	A	50	PASS	.	GT:AD	0/0:10,10	0/1:10,10	0/1:10,10
+2	50	.	G	A	50	PASS	.	GT:AD	0/0:10,10	0/0:10,10	./.:10,10
+2	60	.	C	A	50	PASS	.	GT:AD	0/1:10,10	0/0:10,10	0/1:10,10
+2	60	.	C	A	50	PASS	.	GT:AD	0/1:10,10	0/0:10,10	0/1:10,10
+Un_test	10	.	G	A	50	PASS	.	GT:AD	0/1:10,10	0/0:10,10	0/1:10,10

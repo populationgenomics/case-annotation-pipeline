@@ -1,0 +1,12 @@
+##fileformat=VCFv4.2
+##FILTER=<ID=PASS,Description="All filters passed">
+##contig=<ID=chr1,length=600>
+##contig=<ID=chr2,length=600>
+##contig=<ID=chrUn_test,length=100>
+##contig=<ID=chrX,length=600>
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=AD,Number=R,Type=Integer,Description="Allelic depths">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	B1	B2	B3
+chr1	100	.	G	A	50	PASS	.	GT:AD	0/0:10,10	0/1:10,10	0/1:10,10
+chr1	400	.	TCA	T	50	PASS	.	GT:AD	0/1:10,10	0/0:10,10	0/1:10,10
+chr2	70	.	T	A	50	PASS	.	GT:AD	0/0:10,10	0/0:10,10	0/1:10,10

@@ -1,0 +1,15 @@
+##fileformat=VCFv4.2
+##contig=<ID=chr1,length=600>
+##contig=<ID=chr2,length=600>
+##contig=<ID=chrX,length=600>
+##INFO=<ID=AC_joint,Number=A,Type=Integer,Description="Invented allele count">
+##INFO=<ID=AF_joint,Number=A,Type=Float,Description="Invented allele frequency">
+##INFO=<ID=nhomalt_joint,Number=A,Type=Integer,Description="Invented count of homozygous individuals">
+##INFO=<ID=fafmax_faf95_max_joint,Number=A,Type=Float,Description="Invented filtering allele frequency">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+chr1	100	.	G	A	.	.	AC_joint=3;AF_joint=0.0000187;nhomalt_joint=1;fafmax_faf95_max_joint=0.00000431
+chr1	200	.	G	A	.	.	AC_joint=0;AF_joint=0;nhomalt_joint=0
+chr1	400	.	TCA	T	.	.	AC_joint=120000;AF_joint=0.0743212;nhomalt_joint=4500;fafmax_faf95_max_joint=0.062502
+chr2	60	.	C	G	.	.	AC_joint=900000;AF_joint=0.6;nhomalt_joint=300000;fafmax_faf95_max_joint=0.7
+chr2	90	.	GCGTAAA	G	.	.	AC_joint=7;AF_joint=0.00000434;nhomalt_joint=0;fafmax_faf95_max_joint=0.00000101
+chrX	100	.	T	C	.	.	AC_joint=25;AF_joint=0.001;nhomalt_joint=1;fafmax_faf95_max_joint=0.0008

@@ -1,0 +1,24 @@
+##fileformat=VCFv4.2
+##source=Invented for build/tests/family.nf
+##FILTER=<ID=PASS,Description="All filters passed">
+##FILTER=<ID=MinQUAL,Description="Invented filter">
+##contig=<ID=chr1,length=600>
+##contig=<ID=chr2,length=600>
+##contig=<ID=chrUn_test,length=100>
+##contig=<ID=chrX,length=600>
+##INFO=<ID=SVTYPE,Number=1,Type=String,Description="Type of structural variant">
+##INFO=<ID=SVLEN,Number=.,Type=Integer,Description="Difference in length between REF and ALT alleles">
+##INFO=<ID=END,Number=1,Type=Integer,Description="End position">
+##INFO=<ID=REFLEN,Number=1,Type=Integer,Description="Number of REF positions in the record">
+##ALT=<ID=DEL,Description="Region of lowered copy number">
+##ALT=<ID=DUP,Description="Region of elevated copy number">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=SM,Number=1,Type=Float,Description="Linear copy ratio of the segment mean">
+##FORMAT=<ID=CN,Number=1,Type=Integer,Description="Estimated copy number">
+##FORMAT=<ID=BC,Number=1,Type=Integer,Description="Number of bins in the region">
+##FORMAT=<ID=QS,Number=1,Type=Integer,Description="Quality score">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	A1	A2	A3
+chr1	100	inv:REF:1	N	.	.	PASS	END=200;REFLEN=100	GT:SM:CN:BC:QS	./.:1.0:2:5:40	./.:1.0:2:5:40	./.:1.0:2:5:40
+chr1	200	inv:LOSS:1	N	<DEL>	.	PASS	SVTYPE=CNV;END=400;REFLEN=200;SVLEN=-200	GT:SM:CN:BC:QS	0/1:0.5:1:9:30	./.:1.0:2:9:50	1/1:0.0:0:9:60
+chr2	300	inv:CNV:1	N	<DEL>,<DUP>	.	PASS	SVTYPE=CNV;END=450;REFLEN=150;SVLEN=-150,150	GT:SM:CN:BC:QS	0/1:0.5:1:9:30	./2:1.5:3:9:40	./.:1.0:2:9:50
+chrX	300	inv:GAIN:1	N	<DUP>	.	PASS	SVTYPE=CNV;END=500;REFLEN=200;SVLEN=200	GT:SM:CN:BC:QS	1:2.0:2:9:30	./.:1.0:2:9:50	./1:1.5:3:9:40

@@ -1,0 +1,21 @@
+##fileformat=VCFv4.2
+##source=Invented for build/tests/family.nf
+##FILTER=<ID=PASS,Description="All filters passed">
+##FILTER=<ID=MinQUAL,Description="Invented filter">
+##contig=<ID=chr1,length=600>
+##contig=<ID=chr2,length=600>
+##contig=<ID=chrUn_test,length=100>
+##contig=<ID=chrX,length=600>
+##INFO=<ID=SVTYPE,Number=1,Type=String,Description="Type of structural variant">
+##INFO=<ID=SVLEN,Number=.,Type=Integer,Description="Difference in length between REF and ALT alleles">
+##INFO=<ID=END,Number=1,Type=Integer,Description="End position">
+##INFO=<ID=IMPRECISE,Number=0,Type=Flag,Description="Imprecise structural variation">
+##INFO=<ID=CIPOS,Number=2,Type=Integer,Description="Confidence interval around POS">
+##INFO=<ID=MATEID,Number=.,Type=String,Description="ID of mate breakend">
+##ALT=<ID=DEL,Description="Deletion">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype quality">
+##FORMAT=<ID=PL,Number=G,Type=Integer,Description="Genotype likelihoods">
+##FORMAT=<ID=PR,Number=R,Type=Integer,Description="Paired reads of the reference and the allele">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	A1	A2	A3
+chr2	90	inv:DEL:2	GCGTAAT	G	80	PASS	SVTYPE=DEL;END=96;SVLEN=-6	GT:GQ:PL:PR	0/1:30:60,0,70:5,4	0/0:40:0,40,400:9,0	0/1:30:60,0,70:5,4

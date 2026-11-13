@@ -1,0 +1,28 @@
+##fileformat=VCFv4.2
+##source=Invented for build/tests/family.nf
+##FILTER=<ID=PASS,Description="All filters passed">
+##FILTER=<ID=MinQUAL,Description="Invented filter">
+##contig=<ID=chr1,length=600>
+##contig=<ID=chr2,length=600>
+##contig=<ID=chrUn_test,length=100>
+##contig=<ID=chrX,length=600>
+##INFO=<ID=SVTYPE,Number=1,Type=String,Description="Type of structural variant">
+##INFO=<ID=SVLEN,Number=.,Type=Integer,Description="Difference in length between REF and ALT alleles">
+##INFO=<ID=END,Number=1,Type=Integer,Description="End position">
+##INFO=<ID=IMPRECISE,Number=0,Type=Flag,Description="Imprecise structural variation">
+##INFO=<ID=CIPOS,Number=2,Type=Integer,Description="Confidence interval around POS">
+##INFO=<ID=MATEID,Number=.,Type=String,Description="ID of mate breakend">
+##ALT=<ID=DEL,Description="Deletion">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype quality">
+##FORMAT=<ID=PL,Number=G,Type=Integer,Description="Genotype likelihoods">
+##FORMAT=<ID=PR,Number=R,Type=Integer,Description="Paired reads of the reference and the allele">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	A1	A2	A3
+chr1	300	inv:BND:1:0	T	T[chr2:200[	60	PASS	SVTYPE=BND;MATEID=inv:BND:1:1	GT:GQ:PL:PR	0/0:40:0,40,400:9,0	0/1:30:60,0,70:5,4	0/1:30:60,0,70:5,4
+chr1	406	inv:DEL:1	ACA	A	70	PASS	SVTYPE=DEL;END=408;SVLEN=-2	GT:GQ:PL:PR	0/0:40:0,40,400:9,0	0/1:30:60,0,70:5,4	0/1:30:60,0,70:5,4
+chr1	500	inv:DEL:4	N	<DEL>	50	MinQUAL	SVTYPE=DEL;END=560;SVLEN=-60;IMPRECISE;CIPOS=-5,5	GT:GQ:PL:PR	0/1:30:60,0,70:5,4	0/0:40:0,40,400:9,0	1/1:20:300,30,0:0,8
+chr2	90	inv:DEL:2	GCGTAAA	G	80	PASS	SVTYPE=DEL;END=96;SVLEN=-6	GT:GQ:PL:PR	0/1:30:60,0,70:5,4	0/0:40:0,40,400:9,0	0/1:30:60,0,70:5,4
+chr2	97	inv:DEL:3	GCTG	G	80	PASS	SVTYPE=DEL;END=100;SVLEN=-3	GT:GQ:PL:PR	0/0:40:0,40,400:9,0	0/0:40:0,40,400:9,0	0/1:30:60,0,70:5,4
+chr2	200	inv:BND:1:1	C	]chr1:300]C	60	PASS	SVTYPE=BND;MATEID=inv:BND:1:0	GT:GQ:PL:PR	0/0:40:0,40,400:9,0	0/1:30:60,0,70:5,4	0/1:30:60,0,70:5,4
+chrUn_test	10	inv:DEL:9	N	<DEL>	50	PASS	SVTYPE=DEL;END=40;SVLEN=-30	GT:GQ:PL:PR	0/1:30:60,0,70:5,4	0/0:40:0,40,400:9,0	0/1:30:60,0,70:5,4
+chrX	200	inv:DEL:5	N	<DEL>	50	PASS	SVTYPE=DEL;END=260;SVLEN=-60	GT:GQ:PL:PR	1:30:70,0:0,7	0/1:30:60,0,70:5,4	0/0:40:0,40,400:9,0

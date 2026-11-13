@@ -1,0 +1,322 @@
+name: nextflow
+
+on:
+  pull_request:
+    types: [opened, ready_for_review, synchronize]
+  push:
+    branches: [main]
+
+jobs:
+  stub-runs:
+    # Runs both workflows in stub mode: the wiring between processes, with no Annotator and no cloud. Linting is in the
+    # pre-commit config. The image is the one the nextflow-lint hook pins.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Stub runs of each of the Annotator's modes, and of refused params
+        run: |
+          mkdir -p stub/illumina-bundle/runConfigs
+          touch stub/input.vcf.gz stub/input.vcf.gz.tbi stub/regions.bed stub/unindexed.vcf.gz
+          echo '{"data": {"catalog": "202610", "versionSelector": {"clinvar": {"SmallVariant": "1"}}}}' \
+            > stub/illumina-bundle/runConfigs/bundle.json
+          # List params, which only a params file can give; a catalog name that is not a file name as it is.
+          printf "catalogs: ['20260501', 'May 2026']\n" > stub/list.params.yaml
+          printf "exclude_sources: [cosmic]\n" > stub/download.params.yaml
+          printf "sources: [clinvar]\n" > stub/annotate.params.yaml
+          printf "categories: []\n" > stub/no-categories.params.yaml
+          printf "catalogs: [\"May'2026\"]\n" > stub/quote.params.yaml
+          printf "name: \"stub input\"\n" > stub/space.params.yaml
+          illumina_run() {
+            docker run --rm -v "${PWD}:/src" -w /src \
+              nextflow/nextflow:26.04.7@sha256:08a3a53e8fd317b22711b6fbabb268678b91b023b39099da2b902261515f438e \
+              nextflow run annotator.nf -stub-run -profile stub \
+                --annotator_container stub \
+                --annotator /stub/Annotator \
+                --annotator_version 4.0.0 \
+                --license_secret projects/stub/secrets/stub/versions/1 \
+                "$@"
+          }
+          annotate=(-params-file /src/stub/annotate.params.yaml --mode annotate --catalog 202610
+            --annotation_data /src/stub/illumina-bundle --input /src/stub/input.vcf.gz --name stub-input)
+          illumina_run -params-file /src/stub/list.params.yaml --mode list
+          illumina_run -params-file /src/stub/download.params.yaml --mode download --catalog 202610
+          illumina_run "${annotate[@]}"
+          illumina_run "${annotate[@]}" --regions /src/stub/regions.bed --label regions --tools_container stub
+          # Published files are symlinks into the container's work directory, so their names are checked, not their
+          # contents.
+          results=results
+          for f in "annotation/list/$(date -u +%F)/"{catalogs,GRCh38,GRCh38.catalog-20260501,GRCh38.catalog-May_2026}.txt \
+            references/dragen-annotation/4.0.0/202610/GRCh38 references/dragen-annotation/4.0.0/202610/GRCh38.download.log \
+            annotations/stub-input/illumina-202610{,-regions}/{run.json,stub-input.annotate.log,out/stub-input.json.gz}; do
+            test -L "${results}/${f}" || { echo "not published: ${f}" >&2; exit 1; }
+          done
+          # A second download of the catalog replaces the data directory, which is a folder: its link then leads into
+          # the second run's work directory. The stub gives the folder a fixed time, so that Nextflow cannot tell the
+          # second run's from the first's, as it cannot in a bucket.
+          bundle=${results}/references/dragen-annotation/4.0.0/202610/GRCh38
+          first_bundle=$(readlink "${bundle}")
+          illumina_run -params-file /src/stub/download.params.yaml --mode download --catalog 202610
+          if [[ $(readlink "${bundle}") == "${first_bundle}" ]]; then
+            echo "a second download left the first one's data directory published" >&2
+            exit 1
+          fi
+          # Refused, each with its own message: an unknown mode; a quote in a name, or a space in an output's; a
+          # download without its catalog, with LATEST for it, or without categories; an annotation without its catalog,
+          # data, input, name or sources; regions without the tools image or the VCF's index.
+          refused() {
+            local message=$1
+            shift
+            if illumina_run "$@" > refused.log 2>&1; then
+              echo "accepted: $*" >&2
+              exit 1
+            fi
+            grep -qF "${message}" refused.log || { echo "expected: ${message}" >&2; cat refused.log; exit 1; }
+          }
+          sources=(-params-file /src/stub/annotate.params.yaml)
+          catalog=(--catalog 202610)
+          data=(--annotation_data /src/stub/illumina-bundle)
+          input=(--input /src/stub/input.vcf.gz)
+          name=(--name stub-input)
+          refused 'give list, download or annotate' --mode measure
+          refused 'a name may hold' -params-file /src/stub/quote.params.yaml --mode list
+          refused 'catalog id, name or label may hold' -params-file /src/stub/space.params.yaml --mode list
+          refused 'download: give catalog' --mode download
+          refused 'rather than LATEST' --mode download --catalog LATEST
+          refused 'name at least one category' -params-file /src/stub/no-categories.params.yaml --mode download "${catalog[@]}"
+          refused 'annotate: give catalog' "${sources[@]}" --mode annotate "${data[@]}" "${input[@]}" "${name[@]}"
+          refused 'annotate: give annotation_data' "${sources[@]}" --mode annotate "${catalog[@]}" "${input[@]}" "${name[@]}"
+          refused 'annotate: give input' "${sources[@]}" --mode annotate "${catalog[@]}" "${data[@]}" "${name[@]}"
+          refused 'annotate: give name' "${sources[@]}" --mode annotate "${catalog[@]}" "${data[@]}" "${input[@]}"
+          refused 'annotate: name the sources' --mode annotate "${catalog[@]}" "${data[@]}" "${input[@]}" "${name[@]}"
+          refused 'annotate: give tools_container' "${sources[@]}" --mode annotate "${catalog[@]}" "${data[@]}" "${input[@]}" \
+            "${name[@]}" --regions /src/stub/regions.bed
+          refused 'no .tbi beside it' "${sources[@]}" --mode annotate "${catalog[@]}" "${data[@]}" \
+            --input /src/stub/unindexed.vcf.gz "${name[@]}" --regions /src/stub/regions.bed --tools_container stub
+
+      - name: Stub runs of the family tables, annotating, reusing an annotation and with larger variants, and of refused params
+        run: |
+          mkdir -p stub/illumina-bundle/runConfigs stub/annotated/out
+          echo '{"data": {"catalog": "202610", "versionSelector": {"clinvar": {"SmallVariant": "1"}}}}' \
+            > stub/illumina-bundle/runConfigs/bundle.json
+          touch stub/reference.fa stub/reference.fa.fai stub/unindexed.fa stub/annotated/out/stub-group.json.gz \
+            stub/annotated/out/stub-group.sv.json.gz stub/annotated/run.json stub/gnomad-joint.zip
+          # An annotation folder of the group's alleles alone, without the annotation of its structural variants.
+          mkdir -p stub/annotated-no-sv/out
+          touch stub/annotated-no-sv/out/stub-group.json.gz stub/annotated-no-sv/run.json
+          # An annotation folder of another group, which holds no annotation named after this one.
+          mkdir -p stub/annotated-other/out
+          touch stub/annotated-other/out/other-group.json.gz stub/annotated-other/run.json
+          # An annotation folder that holds the group's annotation without the run config it was made with.
+          mkdir -p stub/annotated-no-config/out
+          touch stub/annotated-no-config/out/stub-group.json.gz
+          for f in a b; do
+            touch "stub/family-${f}.vcf.gz" "stub/family-${f}.ped"
+          done
+          # A family with a proband and one in which none is designated.
+          printf 'family,vcf,ped,proband\nfam-a,/src/stub/family-a.vcf.gz,/src/stub/family-a.ped,A3\nfam-b,/src/stub/family-b.vcf.gz,/src/stub/family-b.ped,\n' \
+            > stub/families.csv
+          { head -2 stub/families.csv; sed -n 2p stub/families.csv; } > stub/repeated.csv
+          printf 'family,vcf,ped,proband\nfam a,/src/stub/family-a.vcf.gz,/src/stub/family-a.ped,A3\n' > stub/space.csv
+          printf 'family,vcf,ped,proband\n' > stub/empty.csv
+          printf 'family,vcf,ped,proband\nfam-a,/src/stub/family-a.vcf.gz,,A3\n' > stub/no-ped.csv
+          printf 'family,vcf,ped\nfam-a,/src/stub/family-a.vcf.gz,/src/stub/family-a.ped\n' > stub/no-proband-column.csv
+          printf 'family,vcf,ped,proband\nfam-a,/src/stub/family-a.vcf.gz,/src/stub/family-a.ped\n' > stub/short-row.csv
+          printf 'family,vcf,ped,proband\nfam-a,/src/stub/family-a.vcf.gz,/src/stub/family-a.ped,A 3\n' \
+            > stub/proband-space.csv
+          # Sheets with the optional columns of the larger variants: a family with every such VCF beside one with
+          # none; a repeat VCF without its index; an empty entry among the repeat VCFs.
+          for f in sv cnv repeats-1 repeats-2 repeats-3; do
+            touch "stub/family-a.${f}.vcf.gz" "stub/family-a.${f}.vcf.gz.tbi"
+          done
+          touch stub/unindexed.vcf.gz
+          larger='family,vcf,ped,proband,sv_vcf,cnv_vcf,repeat_vcfs'
+          a=fam-a,/src/stub/family-a.vcf.gz,/src/stub/family-a.ped,A3,/src/stub/family-a.sv.vcf.gz,/src/stub/family-a.cnv.vcf.gz
+          repeats='/src/stub/family-a.repeats-1.vcf.gz;/src/stub/family-a.repeats-2.vcf.gz'
+          printf '%s\n%s,%s\nfam-b,/src/stub/family-b.vcf.gz,/src/stub/family-b.ped,,,,\n' \
+            "${larger}" "${a}" "${repeats};/src/stub/family-a.repeats-3.vcf.gz" > stub/larger.csv
+          printf '%s\n%s,%s\n' "${larger}" "${a}" "${repeats};/src/stub/unindexed.vcf.gz" > stub/repeat-unindexed.csv
+          printf '%s\n%s,%s\n' "${larger}" "${a}" "${repeats};" > stub/repeat-empty.csv
+          # An optional column under a misspelt name.
+          printf '%s\n%s,\n' "${larger/sv_vcf/sv_vcfs}" "${a}" > stub/misspelt-column.csv
+          printf "sources: [\"clin'var\"]\n" > stub/quoted-source.params.yaml
+          printf "sources: [clinvar]\n" > stub/family-sources.params.yaml
+          family_run() {
+            docker run --rm -v "${PWD}:/src" -w /src \
+              nextflow/nextflow:26.04.7@sha256:08a3a53e8fd317b22711b6fbabb268678b91b023b39099da2b902261515f438e \
+              nextflow run family_tables.nf -stub-run -profile stub \
+                --group stub-group \
+                --reference /src/stub/reference.fa \
+                --catalog 202610 \
+                --annotation_data /src/stub/illumina-bundle \
+                --gnomad_joint /src/stub/gnomad-joint.zip \
+                --tools_container stub \
+                "$@"
+          }
+          annotator=(--annotator_container stub --annotator /stub/Annotator --annotator_version 4.0.0
+            --license_secret projects/stub/secrets/stub/versions/1)
+          sources=(-params-file /src/stub/family-sources.params.yaml)
+          family_run "${sources[@]}" "${annotator[@]}" --families /src/stub/families.csv
+          # Published files are symlinks into the container's work directory, so their names are checked. The union,
+          # its annotation and its gnomAD joint values go under annotation-unions/, each family's tables under
+          # annotations/<family>/.
+          results=results
+          union=annotation-unions/stub-group/tables-0.4.0-illumina-202610
+          for f in "${union}"/{stub-group.vcf.gz,stub-group.vcf.gz.tbi,tables,gnomad_joint,annotator/run.json,annotator/out/stub-group.json.gz} \
+            annotations/fam-{a,b}/tables-0.4.0-illumina-202610/{variants,transcripts}.parquet \
+            annotations/fam-{a,b}/tables-0.4.0-illumina-202610/manifest.json; do
+            test -L "${results}/${f}" || { echo "not published: ${f}" >&2; exit 1; }
+          done
+          if find "${results}/annotations" -name 'stub-group*' | grep -q .; then
+            echo 'the union is published beside a family' >&2
+            exit 1
+          fi
+          # A second run into the same folder replaces the union's tables and joint values, which are folders: each
+          # link then leads into the second run's work directory. The stubs give both folders a fixed time, so that
+          # Nextflow cannot tell the second run's from the first's, as it cannot in a bucket.
+          first_tables=$(readlink "${results}/${union}/tables")
+          first_joint=$(readlink "${results}/${union}/gnomad_joint")
+          family_run "${sources[@]}" "${annotator[@]}" --families /src/stub/families.csv
+          if [[ $(readlink "${results}/${union}/tables") == "${first_tables}" ||
+            $(readlink "${results}/${union}/gnomad_joint") == "${first_joint}" ]]; then
+            echo "a second run left the first run's tables or joint values published" >&2
+            exit 1
+          fi
+          # Reusing an earlier run's annotation runs no Annotator, and reads the gnomAD joint values afresh. Its outputs
+          # go to a folder of their own: the first run's belong to the container's user, which the runner cannot
+          # remove.
+          family_run --families /src/stub/families.csv --annotated /src/stub/annotated --output_dir /src/stub/reuse \
+            > reuse.log
+          if grep -q ILLUMINA_ANNOTATE reuse.log || ! grep -q GNOMAD_JOINT reuse.log; then
+            cat reuse.log
+            exit 1
+          fi
+          # No family of the sheet names a VCF of structural variants, so nothing of their union runs.
+          if grep -qE '(SV_SITES|SV_UNION|SV_ANNOTATION_TABLES) \(' reuse.log; then
+            cat reuse.log
+            exit 1
+          fi
+          test -L stub/reuse/annotations/fam-a/tables-0.4.0-illumina-202610/manifest.json
+          test -L "stub/reuse/${union}/gnomad_joint"
+          test ! -e "stub/reuse/${union}/annotator"
+          # A family whose row names the VCFs of its larger variants gets their tables beside the others, in the same
+          # folder, and its structural variants are normalised; a family whose row names none gets no such table. The
+          # sites of its structural variants and copy-number segments go into a union of their own, whose reused
+          # annotation is converted without an Annotator run. The union, its map and its tables are published with the
+          # union of the alleles, never beside a family.
+          family_run --families /src/stub/larger.csv --annotated /src/stub/annotated --output_dir /src/stub/larger \
+            > larger.log
+          # Nextflow's log has one line for each process, which names one of the process's tasks, and it lists a
+          # process without a task too. Each process below has one task, so its line names that task. What each
+          # family got is checked by what is published for it.
+          for task in 'NORMALISE_SV (fam-a)' 'SV_SITES (fam-a)' 'SV_UNION (stub-group)'; do
+            grep -qF "${task}" larger.log || { echo "did not run: ${task}" >&2; cat larger.log; exit 1; }
+          done
+          if grep -q ILLUMINA_ANNOTATE larger.log; then
+            cat larger.log
+            exit 1
+          fi
+          for table in variants transcripts sv sv_transcripts repeats; do
+            test -L "stub/larger/annotations/fam-a/tables-0.4.0-illumina-202610/${table}.parquet" ||
+              { echo "not published: ${table}" >&2; exit 1; }
+          done
+          test -L stub/larger/annotations/fam-b/tables-0.4.0-illumina-202610/variants.parquet
+          for table in sv sv_transcripts repeats; do
+            test ! -e "stub/larger/annotations/fam-b/tables-0.4.0-illumina-202610/${table}.parquet"
+          done
+          for f in stub-group.sv.vcf.gz stub-group.sv.vcf.gz.tbi stub-group.sv.map.parquet sv_annotation; do
+            test -L "stub/larger/${union}/${f}" || { echo "not published: ${f}" >&2; exit 1; }
+          done
+          if find stub/larger/annotations -name 'stub-group*' -o -name sv_annotation | grep -q .; then
+            echo 'the union of the structural variants is published beside a family' >&2
+            exit 1
+          fi
+          # Annotating such a group runs the Annotator twice, over the alleles and over the structural variants, and
+          # publishes both annotations and both logs with the one run config.
+          family_run "${sources[@]}" "${annotator[@]}" --families /src/stub/larger.csv \
+            --output_dir /src/stub/larger-annotated > larger-annotated.log
+          for task in 'ILLUMINA_ANNOTATE (stub-group)' 'ILLUMINA_ANNOTATE_SV'; do
+            grep -qF "${task}" larger-annotated.log || { echo "did not run: ${task}" >&2; cat larger-annotated.log; exit 1; }
+          done
+          for f in run.json out/stub-group.json.gz out/stub-group.sv.json.gz stub-group.annotate.log \
+            stub-group.sv.annotate.log; do
+            test -L "stub/larger-annotated/${union}/annotator/${f}" || { echo "not published: ${f}" >&2; exit 1; }
+          done
+          test -L stub/larger-annotated/annotations/fam-a/tables-0.4.0-illumina-202610/sv_transcripts.parquet
+          # Refused, each with its own message: sources and a reused annotation together; neither; annotating without
+          # the Annotator's params; a repeated family; a family id that is not a folder name; a reference without its
+          # index; a catalog id that is not a folder name; a quote in a source; a sheet without families; a row
+          # without its PED file; a sheet without the proband column; a row that ends before it; a proband that is not
+          # a sample id; a reused annotation that holds none of the group; a reused annotation without its run config,
+          # which Nextflow refuses by the missing file's path; a repeat VCF without its index; an empty entry among a
+          # row's repeat VCFs; a sheet with a column that is none of a families sheet; a reused annotation without
+          # that of the structural variants, for a group with a family that names their VCF.
+          refused() {
+            local message=$1
+            shift
+            if family_run "$@" > refused.log 2>&1; then
+              echo "accepted: $*" >&2
+              exit 1
+            fi
+            grep -qF "${message}" refused.log || { echo "expected: ${message}" >&2; cat refused.log; exit 1; }
+          }
+          families=(--families /src/stub/families.csv)
+          refused 'not both' "${sources[@]}" "${families[@]}" --annotated /src/stub/annotated
+          refused 'name the sources' "${families[@]}" "${annotator[@]}"
+          refused 'give annotator_container' "${sources[@]}" "${families[@]}"
+          refused 'a family is listed twice' "${sources[@]}" "${annotator[@]}" --families /src/stub/repeated.csv
+          refused 'a family id may hold' "${sources[@]}" "${annotator[@]}" --families /src/stub/space.csv
+          refused 'no .fai beside it' "${sources[@]}" "${annotator[@]}" "${families[@]}" --reference /src/stub/unindexed.fa
+          refused 'a group or catalog id may hold' "${sources[@]}" "${annotator[@]}" "${families[@]}" --catalog 'May 2026'
+          refused 'a source may hold' -params-file /src/stub/quoted-source.params.yaml "${annotator[@]}" "${families[@]}"
+          refused 'no families' "${sources[@]}" "${annotator[@]}" --families /src/stub/empty.csv
+          refused 'a row without ped' "${sources[@]}" "${annotator[@]}" --families /src/stub/no-ped.csv
+          refused 'no column proband' "${sources[@]}" "${annotator[@]}" --families /src/stub/no-proband-column.csv
+          refused 'a row that ends before proband' "${sources[@]}" "${annotator[@]}" --families /src/stub/short-row.csv
+          refused 'the proband A 3 is not a sample id' "${sources[@]}" "${annotator[@]}" \
+            --families /src/stub/proband-space.csv
+          refused 'stub-group: /src/stub/annotated-other holds no out/stub-group.json.gz' "${families[@]}" \
+            --annotated /src/stub/annotated-other
+          refused '/src/stub/annotated-no-config/run.json' "${families[@]}" --annotated /src/stub/annotated-no-config
+          refused 'fam-a: /src/stub/unindexed.vcf.gz: no .tbi beside it' "${sources[@]}" "${annotator[@]}" \
+            --families /src/stub/repeat-unindexed.csv
+          refused 'fam-a: an empty entry among its repeat_vcfs' "${sources[@]}" "${annotator[@]}" \
+            --families /src/stub/repeat-empty.csv
+          refused 'the columns [sv_vcfs] are none of a families sheet' "${sources[@]}" "${annotator[@]}" \
+            --families /src/stub/misspelt-column.csv
+          refused 'stub-group: /src/stub/annotated-no-sv holds no out/stub-group.sv.json.gz' \
+            --families /src/stub/larger.csv --annotated /src/stub/annotated-no-sv
+
+  annotator:
+    # Runs the Annotator's processes for real on an invented stand-in for the Annotator, in a stand-in for its image, and
+    # checks what they write and that the key appears in none of it (tests/workflows/annotator.nf). Nextflow starts the
+    # task containers through the runner's Docker daemon, so the checkout is mounted at the same path inside. -C gives
+    # the run the tests' config alone: from the repository's root it would otherwise read the pipeline's over it.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: The Annotator's processes on an invented Annotator
+        run: |
+          docker build -t annotator-test tests/workflows/annotator
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "${PWD}:${PWD}" -w "${PWD}" \
+            nextflow/nextflow:26.04.7@sha256:08a3a53e8fd317b22711b6fbabb268678b91b023b39099da2b902261515f438e \
+            nextflow -C tests/workflows/nextflow.config run tests/workflows/annotator.nf
+
+  family-tables:
+    # Runs the family tables' processes for real on invented families, wired as family_tables.nf wires them, and checks
+    # their output (tests/workflows/family_tables.nf). The case-annotation and echtvar steps run in the tools image,
+    # built from this commit.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: The family tables' processes on invented families
+        run: |
+          docker build -f containers/tools/Dockerfile -t case-annotation-tools-test .
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "${PWD}:${PWD}" -w "${PWD}" \
+            nextflow/nextflow:26.04.7@sha256:08a3a53e8fd317b22711b6fbabb268678b91b023b39099da2b902261515f438e \
+            nextflow -C tests/workflows/nextflow.config run tests/workflows/family_tables.nf
