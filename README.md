@@ -7,7 +7,9 @@ The pipeline takes a sheet with one row for each family. A row names the family'
 where the family has them, its VCFs of structural variants, copy number segments and tandem repeats. For each family the
 pipeline writes one folder of tables, with a manifest that describes them.
 
-The workflows, the tools and their documentation follow in the next changes.
+The pipeline's own steps are the Python package `case-annotation-tools` in `src/case_annotation/`, which installs the
+`case-annotation` command with one subcommand for each step. The workflows and the documentation follow in the next
+changes.
 
 ## Development
 

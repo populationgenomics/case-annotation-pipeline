@@ -1,9 +1,25 @@
 from __future__ import annotations
 
+import importlib.resources
 import pathlib
+import re
+
+import pytest
 
 import case_annotation
+from case_annotation import cli, family_tables
 
 
 def test_the_package_declares_its_inline_types() -> None:
     assert (pathlib.Path(case_annotation.__file__).parent / 'py.typed').is_file()
+
+
+def test_the_command_line_requires_a_subcommand() -> None:
+    with pytest.raises(SystemExit):
+        cli.main([])
+
+
+def test_the_tables_version_is_the_one_line_of_its_file() -> None:
+    text = importlib.resources.files(case_annotation).joinpath('tables-version.txt').read_text()
+    assert re.fullmatch(r'\d+\.\d+\.\d+\n', text)
+    assert text.removesuffix('\n') == family_tables.SCHEMA_VERSION
