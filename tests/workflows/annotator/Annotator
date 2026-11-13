@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# An invented stand-in for Illumina's Annotator, for tests/workflows/annotator.nf: it writes what the workflow reads
+# (run configs per category, a data directory, an annotation) without any of Illumina's data, and prints the key it is
+# given, which the workflow must redact. Some inputs make it misbehave on purpose: in catalog "conflict" two categories
+# pin one source at different versions, in catalog "leak" setup writes the key into its log, in catalog "stray" it
+# writes a credentials file (without the key) outside license/, and an annotation with the prefix "leak" writes the key
+# into a file beside its output.
+set -euo pipefail
+command=${1:-}
+shift || true
+arg() {
+    local name=$1
+    shift
+    while (($#)); do
+        if [[ $1 == "${name}" ]]; then
+            echo "$2"
+            return
+        fi
+        shift
+    done
+    echo "no ${name}" >&2
+    return 1
+}
+case ${command} in
+    --version)
+        echo 'DRAGEN Annotation 4.0.0-0+invented'
+        ;;
+    list)
+        echo "listing with key $(cat "$(arg --license.apiKeyFile "$@")")"
+        ;;
+    setup)
+        data=$(arg --data.directory "$@")
+        catalog=$(arg --data.catalog "$@")
+        assembly=$(arg --data.assemblies "$@")
+        key=$(arg --license.apiKeyFile "$@")
+        mkdir -p "${data}/runConfigs" "${data}/license" "${data}/logs"
+        cp "${key}" "${data}/license/credentials.json"
+        premium_clinvar=20260928
+        [[ ${catalog} == conflict ]] && premium_clinvar=20260801
+        for category in basic premium methylation tmb germline-tagging; do
+            case ${category} in
+                basic) sources='{"clinvar": {"SmallVariant": "20260928"}, "gnomad": {"SmallVariant": "4.1"}}' ;;
+                premium) sources='{"clinvar": {"SmallVariant": "'"${premium_clinvar}"'"}, "omim": {"Gene": "20261001"}, "cosmic": {"SmallVariant": "104"}, "spliceAI": {"SmallVariant": "2.0"}}' ;;
+                *) sources='{"UcscCpgIsland": {"MethylationRegion": "20221018"}}' ;;
+            esac
+            cat > "${data}/runConfigs/${assembly}.${catalog}.${category}.json" <<CONFIG
+{"schemaVersion": "1.0", "license": {"credentialsFile": "${data}/license/credentials.json"},
+ "data": {"directory": "${data}", "assembly": "${assembly}", "catalog": "${catalog}", "versionSelector": ${sources}},
+ "parallel": {"workers": 2}}
+CONFIG
+        done
+        echo '{"setup": "done"}' > "${data}/logs/setup.${catalog}.json"
+        if [[ ${catalog} == leak ]]; then
+            cat "${key}" >> "${data}/logs/setup.${catalog}.json"
+        fi
+        if [[ ${catalog} == stray ]]; then
+            echo '{"invented": "not a key"}' > "${data}/logs/credentials.json"
+        fi
+        ;;
+    download)
+        data=$(arg --data.directory "$@")
+        mkdir -p "${data}"
+        for source in $(jq -r '.data.versionSelector | keys[]' "$(arg --config "$@")"); do
+            echo "invented ${source} data" > "${data}/${source}.nsa"
+        done
+        ;;
+    version-validate)
+        jq -e '.data.versionSelector | length > 0' "$(arg --config "$@")" > /dev/null
+        ;;
+    annotate)
+        output=$(arg --output.directory "$@")
+        prefix=$(arg --output.prefix "$@")
+        # As the Annotator, which writes into its output directory but does not create it.
+        if [[ ! -d ${output} ]]; then
+            echo "Error: Could not find a part of the path '${output}/${prefix}.annotation_report.json'."
+            exit 255
+        fi
+        echo "annotating with key $(cat "$(arg --license.apiKeyFile "$@")")"
+        jq -c '{header: {dataSources: .data.versionSelector}}' "$(arg --config "$@")" | gzip > "${output}/${prefix}.json.gz"
+        touch "${output}/${prefix}.json.gz.jsi"
+        if [[ ${prefix} == leak ]]; then
+            cat "$(arg --license.apiKeyFile "$@")" > "${output}/${prefix}.log"
+        fi
+        ;;
+    *)
+        echo "unknown command ${command}" >&2
+        exit 2
+        ;;
+esac

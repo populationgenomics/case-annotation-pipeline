@@ -51,5 +51,9 @@ uv run pre-commit run --all-files
 uv run pytest
 ```
 
+The `nextflow` workflow runs on a pull request too. It runs both workflows in stub mode, and it runs their processes in
+Docker on invented inputs, which are the tests in `tests/workflows/`. The comment that opens each test gives its
+command.
+
 [CLAUDE.md](CLAUDE.md) holds the rules of the repository, and [REVIEW.md](REVIEW.md) says what a review of a change
 reports.
