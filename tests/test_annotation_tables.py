@@ -143,10 +143,12 @@ def test_a_position_gives_its_allele_and_its_transcripts() -> None:
     row, transcripts, keys = _position_rows(_rich_position())
     assert row['variant_id'] == 'chr2-100-A-G'
     assert row['rsids'] == ['rs1', 'rs2']  # each id of its own, in the Annotator's order
-    # Two missense transcripts: the MANE Select one wins, and its gene's Ensembl id comes from the Ensembl transcripts.
-    assert (row['worst_consequence'], row['worst_transcript_id']) == ('missense_variant', 'NM_01.2')
-    assert (row['gene_symbol'], row['gene_id']) == ('GENEA', 'ENSG01')
-    assert (row['mane_select_transcript_id'], row['mane_select_hgvsp']) == ('NM_01.2', 'NP_01.2:p.(K1E)')
+    # Two missense transcripts: the MANE Select one is chosen, and its gene's Ensembl id comes from the Ensembl
+    # transcripts.
+    assert (row['worst_consequence'], row['worst_impact']) == ('missense_variant', 'moderate')
+    first = row['genes'][0]
+    assert (first['worst_transcript_id'], first['gene_symbol'], first['gene_id']) == ('NM_01.2', 'GENEA', 'ENSG01')
+    assert (first['mane_select_transcript_id'], first['mane_select_hgvsp']) == ('NM_01.2', 'NP_01.2:p.(K1E)')
     assert (row['gnomad_genomes_af'], row['gnomad_genomes_failed_filter']) == (0.001, True)
     assert 'gnomad_exomes_af' not in row
     # The table holds the ids as a list of strings and a frequency as a 32-bit float.
@@ -349,39 +351,104 @@ def test_a_symbol_of_two_ensembl_genes_leaves_a_refseq_transcripts_gene_open() -
         spliceAI=[{'geneId': 'ENSG01', 'donorGainScore0': 0.1}, {'geneId': 'ENSG02', 'donorGainScore0': 0.6}],
     )
     row, transcripts, _ = _position_rows(position)
-    assert (row['worst_transcript_id'], row['gene_symbol'], row['gene_id']) == ('NM_01.1', 'GENEP', None)
+    gene = row['genes'][0]
+    assert (gene['worst_transcript_id'], gene['gene_symbol'], gene['gene_id']) == ('NM_01.1', 'GENEP', None)
     assert next(t for t in transcripts if t['source'] == 'RefSeq')['spliceai_max'] == 0.6
 
 
-def test_the_mane_select_transcript_of_the_worst_consequences_gene_comes_first() -> None:
-    position = _position(
-        'chr1',
-        5,
-        'C',
-        'T',
-        transcripts=[
-            _transcript('NM_01.1', 'RefSeq', 'GENEA', '1001', 'intron_variant', isManeSelect=True),
-            _transcript('NM_02.1', 'RefSeq', 'GENEB', '1002', 'missense_variant', isManeSelect=True),
-        ],
-    )
-    row, _, _ = _position_rows(position)
-    assert (row['gene_symbol'], row['mane_select_transcript_id']) == ('GENEB', 'NM_02.1')
+# What no column of `variants` holds: each is of one gene or one transcript of an allele, and a field of an entry.
+PER_GENE = (
+    'gene_symbol',
+    'gene_id',
+    'worst_transcript_id',
+    'mane_select_transcript_id',
+    'mane_select_consequence',
+    'mane_select_hgvsc',
+    'mane_select_hgvsp',
+)
+
+
+def test_no_column_of_variants_is_of_one_gene_or_one_transcript_of_the_allele() -> None:
+    row, _, _ = _position_rows(_rich_position())
+    assert not set(PER_GENE) & set(row)
+    assert not set(PER_GENE) & set(annotation_tables.VARIANTS.names)
+    assert set(PER_GENE) <= {field.name for field in annotation_tables.GENE}
+    assert {'worst_consequence', 'worst_impact', 'hgnc_ids', 'genes'} <= set(annotation_tables.VARIANTS.names)
 
 
 def _gene(
-    symbol: str | None, gene_id: str | None, hgnc_id: int | None, biotype: str, *summary: str | None
+    symbol: str | None,
+    gene_id: str | None,
+    hgnc_id: int | None,
+    worst: tuple[str, str, str, str],
+    mane: tuple[str, str, str, str | None] | None = None,
 ) -> dict[str, Any]:
-    """An entry of `genes`; the summary is the worst consequence, its impact and the MANE Select consequence."""
-    worst_consequence, worst_impact, mane_select_consequence = summary
+    """An entry of `genes`.
+
+    `worst` is the consequence, the impact, the id and the biotype of the transcript chosen for the gene, and `mane`
+    the id, the consequence and the two HGVS names of its MANE Select transcript.
+    """
+    worst_consequence, worst_impact, worst_transcript_id, biotype = worst
+    mane_id, mane_consequence, mane_hgvsc, mane_hgvsp = mane or (None, None, None, None)
     return {
         'gene_symbol': symbol,
         'gene_id': gene_id,
         'hgnc_id': hgnc_id,
-        'biotype': biotype,
         'worst_consequence': worst_consequence,
         'worst_impact': worst_impact,
-        'mane_select_consequence': mane_select_consequence,
+        'worst_transcript_id': worst_transcript_id,
+        'biotype': biotype,
+        'mane_select_transcript_id': mane_id,
+        'mane_select_consequence': mane_consequence,
+        'mane_select_hgvsc': mane_hgvsc,
+        'mane_select_hgvsp': mane_hgvsp,
     }
+
+
+def test_each_gene_of_an_allele_has_its_own_mane_select_transcript() -> None:
+    transcripts = [
+        _transcript('NM_01.1', 'RefSeq', 'GENEA', '1001', 'intron_variant', impact='modifier', isManeSelect=True),
+        _transcript(
+            'NM_02.1', 'RefSeq', 'GENEB', '1002', 'missense_variant', isManeSelect=True, hgvsp='NP_02.1:p.(K1E)'
+        ),
+        _transcript('ENST02.1', 'Ensembl', 'GENEB', 'ENSG02', 'stop_gained', impact='high'),
+    ]
+    row, _, _ = _position_rows(_position('chr1', 5, 'C', 'T', transcripts=transcripts))
+    # GENEB's most severe consequence is on another transcript than its MANE Select one, and each gene's entry names
+    # its own MANE Select transcript with that transcript's consequence and HGVS names.
+    assert row['genes'] == [
+        _gene(
+            'GENEB',
+            'ENSG02',
+            None,
+            ('stop_gained', 'high', 'ENST02.1', 'mRNA'),
+            ('NM_02.1', 'missense_variant', 'NM_02.1:c.1A>G', 'NP_02.1:p.(K1E)'),
+        ),
+        _gene(
+            'GENEA',
+            None,
+            90001,
+            ('intron_variant', 'modifier', 'NM_01.1', 'mRNA'),
+            ('NM_01.1', 'intron_variant', 'NM_01.1:c.1A>G', None),
+        ),
+    ]
+
+
+def test_a_gene_without_a_mane_select_transcript_has_none_of_its_fields() -> None:
+    transcripts = [
+        _transcript('ENST01.1', 'Ensembl', 'GENEA', 'ENSG01', 'missense_variant', isCanonical=True),
+        _transcript('NM_02.1', 'RefSeq', 'GENEB', '1002', 'intron_variant', impact='modifier', isManeSelect=True),
+    ]
+    row, _, _ = _position_rows(_position('chr1', 5, 'C', 'T', transcripts=transcripts))
+    first, second = row['genes']
+    assert (first['gene_symbol'], first['worst_transcript_id']) == ('GENEA', 'ENST01.1')
+    assert {name: first[name] for name in PER_GENE if name.startswith('mane_select_')} == dict.fromkeys(
+        (name for name in PER_GENE if name.startswith('mane_select_')), None
+    )
+    # The MANE Select transcript of the allele's other gene stays with that gene.
+    assert (second['gene_symbol'], second['mane_select_transcript_id']) == ('GENEB', 'NM_02.1')
+    table = pa.Table.from_pylist([row], schema=annotation_tables.VARIANTS)
+    assert table.column('genes').to_pylist() == [row['genes']]
 
 
 def test_an_allele_in_two_genes_has_an_entry_for_each_with_that_genes_own_summary() -> None:
@@ -400,10 +467,16 @@ def test_an_allele_in_two_genes_has_an_entry_for_each_with_that_genes_own_summar
         _transcript('ENST03.1', 'Ensembl', 'GENEB', 'ENSG02', 'missense_variant', bioType='protein_coding'),
     ]
     row, _, _ = _position_rows(_position('chr1', 5, 'C', 'T', transcripts=transcripts))
-    assert (row['gene_symbol'], row['worst_consequence'], row['hgnc_ids']) == ('GENEB', 'missense_variant', [90001])
+    assert (row['worst_consequence'], row['worst_impact'], row['hgnc_ids']) == ('missense_variant', 'moderate', [90001])
     assert row['genes'] == [
-        _gene('GENEB', 'ENSG02', None, 'protein_coding', 'missense_variant', 'moderate', None),
-        _gene('GENEA', 'ENSG01', 90001, 'retained_intron', 'splice_region_variant', 'low', 'upstream_gene_variant'),
+        _gene('GENEB', 'ENSG02', None, ('missense_variant', 'moderate', 'ENST03.1', 'protein_coding')),
+        _gene(
+            'GENEA',
+            'ENSG01',
+            90001,
+            ('splice_region_variant', 'low', 'ENST02.1', 'retained_intron'),
+            ('NM_00.1', 'upstream_gene_variant', 'NM_00.1:c.1A>G', None),
+        ),
     ]
     table = pa.Table.from_pylist([row], schema=annotation_tables.VARIANTS)
     assert table.schema.field('genes').type == pa.list_(annotation_tables.GENE)
@@ -414,7 +487,7 @@ def test_a_gene_without_an_hgnc_id_has_an_entry_that_lacks_the_id() -> None:
     transcripts = [_transcript('ENST03.1', 'Ensembl', 'GENEB', 'ENSG02', 'intron_variant', impact='modifier')]
     row, _, _ = _position_rows(_position('chr1', 5, 'C', 'T', transcripts=transcripts))
     assert row['hgnc_ids'] is None
-    assert row['genes'] == [_gene('GENEB', 'ENSG02', None, 'mRNA', 'intron_variant', 'modifier', None)]
+    assert row['genes'] == [_gene('GENEB', 'ENSG02', None, ('intron_variant', 'modifier', 'ENST03.1', 'mRNA'))]
 
 
 GENE_MODELS = {
@@ -431,9 +504,15 @@ def test_the_transcripts_of_both_gene_models_of_one_gene_give_one_entry(case: st
         _transcript('NM_01.1', 'RefSeq', symbol, '1001', 'missense_variant', isManeSelect=True),
     ]
     row, _, _ = _position_rows(_position('chr1', 5, 'C', 'T', transcripts=transcripts))
-    # The entry is the RefSeq transcript's, and its gene id the Ensembl gene of the symbol, as the allele's own is.
+    # The entry is the RefSeq transcript's, and its gene id the Ensembl gene of the symbol.
     assert row['genes'] == [
-        _gene(symbol, 'ENSG01', _HGNC[symbol], 'mRNA', 'missense_variant', 'moderate', 'missense_variant')
+        _gene(
+            symbol,
+            'ENSG01',
+            _HGNC[symbol],
+            ('missense_variant', 'moderate', 'NM_01.1', 'mRNA'),
+            ('NM_01.1', 'missense_variant', 'NM_01.1:c.1A>G', None),
+        )
     ]
 
 
@@ -448,9 +527,9 @@ def test_an_hgnc_id_names_one_gene_whatever_its_symbols_and_a_transcript_without
     ]
     row, _, _ = annotation_tables.position_rows(_position('chr1', 5, 'C', 'T', transcripts=transcripts), hgnc)
     assert row['genes'] == [
-        _gene('GENEA', 'ENSG01', 90001, 'mRNA', 'missense_variant', 'moderate', None),
-        _gene(None, 'ENSG08', None, 'mRNA', 'intron_variant', 'modifier', None),
-        _gene(None, 'ENSG09', None, 'mRNA', 'intron_variant', 'modifier', None),
+        _gene('GENEA', 'ENSG01', 90001, ('missense_variant', 'moderate', 'ENST01.1', 'mRNA')),
+        _gene(None, 'ENSG08', None, ('intron_variant', 'modifier', 'ENST08.1', 'mRNA')),
+        _gene(None, 'ENSG09', None, ('intron_variant', 'modifier', 'ENST09.1', 'mRNA')),
     ]
 
 
@@ -489,21 +568,25 @@ ALLELES_IN_GENES = {
 
 
 @pytest.mark.parametrize('case', ALLELES_IN_GENES)
-def test_the_first_gene_of_an_allele_is_the_one_its_own_summary_is_of(case: str) -> None:
+def test_the_first_gene_of_an_allele_is_the_one_of_its_worst_consequence(case: str) -> None:
     transcripts = ALLELES_IN_GENES[case]
     row, rows, _ = _position_rows(_position('chr1', 5, 'C', 'T', transcripts=transcripts))
     genes = row['genes']
-    first = genes[0]
-    for column, field in (
-        ('gene_symbol', 'gene_symbol'),
-        ('gene_id', 'gene_id'),
-        ('worst_consequence', 'worst_consequence'),
-        ('worst_impact', 'worst_impact'),
-    ):
-        assert first[field] == row[column], column
-    # The allele's MANE Select columns are those of its first gene where a MANE Select transcript has its symbol.
-    if any(r['is_mane_select'] and r['gene_symbol'] == row['gene_symbol'] for r in rows):
-        assert first['mane_select_consequence'] == row['mane_select_consequence']
+    assert (genes[0]['worst_consequence'], genes[0]['worst_impact']) == (row['worst_consequence'], row['worst_impact'])
+    for gene in genes:
+        own = [r for r in rows if (r['gene_symbol'], r['hgnc_id']) == (gene['gene_symbol'], gene['hgnc_id'])]
+        # The entry's transcript is one of the gene's own rows of transcripts, and the entry says what that row says.
+        chosen = [r for r in own if r['transcript_id'] == gene['worst_transcript_id']]
+        assert [(r['worst_consequence'], r['impact'], r['biotype']) for r in chosen] == [
+            (gene['worst_consequence'], gene['worst_impact'], gene['biotype'])
+        ]
+        # So is its MANE Select transcript, and a gene without such a row has none of its fields.
+        mane = [r for r in own if r['is_mane_select'] and r['transcript_id'] == gene['mane_select_transcript_id']]
+        named = (gene['mane_select_consequence'], gene['mane_select_hgvsc'], gene['mane_select_hgvsp'])
+        assert [(r['worst_consequence'], r['hgvsc'], r['hgvsp']) for r in mane] == (
+            [named] if any(r['is_mane_select'] for r in own) else []
+        )
+        assert mane or (gene['mane_select_transcript_id'], *named) == (None, None, None, None)
     # The genes follow from most to least severe, each gene once, and they are those of the allele's transcripts.
     ranks = [annotation_tables.CONSEQUENCES.index(g['worst_consequence']) for g in genes]
     assert ranks == sorted(ranks)

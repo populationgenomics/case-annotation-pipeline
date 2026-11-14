@@ -143,17 +143,22 @@ CLINVAR_RECORD = pa.struct(
     ]
 )
 
-# One gene of the allele, as the transcript chosen among the gene's own says it (_gene_entry), and the consequence on
-# the gene's MANE Select transcript.
+# One gene of the allele (_gene_entry): the gene, then what the transcript chosen among the gene's own says of it,
+# then the gene's MANE Select transcript. Whatever is of one gene or one transcript of an allele stands here and in
+# `transcripts`: a column of `variants` beside `genes` describes the allele as a whole.
 GENE = pa.struct(
     [
         pa.field('gene_symbol', _STRING),
         pa.field('gene_id', _STRING),
         pa.field('hgnc_id', _HGNC_ID),
-        pa.field('biotype', _STRING),
         pa.field('worst_consequence', _STRING, nullable=False),
         pa.field('worst_impact', _STRING),
+        pa.field('worst_transcript_id', _STRING, nullable=False),
+        pa.field('biotype', _STRING),
+        pa.field('mane_select_transcript_id', _STRING),
         pa.field('mane_select_consequence', _STRING),
+        pa.field('mane_select_hgvsc', _STRING),
+        pa.field('mane_select_hgvsp', _STRING),
     ]
 )
 
@@ -169,15 +174,8 @@ VARIANTS = pa.schema(
         pa.field('rsids', pa.list_(_STRING)),
         pa.field('worst_consequence', _STRING),
         pa.field('worst_impact', _STRING),
-        pa.field('worst_transcript_id', _STRING),
-        pa.field('gene_symbol', _STRING),
-        pa.field('gene_id', _STRING),
         pa.field('hgnc_ids', pa.list_(_HGNC_ID)),
         pa.field('genes', pa.list_(GENE)),
-        pa.field('mane_select_transcript_id', _STRING),
-        pa.field('mane_select_consequence', _STRING),
-        pa.field('mane_select_hgvsc', _STRING),
-        pa.field('mane_select_hgvsp', _STRING),
         *gnomad_fields('gnomad_genomes'),
         *gnomad_fields('gnomad_exomes'),
         pa.field('alphamissense_max', _FLOAT),
@@ -542,19 +540,25 @@ def _gene_key(row: Mapping[str, Any]) -> tuple[str, int | str] | None:
 def _gene_entry(rows: Sequence[Mapping[str, Any]], gene_id: str | None) -> dict[str, Any]:
     """One entry of `genes` (GENE), from the transcript rows of one gene of an allele in their order (_preference).
 
-    The first row gives the entry what the allele's first row gives the allele's own summary, and `gene_id` is that
-    row's Ensembl gene. Of several MANE Select transcripts the first by id gives its consequence, as for the allele.
+    The first row is the transcript chosen for the gene: it gives the entry its symbol, HGNC id, consequence, impact
+    and biotype, and `gene_id` is that row's Ensembl gene. The gene's MANE Select transcript gives the four fields
+    named after it, and of several such transcripts the first by id does.
     """
     chosen = rows[0]
     mane = min((r for r in rows if r['is_mane_select']), key=lambda r: r['transcript_id'], default=None)
+    of_mane: Mapping[str, Any] = {} if mane is None else mane
     return {
         'gene_symbol': chosen['gene_symbol'],
         'gene_id': gene_id,
         'hgnc_id': chosen['hgnc_id'],
-        'biotype': chosen['biotype'],
         'worst_consequence': chosen['worst_consequence'],
         'worst_impact': chosen['impact'],
-        'mane_select_consequence': None if mane is None else mane['worst_consequence'],
+        'worst_transcript_id': chosen['transcript_id'],
+        'biotype': chosen['biotype'],
+        'mane_select_transcript_id': of_mane.get('transcript_id'),
+        'mane_select_consequence': of_mane.get('worst_consequence'),
+        'mane_select_hgvsc': of_mane.get('hgvsc'),
+        'mane_select_hgvsp': of_mane.get('hgvsp'),
     }
 
 
@@ -653,36 +657,21 @@ def position_rows(
 
     if transcript_rows:
         # Each row with the Annotator's transcript it was made from, in the rows' order of preference. The first row
-        # summarises the allele, and the first row of each gene that gene, so the genes stand in the order of their
-        # first rows and the allele's own summary is that of its first gene.
+        # gives the allele its consequence and impact, and the first row of each gene that gene's entry, so the genes
+        # stand in the order of their first rows and the allele's consequence is that of its first gene.
         ranked = sorted(zip(transcript_rows, transcripts, strict=True), key=lambda pair: _preference(pair[0]))
-        chosen, annotated = ranked[0]
+        chosen = ranked[0][0]
         by_gene: dict[tuple[str, int | str] | None, list[tuple[dict[str, Any], Mapping[str, Any]]]] = {}
         for pair in ranked:
             by_gene.setdefault(_gene_key(pair[0]), []).append(pair)
         row |= {
             'worst_consequence': chosen['worst_consequence'],
             'worst_impact': chosen['impact'],
-            'worst_transcript_id': chosen['transcript_id'],
-            'gene_symbol': chosen['gene_symbol'],
-            'gene_id': ensembl_gene(annotated),
             # Every gene of the allele's transcripts that has an id, and no list for an allele without one.
             'hgnc_ids': sorted({r['hgnc_id'] for r in transcript_rows if r['hgnc_id'] is not None}) or None,
             'genes': [
                 _gene_entry([r for r, _ in members], ensembl_gene(members[0][1])) for members in by_gene.values()
             ],
-        }
-    # An allele in two genes can have two MANE Select transcripts: the one of the worst consequence's gene first.
-    mane = sorted(
-        (r for r in transcript_rows if r['is_mane_select']),
-        key=lambda r: (r['gene_symbol'] != row.get('gene_symbol'), r['transcript_id']),
-    )
-    if mane:
-        row |= {
-            'mane_select_transcript_id': mane[0]['transcript_id'],
-            'mane_select_consequence': mane[0]['worst_consequence'],
-            'mane_select_hgvsc': mane[0]['hgvsc'],
-            'mane_select_hgvsp': mane[0]['hgvsp'],
         }
     top_am = _max_by(v.get('alphaMissense', ()), 'pathogenicity')
     top_p3d = _max_by(v.get('primateAI-3D', ()), 'score')
