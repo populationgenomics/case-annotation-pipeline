@@ -1657,8 +1657,8 @@ for one. Two ways of holding both in one table were measured and rejected.
 
 `hgnc_ids` gives `variants` the part of `transcripts` that most questions need, the genes of an allele, in a column of
 under 1 MB. `genes` holds a summary for each of those genes. It is a list of structs as well, with an entry for each
-gene instead of each transcript, and a condition on a field of its entries is read in the same way, so a query filters
-on the allele's own columns first.
+gene instead of each transcript, and DuckDB 2.0 reads it in the same way: every field of the entries to read one of
+them.
 
 `sv_transcripts` is a table of its own beside `sv` for the same reason: a record has ten transcripts on average, and
 some have hundreds. `sv` has `hgnc_ids` as well.
@@ -1821,10 +1821,12 @@ transcript. `biotype` is that of one transcript, so a protein-coding gene whose 
 non-coding transcript shows that transcript's biotype. An allele without a transcript has no `genes`, and every other
 allele has at least one entry, also an allele that has no `hgnc_ids` because none of its genes has an id.
 
-A condition on a field of an entry cannot skip a row group, like one on `hgnc_ids`, and it reads a larger column whole.
-A query therefore narrows the alleles by their own columns first and then turns the entries into rows with
-`unnest(genes)`, as the second query of
-[Recessive: compound heterozygous candidates](#recessive-compound-heterozygous-candidates) does.
+A condition on a field of an entry cannot skip a row group, like one on `hgnc_ids`. DuckDB 2.0 reads `genes` for every
+row group that a query does not skip, with every field of its entries, also where the query's other conditions leave few
+alleles. A query that reads `genes` over the whole genome therefore reads the column whole. One that narrows the alleles
+by their own columns first, as the second query of
+[Recessive: compound heterozygous candidates](#recessive-compound-heterozygous-candidates) does, has fewer entries to
+turn into rows with `unnest(genes)`.
 
 An HGNC id comes from the genes section of the Annotator's output, which lists the gene of every transcript by its
 symbol, with the gene's HGNC id where it has one. A transcript's gene is matched to that list by its symbol, whichever
