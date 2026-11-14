@@ -275,7 +275,7 @@ def _call(
     sample: pysam.VariantRecordSample, caller: Caller, alts: Sequence[str], formats: frozenset[str], where: str
 ) -> dict[str, Any]:
     """One member's call of a record, as a value of its column (CALL)."""
-    alleles, gt = vcf_values.genotype(sample)
+    alleles, gt = vcf_values.genotype(sample, where)
     cn = vcf_values.integer(sample, 'CN', formats, where)
     carries, zygosity = genotype_call(alleles) if caller == 'sv' else copy_number_call(alleles, cn, alts, where)
     counts = 'a count for the reference and one for the allele'

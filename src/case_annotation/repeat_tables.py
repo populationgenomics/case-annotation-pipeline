@@ -92,7 +92,7 @@ def _intervals(parts: Sequence[str] | None, where: str) -> tuple[list[int] | Non
 def _call(record: pysam.VariantRecord, sample: str, formats: frozenset[str], where: str) -> dict[str, Any]:
     """The member's genotype of a repeat, as a value of its column (CALL)."""
     held = record.samples[sample]
-    alleles, gt = vcf_values.genotype(held)
+    alleles, gt = vcf_values.genotype(held, where)
     ploidy = len(alleles)
     lower, upper = _intervals(_per_allele(held, 'REPCI', formats, ploidy, where), where)
     return {

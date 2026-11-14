@@ -90,10 +90,16 @@ def likelihoods(
     return list(kept)
 
 
-def genotype(sample: pysam.VariantRecordSample) -> tuple[tuple[int | None, ...], str]:
-    """The call's alleles, None for a missing one, and the genotype as a VCF writes it."""
+def genotype(sample: pysam.VariantRecordSample, where: str) -> tuple[tuple[int | None, ...], str]:
+    """The call's alleles, None for a missing one, and the genotype as a VCF writes it.
+
+    Fails on a genotype without alleles, which is what pysam returns where GT is not the first of a record's FORMAT
+    keys: it would read as a call in which every allele is called and none is the allele.
+    """
     # htslib reads an allele index the record lacks as missing.
     alleles: tuple[int | None, ...] = sample['GT']
+    if not alleles:
+        raise ValueError(f'{where}: {sample.name} has a genotype without alleles; is GT the first FORMAT key?')
     separator = '|' if sample.phased and len(alleles) > 1 else '/'
     return alleles, separator.join('.' if a is None else str(a) for a in alleles)
 

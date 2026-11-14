@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pathlib
+from collections.abc import Sequence
 
 import pysam
 import pytest
@@ -35,15 +36,16 @@ GENOTYPES: dict[str, tuple[tuple[int | None, ...], bool | None, vcf_values.Zygos
 }
 
 
-def _samples(tmp_path: pathlib.Path) -> list[pysam.VariantRecordSample]:
-    """A record of one alternate allele with a sample for each genotype, in the order of GENOTYPES."""
-    names = [f'G{number}' for number in range(len(GENOTYPES))]
+def _samples(tmp_path: pathlib.Path, keys: str, values: Sequence[str]) -> list[pysam.VariantRecordSample]:
+    """A record of one alternate allele with a sample for each of the values, under the FORMAT keys given."""
+    names = [f'G{number}' for number in range(len(values))]
     lines = [
         '##fileformat=VCFv4.2',
         '##contig=<ID=chr1,length=1000>',
         '##FORMAT=<ID=GT,Number=1,Type=String,Description="x">',
+        '##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="x">',
         '\t'.join(['#CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'FORMAT', *names]),
-        '\t'.join(['chr1', '5', '.', 'C', 'T', '50', 'PASS', '.', 'GT', *GENOTYPES]),
+        '\t'.join(['chr1', '5', '.', 'C', 'T', '50', 'PASS', '.', keys, *values]),
     ]
     path = tmp_path / 'genotypes.vcf'
     path.write_text('\n'.join(lines) + '\n')
@@ -53,8 +55,10 @@ def _samples(tmp_path: pathlib.Path) -> list[pysam.VariantRecordSample]:
 
 
 def test_a_genotype_says_whether_it_carries_the_allele_only_where_its_alleles_decide_it(tmp_path: pathlib.Path) -> None:
-    for sample, (written, (alleles, carries, zygosity)) in zip(_samples(tmp_path), GENOTYPES.items(), strict=True):
-        read, _ = vcf_values.genotype(sample)
+    samples = _samples(tmp_path, 'GT', list(GENOTYPES))
+    for sample, (written, (alleles, carries, zygosity)) in zip(samples, GENOTYPES.items(), strict=True):
+        read, gt = vcf_values.genotype(sample, 'here')
+        assert gt == written.replace('2', '.')
         assert read == alleles, written
         assert vcf_values.carries(read) is carries, written
         assert vcf_values.zygosity(read) == zygosity, written
@@ -68,3 +72,11 @@ def test_the_zygosity_never_says_more_than_whether_the_allele_is_carried(written
     # A missing allele alone never makes a genotype one that lacks the allele.
     if None in alleles:
         assert vcf_values.carries(alleles) is not False
+
+
+def test_a_genotype_that_pysam_reads_without_alleles_is_refused(tmp_path: pathlib.Path) -> None:
+    # GT stands after GQ, against the VCF specification, and pysam then returns no alleles for it.
+    (sample,) = _samples(tmp_path, 'GQ:GT', ['40:0/1'])
+    assert sample['GT'] == ()
+    with pytest.raises(ValueError, match='here: G0 has a genotype without alleles'):
+        vcf_values.genotype(sample, 'here')

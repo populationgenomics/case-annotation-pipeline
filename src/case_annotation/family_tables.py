@@ -357,7 +357,7 @@ class _Call:
 
 
 def _call(sample: pysam.VariantRecordSample, formats: frozenset[str], where: str) -> _Call:
-    alleles, gt = vcf_values.genotype(sample)
+    alleles, gt = vcf_values.genotype(sample, where)
     ad_ref, ad_alt = vcf_values.pair(sample, 'AD', formats, where, 'a depth of the reference and one of the allele')
     return _Call(
         gt=gt,
