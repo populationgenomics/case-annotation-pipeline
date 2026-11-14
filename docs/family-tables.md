@@ -1710,9 +1710,9 @@ only the columns a query names: the trio filter reads 5 of the 103 columns of `v
 skips no row group, since every row group holds heterozygous and homozygous calls. Skipping row groups is what makes a
 lookup by region or variant id take hundredths of a second.
 
-A search over the genome that lists a gene spends most of its time on `genes`. The search for rare damaging variants
-takes 0.32 s without its `gene_symbols` and 1.2 s with them, and the de novo search by GQ 1.4 s without the gene symbol
-and 1.8 s with it ([the `variants` table](#the-variants-table) says when a query reads the column).
+A search over the genome that lists a gene pays for the read of `genes`. The search for rare damaging variants takes
+0.32 s without its `gene_symbols` and 1.2 s with them, and the de novo search by GQ 1.4 s without the gene symbol and
+1.8 s with it ([the `variants` table](#the-variants-table) says when a query reads the column).
 
 ## Why the tables have this shape
 
