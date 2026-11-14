@@ -116,6 +116,12 @@ def test_a_manifest_key_with_a_default_is_not_required() -> None:
     assert set(schema['properties']) == set(fields)
 
 
+def test_a_members_phenotype_is_required_and_may_be_null() -> None:
+    member = contract.manifest_schema()['$defs']['FamilyMember']
+    assert 'affected' in member['required']
+    assert {option['type'] for option in member['properties']['affected']['anyOf']} == {'boolean', 'null'}
+
+
 def test_the_example_manifest_is_one_that_the_model_reads_and_writes() -> None:
     text = (CONTRACT / 'examples' / 'manifest.json').read_text('utf-8')
     manifest = family_tables.FamilyManifest.model_validate_json(text)

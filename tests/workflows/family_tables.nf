@@ -6,26 +6,26 @@
 // and empty in family B, whose affected son therefore has no role. Everything under family_tables/ is invented, the PED
 // files too: family-a.vcf holds a record of two alleles that both members carry, one of two alleles of which one nobody
 // carries, a spanning deletion beside an allele, a deletion written at the right end of a repeat, a record nobody
-// carries, a record that only a call of ./1 carries, a deletion of six bases, a record off the primary chromosomes and
-// a record of two alleles on X with genotype likelihoods, called in a haploid father and a diploid mother and daughter;
-// family-b.vcf holds an allele family A shares, the same deletion left-aligned, and one of its own. gnomad-joint.vcf
-// stands in for gnomAD's joint sites VCF, with invented counts and frequencies under gnomAD's field names, and
-// echtvar-config.json encodes it as the public archive of docs/annotation.md is encoded: it holds one of the two
-// alleles at a site, an allele counted 0 times, the deletion at its left-aligned position, the deletion of six bases
-// (echtvar keeps alleles of more than four bases in a table of their own), an allele whose frequency is a usual
-// threshold, a filtering allele frequency that is a multiple of 1/2000000 and that echtvar's 32-bit arithmetic stores
-// one step below, and another allele at a position of the union's. reference.fa holds an N at chr2:300 and the IUPAC
-// code R at chr2:320, which bcftools reads as N: ref-n.vcf, whose REF is N at both, is normalised, and a REF of N at a
-// base (ref-n-at-base.vcf) and a base as REF at the N and at the R (ref-base-at-n.vcf, ref-base-at-iupac.vcf) are
-// refused. Family A also brings the VCFs of its larger variants, which COMPRESSED gives the indexes a run's sheet names
-// them with, and family B brings none. family-a.sv.vcf holds a deletion written as a sequence at another place of a
-// repeat than family-a.vcf writes it, the deletion of six bases as family-a.vcf has it, a deletion that no small
-// variant is, a symbolic deletion, a breakend and its mate, a record off the primary chromosomes and a symbolic
-// deletion on X, where the father is called haploid. family-a.cnv.vcf holds a segment at the reference's copy number, a
-// loss, a segment that the father loses and the mother gains, and a gain on X. A1, A2 and A3.repeats.vcf hold each
-// member's genotypes of two invented repeats. The checks refuse repeat VCFs of two of the three members, a
-// structural-variant VCF of another family's samples, and a structural variant whose REF is not the reference's
-// (sv-ref-mismatch.vcf).
+// carries, an allele that the mother has no call of, a record that only a call of ./1 carries, a deletion of six bases,
+// a record off the primary chromosomes and a record of two alleles on X with genotype likelihoods, called in a haploid
+// father and a diploid mother and daughter; family-b.vcf holds an allele family A shares, the same deletion
+// left-aligned, and one of its own. gnomad-joint.vcf stands in for gnomAD's joint sites VCF, with invented counts and
+// frequencies under gnomAD's field names, and echtvar-config.json encodes it as the public archive of
+// docs/annotation.md is encoded: it holds one of the two alleles at a site, an allele counted 0 times, the deletion at
+// its left-aligned position, the deletion of six bases (echtvar keeps alleles of more than four bases in a table of
+// their own), an allele whose frequency is a usual threshold, a filtering allele frequency that is a multiple of
+// 1/2000000 and that echtvar's 32-bit arithmetic stores one step below, and another allele at a position of the
+// union's. reference.fa holds an N at chr2:300 and the IUPAC code R at chr2:320, which bcftools reads as N: ref-n.vcf,
+// whose REF is N at both, is normalised, and a REF of N at a base (ref-n-at-base.vcf) and a base as REF at the N and at
+// the R (ref-base-at-n.vcf, ref-base-at-iupac.vcf) are refused. Family A also brings the VCFs of its larger variants,
+// which COMPRESSED gives the indexes a run's sheet names them with, and family B brings none. family-a.sv.vcf holds a
+// deletion written as a sequence at another place of a repeat than family-a.vcf writes it, the deletion of six bases as
+// family-a.vcf has it, a deletion that no small variant is, a symbolic deletion, a breakend and its mate, a record off
+// the primary chromosomes and a symbolic deletion on X, where the father is called haploid. family-a.cnv.vcf holds a
+// segment at the reference's copy number, a loss, a segment that the father loses and the mother gains, and a gain on
+// X. A1, A2 and A3.repeats.vcf hold each member's genotypes of two invented repeats. The checks refuse repeat VCFs of
+// two of the three members, a structural-variant VCF of another family's samples, and a structural variant whose REF is
+// not the reference's (sv-ref-mismatch.vcf).
 // The structural variants and copy-number segments go the way family_tables.nf sends them: SV_SITES cuts family A's
 // sites, SV_UNION writes their union and its map, INVENTED_SV_ANNOTATION writes an invented annotation of the union in
 // the Annotator's layout, SV_ANNOTATION_TABLES converts it, and FAMILY_TABLES reads family A's records' annotation from
@@ -124,7 +124,7 @@ workflow {
         joint,
         sv_tables,
         sv_union.map,
-        '0.4.0',
+        '0.5.0',
     )
     CHECK_TABLES(written.filter { w -> w[0] == 'family-a' }.map { w -> w[0..3] }, archive)
     CHECK_NO_ROLES(written.filter { w -> w[0] == 'family-b' }.map { w -> w[3] })
@@ -422,7 +422,8 @@ process INVENTED_ARCHIVE {
 
 // Family A's tables: its ten alleles, each with its invented transcript, its gene's HGNC id, the entry of that gene
 // and, after the allele's columns of variants, a call column per member in the VCF's order, which says that the member
-// carries the allele where its genotype holds a copy of it; the manifest gives the daughter, whom the sheet names, the
+// carries the allele where its genotype holds a copy of it, that it does not where every allele is called and none is
+// the allele, and neither for the mother's missing call; the manifest gives the daughter, whom the sheet names, the
 // proband's role and her parents theirs.
 // Each split allele of the record on X has each member's likelihoods of its own genotypes, two for the haploid father
 // and three for the others, and an allele of a record without PL has none. An allele the archive holds has the counts
@@ -462,8 +463,23 @@ assert variants.column_names[-5:] == ['qual', 'filters', 'A1', 'A2', 'A3'], vari
 assert variants.num_rows == 10, variants.num_rows
 pl = {(r['variant_id'], s): (r[s]['gt'], r[s]['pl']) for r in variants.to_pylist() for s in ('A1', 'A2', 'A3')}
 carries = {key: r[key[1]]['carries'] for r in variants.to_pylist() for key in pl if key[0] == r['variant_id']}
-assert all(carries[key] == ('1' in gt) for key, (gt, _) in pl.items()), carries
-assert any(carries.values()) and not all(carries.values()), carries
+zygosity = {key: r[key[1]]['zygosity'] for r in variants.to_pylist() for key in pl if key[0] == r['variant_id']}
+
+
+def carried(gt):
+    alleles = gt.split('/')
+    return True if '1' in alleles else None if '.' in alleles else False
+
+
+assert all(carries[key] is carried(gt) for key, (gt, _) in pl.items()), carries
+assert set(carries.values()) == {True, False, None}, carries
+# The mother has no call of chr2-60-C-A, which is not a call of the reference.
+assert (pl[('chr2-60-C-A', 'A2')][0], carries[('chr2-60-C-A', 'A2')], zygosity[('chr2-60-C-A', 'A2')]) == (
+    './.', None, None), pl
+# She has the other allele of the site at chr1:100, which the split writes as the reference in this allele's record.
+assert (pl[('chr1-100-G-C', 'A2')][0], carries[('chr1-100-G-C', 'A2')], zygosity[('chr1-100-G-C', 'A2')]) == (
+    '0/0', False, 'hom_ref'), pl
+assert all((zygosity[key] is None) == (carries[key] is None) for key in carries), zygosity
 assert pl[('chrX-100-T-A', 'A1')] == ('0', [90, 80]), pl
 assert pl[('chrX-100-T-A', 'A2')] == ('0/1', [70, 0, 60]), pl
 assert pl[('chrX-100-T-A', 'A3')] == ('1/0', [73, 62, 63]), pl
@@ -566,7 +582,7 @@ manifest = json.load(open('${manifest}'))
 rows = {t['table']: t['rows'] for t in manifest['tables']}
 assert rows == {'variants': 10, 'transcripts': 10, 'sv': 10, 'sv_transcripts': 11, 'repeats': 2}, rows
 assert manifest['sv_callers'] == ['sv', 'cnv'], manifest
-assert manifest['schema_version'] == '0.4.0', manifest
+assert manifest['schema_version'] == '0.5.0', manifest
 assert manifest['sv_annotation']['sources'] == manifest['annotation']['sources'] == ['Ensembl', 'gnomad'], manifest
 table = pq.read_table('sv.parquet')
 assert table.column_names[:4] == ['chrom', 'pos', 'end_pos', 'sv_id'], table.column_names

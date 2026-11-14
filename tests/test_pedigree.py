@@ -22,7 +22,15 @@ def test_a_trio_reads_with_its_parents_sexes_and_phenotypes(tmp_path: pathlib.Pa
     assert ped.family == 'fam-1'
     child = ped.member('S3')
     assert (child.father, child.mother, child.sex, child.affected) == ('S1', 'S2', 'unknown', True)
-    assert ped.member('S2').affected is False  # -9, unknown, counts as unaffected
+
+
+PHENOTYPES = {'2': True, '1': False, '0': None, '-9': None}
+
+
+@pytest.mark.parametrize('code', PHENOTYPES)
+def test_an_unknown_phenotype_is_neither_affected_nor_unaffected(tmp_path: pathlib.Path, code: str) -> None:
+    ped = pedigree.read(_ped(tmp_path, f'fam-1\tS1\t0\t0\t1\t{code}\n'))
+    assert ped.member('S1').affected is PHENOTYPES[code]
 
 
 REJECTED = {

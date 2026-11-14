@@ -177,8 +177,15 @@
           "$ref": "#/$defs/Sex"
         },
         "affected": {
-          "title": "Affected",
-          "type": "boolean"
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Affected"
         },
         "sequenced": {
           "title": "Sequenced",

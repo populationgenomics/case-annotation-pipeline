@@ -270,8 +270,8 @@ CNV_RECORDS: tuple[Record, ...] = (
 )
 # Per segment with a row, each member's (carries, zygosity).
 _LOSS_HET, _LOSS_HOM, _GAIN = (True, 'het'), (True, 'hom_alt'), (True, None)
-_AT_EXPECTED, _WITHOUT = (False, 'hom_ref'), (False, None)
-CNV_CALLS: dict[str, tuple[tuple[bool, str | None], ...]] = {
+_AT_EXPECTED, _WITHOUT = (False, 'hom_ref'), (None, None)
+CNV_CALLS: dict[str, tuple[tuple[bool | None, str | None], ...]] = {
     'inv:LOSS:1': (_LOSS_HET, _AT_EXPECTED, _LOSS_HOM),
     'inv:GAIN:1': (_GAIN, _AT_EXPECTED, _GAIN),
     'inv:CNV:1': (_LOSS_HET, _GAIN, _AT_EXPECTED),

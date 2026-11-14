@@ -69,12 +69,12 @@ _CHROM_RANK = {c: i for i, c in enumerate(PRIMARY)}
 _STRING = pa.string()
 _INT = pa.int32()
 
-# One member's call of one allele: a member's column of the variants table holds one per row. The member carries the
-# allele if its genotype holds a copy of it, also beside a missing one.
+# One member's call of one allele: a member's column of the variants table holds one per row. Whether the member
+# carries the allele is read from its genotype alone, and is null where the genotype does not say (vcf_values.carries).
 CALL = pa.struct(
     [
         pa.field('gt', _STRING, nullable=False),
-        pa.field('carries', pa.bool_(), nullable=False),
+        pa.field('carries', pa.bool_()),
         pa.field('zygosity', _STRING),
         pa.field('gq', _INT),
         pa.field('dp', _INT),
@@ -285,7 +285,7 @@ class FamilyMember(pydantic.BaseModel, frozen=True, extra='forbid'):
     father: str | None
     mother: str | None
     sex: pedigree.Sex
-    affected: bool
+    affected: bool | None  # None where the PED file gives the phenotype as unknown
     sequenced: bool  # a sample of the family's VCF, with a column in each table that holds the members' calls
     role: Role | None
 
@@ -316,7 +316,7 @@ class _Call:
     """One member's call of one record's allele, as the member's column of the variants table holds it."""
 
     gt: str
-    carries: bool  # a copy of the allele, also beside a missing one
+    carries: bool | None  # by the genotype alone; None where it does not say (vcf_values.carries)
     zygosity: vcf_values.Zygosity | None
     dp: int | None
     gq: int | None
@@ -361,7 +361,7 @@ def _call(sample: pysam.VariantRecordSample, formats: frozenset[str], where: str
     ad_ref, ad_alt = vcf_values.pair(sample, 'AD', formats, where, 'a depth of the reference and one of the allele')
     return _Call(
         gt=gt,
-        carries=1 in alleles,
+        carries=vcf_values.carries(alleles),
         zygosity=vcf_values.zygosity(alleles),
         dp=vcf_values.integer(sample, 'DP', formats, where),
         gq=vcf_values.integer(sample, 'GQ', formats, where),

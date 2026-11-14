@@ -162,10 +162,10 @@ jobs:
           # its annotation and its gnomAD joint values go under annotation-unions/, each family's tables under
           # annotations/<family>/.
           results=results
-          union=annotation-unions/stub-group/tables-0.4.0-illumina-202610
+          union=annotation-unions/stub-group/tables-0.5.0-illumina-202610
           for f in "${union}"/{stub-group.vcf.gz,stub-group.vcf.gz.tbi,tables,gnomad_joint,annotator/run.json,annotator/out/stub-group.json.gz} \
-            annotations/fam-{a,b}/tables-0.4.0-illumina-202610/{variants,transcripts}.parquet \
-            annotations/fam-{a,b}/tables-0.4.0-illumina-202610/manifest.json; do
+            annotations/fam-{a,b}/tables-0.5.0-illumina-202610/{variants,transcripts}.parquet \
+            annotations/fam-{a,b}/tables-0.5.0-illumina-202610/manifest.json; do
             test -L "${results}/${f}" || { echo "not published: ${f}" >&2; exit 1; }
           done
           if find "${results}/annotations" -name 'stub-group*' | grep -q .; then
@@ -197,7 +197,7 @@ jobs:
             cat reuse.log
             exit 1
           fi
-          test -L stub/reuse/annotations/fam-a/tables-0.4.0-illumina-202610/manifest.json
+          test -L stub/reuse/annotations/fam-a/tables-0.5.0-illumina-202610/manifest.json
           test -L "stub/reuse/${union}/gnomad_joint"
           test ! -e "stub/reuse/${union}/annotator"
           # A family whose row names the VCFs of its larger variants gets their tables beside the others, in the same
@@ -218,12 +218,12 @@ jobs:
             exit 1
           fi
           for table in variants transcripts sv sv_transcripts repeats; do
-            test -L "stub/larger/annotations/fam-a/tables-0.4.0-illumina-202610/${table}.parquet" ||
+            test -L "stub/larger/annotations/fam-a/tables-0.5.0-illumina-202610/${table}.parquet" ||
               { echo "not published: ${table}" >&2; exit 1; }
           done
-          test -L stub/larger/annotations/fam-b/tables-0.4.0-illumina-202610/variants.parquet
+          test -L stub/larger/annotations/fam-b/tables-0.5.0-illumina-202610/variants.parquet
           for table in sv sv_transcripts repeats; do
-            test ! -e "stub/larger/annotations/fam-b/tables-0.4.0-illumina-202610/${table}.parquet"
+            test ! -e "stub/larger/annotations/fam-b/tables-0.5.0-illumina-202610/${table}.parquet"
           done
           for f in stub-group.sv.vcf.gz stub-group.sv.vcf.gz.tbi stub-group.sv.map.parquet sv_annotation; do
             test -L "stub/larger/${union}/${f}" || { echo "not published: ${f}" >&2; exit 1; }
@@ -243,7 +243,7 @@ jobs:
             stub-group.sv.annotate.log; do
             test -L "stub/larger-annotated/${union}/annotator/${f}" || { echo "not published: ${f}" >&2; exit 1; }
           done
-          test -L stub/larger-annotated/annotations/fam-a/tables-0.4.0-illumina-202610/sv_transcripts.parquet
+          test -L stub/larger-annotated/annotations/fam-a/tables-0.5.0-illumina-202610/sv_transcripts.parquet
           # Refused, each with its own message: sources and a reused annotation together; neither; annotating without
           # the Annotator's params; a repeated family; a family id that is not a folder name; a reference without its
           # index; a catalog id that is not a folder name; a quote in a source; a sheet without families; a row

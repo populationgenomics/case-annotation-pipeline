@@ -98,19 +98,27 @@ def genotype(sample: pysam.VariantRecordSample) -> tuple[tuple[int | None, ...],
     return alleles, separator.join('.' if a is None else str(a) for a in alleles)
 
 
-def zygosity(alleles: Sequence[int | None]) -> Zygosity | None:
-    """The zygosity of a genotype of a record with one alternate allele.
+def carries(alleles: Sequence[int | None]) -> bool | None:
+    """Whether a genotype of a record with one alternate allele holds a copy of that allele; None where it does not say.
 
-    As cyvcf2 classifies genotypes: only a genotype with every allele missing has no zygosity; one with an allele
-    missing counts by the alleles called, so 0/. is homozygous reference and ./1 heterozygous.
+    True where an allele of the genotype is the alternate allele, also beside a missing one (./1). False where every
+    allele is called and none is the alternate allele. None where an allele is missing and no called one is the
+    alternate allele (./., a haploid ., 0/.): the missing allele may be the alternate one, so the genotype says neither.
     """
-    called = [a for a in alleles if a is not None]
-    if not called:
+    if 1 in alleles:
+        return True
+    return None if None in alleles else False
+
+
+def zygosity(alleles: Sequence[int | None]) -> Zygosity | None:
+    """The zygosity of a genotype of a record with one alternate allele; None where carries is None.
+
+    `hom_ref` for a genotype that does not hold the alternate allele, `hom_alt` where every allele is the alternate
+    one, also in a haploid call, and `het` for any other genotype that holds it, also beside a missing allele (./1).
+    """
+    held = carries(alleles)
+    if held is None:
         return None
-    if all(a == 0 for a in called):
+    if not held:
         return 'hom_ref'
-    if len(called) < len(alleles):
-        return 'het'
-    if all(a == 1 for a in called):
-        return 'hom_alt'
-    return 'het'
+    return 'hom_alt' if all(a == 1 for a in alleles) else 'het'

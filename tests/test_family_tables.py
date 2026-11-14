@@ -317,11 +317,12 @@ def test_the_variants_table_is_written_with_its_declared_schema(tmp_path: pathli
     written = pq.read_schema(tmp_path / 'out' / 'variants.parquet')
     assert written.equals(family_tables.variants_schema(('S1', 'S2', 'S3')), check_metadata=False)
     # The file itself says which columns always have a value: the allele, and each member's column and genotype.
+    # Whether the member carries the allele is none of them, because a genotype can leave it open.
     parquet = pq.read_metadata(tmp_path / 'out' / 'variants.parquet').schema
     required = {
         parquet.column(i).path for i in range(len(parquet.names)) if parquet.column(i).max_definition_level == 0
     }
-    members = {f'{sample}.{field}' for sample in ('S1', 'S2', 'S3') for field in ('gt', 'carries')}
+    members = {f'{sample}.gt' for sample in ('S1', 'S2', 'S3')}
     assert required == {'chrom', 'pos', 'ref', 'alt', 'variant_id'} | members
 
 
@@ -764,19 +765,75 @@ def test_a_call_outside_the_contract_is_refused(tmp_path: pathlib.Path, case: st
         family_tables.assemble(**{**inputs, 'vcf_path': vcf})
 
 
-def test_a_call_with_an_allele_missing_counts_by_the_alleles_called(tmp_path: pathlib.Path) -> None:
-    # As cyvcf2 classifies genotypes: ./1 is heterozygous and 0/. homozygous reference; only ./. has no zygosity.
+def test_a_call_with_an_allele_missing_says_only_what_its_called_alleles_decide(tmp_path: pathlib.Path) -> None:
+    # ./1 holds a copy of the allele whatever the missing allele is. 0/. and ./. say neither that the member carries the
+    # allele nor that it does not, since a missing allele may be the allele, and so they have no zygosity.
     inputs = _inputs(tmp_path)
     vcf = _text_vcf(tmp_path / 'call.vcf', _GT_AD, ('./1:10,10', '0/.:20,0', './.:0,0'), 'GT:AD')
     family_tables.assemble(**{**inputs, 'vcf_path': vcf})
     (row,) = _rows(tmp_path / 'out' / 'variants.parquet')
-    assert [(row[s]['gt'], row[s]['zygosity']) for s in ('S1', 'S2', 'S3')] == [
-        ('./1', 'het'),
-        ('0/.', 'hom_ref'),
-        ('./.', None),
+    assert [(row[s]['gt'], row[s]['carries'], row[s]['zygosity']) for s in ('S1', 'S2', 'S3')] == [
+        ('./1', True, 'het'),
+        ('0/.', None, None),
+        ('./.', None, None),
     ]
-    # A member carries the allele if its genotype holds a copy of it, also beside a missing one.
-    assert [row[s]['carries'] for s in ('S1', 'S2', 'S3')] == [True, False, False]
+
+
+_UNCALLED: Call = ((None, None), (0, 0), 0, 0, (0, 0, 0))
+
+
+def test_a_filter_for_a_parent_who_does_not_carry_an_allele_leaves_out_a_parent_without_a_call(
+    tmp_path: pathlib.Path,
+) -> None:
+    # The father has no call of the insertion that the daughter carries. At chr1:5 both parents are called for the
+    # reference.
+    records = [
+        (chrom, pos, ref, alt, (_UNCALLED, *calls[1:]) if (chrom, pos) == ('chr10', 7) else calls)
+        for chrom, pos, ref, alt, calls in _RECORDS
+    ]
+    family_tables.assemble(**_inputs(tmp_path, records=records))
+    path = tmp_path / 'out' / 'variants.parquet'
+    (insertion,) = _rows(path, "SELECT S1 AS father FROM t WHERE variant_id = 'chr10-7-G-GA'")
+    father = insertion['father']
+    assert (father['gt'], father['carries'], father['zygosity']) == ('./.', None, None)
+
+    def in_neither_parent(father: str) -> set[str]:
+        query = f'SELECT variant_id FROM t WHERE S3.carries AND {father} AND NOT S2.carries'  # noqa: S608 (the conditions of this test)
+        return {row['variant_id'] for row in _rows(path, query)}
+
+    called_without = in_neither_parent('NOT S1.carries')
+    assert 'chr1-5-C-T' in called_without
+    assert 'chr10-7-G-GA' not in called_without
+    # A parent who is called and lacks the allele is the one that hom_ref names.
+    assert called_without == in_neither_parent("S1.zygosity = 'hom_ref'")
+    # A reader who also wants the alleles that the father is not shown to carry asks for that.
+    assert in_neither_parent('S1.carries IS NOT TRUE') - called_without == {'chr10-7-G-GA'}
+
+
+def test_a_member_of_unknown_phenotype_is_null_in_the_manifest(tmp_path: pathlib.Path) -> None:
+    # The parents' phenotypes are unknown, written as 0 and as -9, and the daughter has an unaffected sister who was
+    # not sequenced.
+    ped = 'fam-1\tS1\t0\t0\t1\t0\nfam-1\tS2\t0\t0\t2\t-9\nfam-1\tS3\tS1\tS2\t2\t2\nfam-1\tS4\tS1\tS2\t2\t1\n'
+    manifest = family_tables.assemble(**_inputs(tmp_path, ped=ped))
+    written = json.loads((tmp_path / 'out' / 'manifest.json').read_text())
+    assert {m['sample_id']: m['affected'] for m in written['members']} == {
+        'S1': None,
+        'S2': None,
+        'S3': True,
+        'S4': False,
+    }
+    # The roles are the sheet's and the PED file's parents, whatever the phenotypes.
+    assert {m['sample_id']: m['role'] for m in written['members']} == {
+        'S1': 'father',
+        'S2': 'mother',
+        'S3': 'proband',
+        'S4': None,
+    }
+    assert family_tables.FamilyManifest.model_validate(written) == manifest
+    # A manifest states each member's phenotype, also where it is unknown: the key is not left out for a null.
+    without = [{key: value for key, value in m.items() if key != 'affected'} for m in written['members']]
+    with pytest.raises(pydantic.ValidationError, match='affected\n  Field required'):
+        family_tables.FamilyManifest.model_validate({**written, 'members': without})
 
 
 def test_a_member_carries_an_allele_that_its_genotype_holds_a_copy_of(tmp_path: pathlib.Path) -> None:
@@ -785,7 +842,7 @@ def test_a_member_carries_an_allele_that_its_genotype_holds_a_copy_of(tmp_path: 
     kind = pq.read_schema(path).field('S1').type
     assert [kind.field(i).name for i in range(3)] == ['gt', 'carries', 'zygosity']
     assert kind.field('carries').type == pa.bool_()
-    assert not kind.field('carries').nullable
+    assert kind.field('carries').nullable
     rows = {v['variant_id']: v for v in _rows(path)}
     for (chrom, pos, ref, alt, calls), sample in (
         (record, sample) for record in _RECORDS for sample in ('S1', 'S2', 'S3')
@@ -1104,6 +1161,14 @@ def test_the_calls_of_both_callers_say_who_carries_a_record(tmp_path: pathlib.Pa
         sv_id for sv_id, calls in structural_vcfs.CNV_CALLS.items() if calls[0] == (True, None)
     }
     assert con.sql(gains).fetchall()
+    # A member without a genotype in a structural-variant record, or without a copy number in a segment, is not said to
+    # lack the record: a filter for the records that the daughter does not carry returns none of them.
+    uncalled = {r[0] for r in con.sql('SELECT sv_id FROM t WHERE S3.carries IS NULL').fetchall()}
+    assert uncalled == {'inv:DEL:2', 'inv:DUP:TANDEM:1', 'inv:LOSS:3', 'inv:GAIN:4'}
+    not_carried = {r[0] for r in con.sql('SELECT sv_id FROM t WHERE NOT S3.carries').fetchall()}
+    assert not_carried
+    assert not not_carried & uncalled
+    assert not con.sql('SELECT sv_id FROM t WHERE S3.carries IS NULL AND S3.zygosity IS NOT NULL').fetchall()
 
 
 def test_the_tables_of_the_larger_variants_carry_their_metadata_filters_and_encodings(
