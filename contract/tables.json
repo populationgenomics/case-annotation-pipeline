@@ -85,6 +85,52 @@
           }
         },
         {
+          "name": "genes",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "struct",
+            "nullable": true,
+            "fields": [
+              {
+                "name": "gene_symbol",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "gene_id",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "hgnc_id",
+                "type": "int32",
+                "nullable": true
+              },
+              {
+                "name": "biotype",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "worst_consequence",
+                "type": "string",
+                "nullable": false
+              },
+              {
+                "name": "worst_impact",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "mane_select_consequence",
+                "type": "string",
+                "nullable": true
+              }
+            ]
+          }
+        },
+        {
           "name": "mane_select_transcript_id",
           "type": "string",
           "nullable": true

@@ -143,6 +143,20 @@ CLINVAR_RECORD = pa.struct(
     ]
 )
 
+# One gene of the allele, as the transcript chosen among the gene's own says it (_gene_entry), and the consequence on
+# the gene's MANE Select transcript.
+GENE = pa.struct(
+    [
+        pa.field('gene_symbol', _STRING),
+        pa.field('gene_id', _STRING),
+        pa.field('hgnc_id', _HGNC_ID),
+        pa.field('biotype', _STRING),
+        pa.field('worst_consequence', _STRING, nullable=False),
+        pa.field('worst_impact', _STRING),
+        pa.field('mane_select_consequence', _STRING),
+    ]
+)
+
 VARIANTS = pa.schema(
     [
         pa.field('chrom', _STRING, nullable=False),
@@ -159,6 +173,7 @@ VARIANTS = pa.schema(
         pa.field('gene_symbol', _STRING),
         pa.field('gene_id', _STRING),
         pa.field('hgnc_ids', pa.list_(_HGNC_ID)),
+        pa.field('genes', pa.list_(GENE)),
         pa.field('mane_select_transcript_id', _STRING),
         pa.field('mane_select_consequence', _STRING),
         pa.field('mane_select_hgvsc', _STRING),
@@ -495,6 +510,54 @@ def hgnc_ids(genes: Iterable[Mapping[str, Any]]) -> dict[str, int | None]:
     return ids
 
 
+def _preference(row: Mapping[str, Any]) -> tuple[int, bool, bool, bool, str]:
+    """Where a transcript row stands among those of its allele, or of one gene of it: the first one summarises them.
+
+    The most severe consequence comes first; among transcripts with the same, the MANE Select one, then a canonical
+    one, then Ensembl's, then the first by id.
+    """
+    return (
+        _RANK[row['worst_consequence']],
+        not row['is_mane_select'],
+        not row['is_canonical'],
+        row['source'] != 'Ensembl',
+        row['transcript_id'],
+    )
+
+
+def _gene_key(row: Mapping[str, Any]) -> tuple[str, int | str] | None:
+    """What tells the gene of a transcript row from the other genes of its allele.
+
+    The HGNC id, which the transcripts of Ensembl's and of RefSeq's model of a gene share, while each has the gene id
+    of its own model. A gene without an HGNC id is told by its symbol, which the two models share as well, and a
+    transcript without a symbol by the gene id of its own model. The transcripts that name no gene at all count as of
+    one gene.
+    """
+    for name in ('hgnc_id', 'gene_symbol', 'gene_id'):
+        if row[name] is not None:
+            return name, row[name]
+    return None
+
+
+def _gene_entry(rows: Sequence[Mapping[str, Any]], gene_id: str | None) -> dict[str, Any]:
+    """One entry of `genes` (GENE), from the transcript rows of one gene of an allele in their order (_preference).
+
+    The first row gives the entry what the allele's first row gives the allele's own summary, and `gene_id` is that
+    row's Ensembl gene. Of several MANE Select transcripts the first by id gives its consequence, as for the allele.
+    """
+    chosen = rows[0]
+    mane = min((r for r in rows if r['is_mane_select']), key=lambda r: r['transcript_id'], default=None)
+    return {
+        'gene_symbol': chosen['gene_symbol'],
+        'gene_id': gene_id,
+        'hgnc_id': chosen['hgnc_id'],
+        'biotype': chosen['biotype'],
+        'worst_consequence': chosen['worst_consequence'],
+        'worst_impact': chosen['impact'],
+        'mane_select_consequence': None if mane is None else mane['worst_consequence'],
+    }
+
+
 def position_rows(
     position: Mapping[str, Any], hgnc: Mapping[str, int | None]
 ) -> tuple[dict[str, Any], list[dict[str, Any]], set[str]]:
@@ -589,27 +652,25 @@ def position_rows(
         )
 
     if transcript_rows:
-        # The most severe consequence; among transcripts with the same, the MANE Select one, then a canonical one,
-        # then Ensembl's, then the first by id.
-        chosen = min(
-            transcript_rows,
-            key=lambda r: (
-                _RANK[r['worst_consequence']],
-                not r['is_mane_select'],
-                not r['is_canonical'],
-                r['source'] != 'Ensembl',
-                r['transcript_id'],
-            ),
-        )
-        gene_id = next(ensembl_gene(t) for t in transcripts if t['transcript'] == chosen['transcript_id'])
+        # Each row with the Annotator's transcript it was made from, in the rows' order of preference. The first row
+        # summarises the allele, and the first row of each gene that gene, so the genes stand in the order of their
+        # first rows and the allele's own summary is that of its first gene.
+        ranked = sorted(zip(transcript_rows, transcripts, strict=True), key=lambda pair: _preference(pair[0]))
+        chosen, annotated = ranked[0]
+        by_gene: dict[tuple[str, int | str] | None, list[tuple[dict[str, Any], Mapping[str, Any]]]] = {}
+        for pair in ranked:
+            by_gene.setdefault(_gene_key(pair[0]), []).append(pair)
         row |= {
             'worst_consequence': chosen['worst_consequence'],
             'worst_impact': chosen['impact'],
             'worst_transcript_id': chosen['transcript_id'],
             'gene_symbol': chosen['gene_symbol'],
-            'gene_id': gene_id,
+            'gene_id': ensembl_gene(annotated),
             # Every gene of the allele's transcripts that has an id, and no list for an allele without one.
             'hgnc_ids': sorted({r['hgnc_id'] for r in transcript_rows if r['hgnc_id'] is not None}) or None,
+            'genes': [
+                _gene_entry([r for r, _ in members], ensembl_gene(members[0][1])) for members in by_gene.values()
+            ],
         }
     # An allele in two genes can have two MANE Select transcripts: the one of the worst consequence's gene first.
     mane = sorted(

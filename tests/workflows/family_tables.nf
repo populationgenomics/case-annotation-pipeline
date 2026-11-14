@@ -420,10 +420,10 @@ process INVENTED_ARCHIVE {
     """
 }
 
-// Family A's tables: its ten alleles, each with its invented transcript, its gene's HGNC id and, after the allele's
-// columns of variants, a call column per member in the VCF's order, which says that the member carries the allele
-// where its genotype holds a copy of it; the manifest gives the daughter, whom the sheet names, the proband's role and
-// her parents theirs.
+// Family A's tables: its ten alleles, each with its invented transcript, its gene's HGNC id, the entry of that gene
+// and, after the allele's columns of variants, a call column per member in the VCF's order, which says that the member
+// carries the allele where its genotype holds a copy of it; the manifest gives the daughter, whom the sheet names, the
+// proband's role and her parents theirs.
 // Each split allele of the record on X has each member's likelihoods of its own genotypes, two for the haploid father
 // and three for the others, and an allele of a record without PL has none. An allele the archive holds has the counts
 // it stores, and each frequency as the 32-bit float echtvar returns: the multiple of 1/2000000 at or below the invented
@@ -473,6 +473,9 @@ assert pl[('chrX-100-T-C', 'A3')] == ('0/1', [73, 51, 52]), pl
 assert pl[('chr2-60-C-A', 'A1')] == ('0/1', None), pl
 assert variants.schema.field('hgnc_ids').type == pa.list_(pa.int32()), variants.schema
 assert variants.column('hgnc_ids').to_pylist() == [[90001]] * 10, variants.column('hgnc_ids')
+genes = [[(g['gene_symbol'], g['gene_id'], g['hgnc_id'], g['worst_consequence']) for g in entries]
+         for entries in variants.column('genes').to_pylist()]
+assert genes == [[('GENEA', 'ENSG01', 90001, 'intron_variant')]] * 10, genes
 transcripts = pq.read_table('${transcripts}')
 assert transcripts.schema.field('hgnc_id').type == pa.int32(), transcripts.schema
 assert transcripts.column('hgnc_id').to_pylist() == [90001] * 10, transcripts.column('hgnc_id')
