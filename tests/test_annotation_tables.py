@@ -255,6 +255,15 @@ def test_an_allele_without_dbsnp_ids_has_no_list_rather_than_an_empty_one(varian
     assert pa.Table.from_pylist([row], schema=annotation_tables.VARIANTS).column('rsids').to_pylist() == [None]
 
 
+def test_a_transcript_listed_twice_for_one_allele_is_refused() -> None:
+    transcripts = [
+        _transcript('NM_01.1', 'RefSeq', 'GENEA', '1001', 'missense_variant'),
+        _transcript('NM_01.1', 'RefSeq', 'GENEA', '1001', 'intron_variant'),
+    ]
+    with pytest.raises(ValueError, match=r'chr1:5: the transcript NM_01\.1 twice'):
+        _position_rows(_position('chr1', 5, 'C', 'T', transcripts=transcripts))
+
+
 def test_an_unknown_consequence_fails_rather_than_being_ranked() -> None:
     position = _position('chr1', 5, 'C', 'T', transcripts=[_transcript('T1', 'Ensembl', 'G', 'E', 'invented_variant')])
     with pytest.raises(ValueError, match='not in the severity order'):

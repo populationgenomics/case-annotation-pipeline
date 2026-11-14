@@ -1638,10 +1638,10 @@ DuckDB 2.0.0 on one thread with a memory limit of 2 GB, after the setup above, t
 cache, and the best of three runs; bcftools ran on the same laptop with one thread. They are approximate. An agent's
 sandbox runs on a slower x86 core, where every time is longer.
 
-The last column ran the queries on this page with no field of `genes` in their lists of columns. A query that reads
-`genes`, as the listings do for a gene symbol, also reads that column in every row group that it does not skip
-([the `variants` table](#the-variants-table)). The page gives no query for the first four rows; the first three filter
-on `gnomad_genomes_af`, as their wording says, so that they stay comparable with the JSON scripts.
+The last column ran the queries on this page with no field of `genes` in their lists of columns. Where a row names the
+gene, its time does not include the read of `genes`, which a query that lists a gene symbol adds in every row group that
+it does not skip ([the `variants` table](#the-variants-table)). The page gives no query for the first four rows; the
+first three filter on `gnomad_genomes_af`, as their wording says, so that they stay comparable with the JSON scripts.
 
 | Question                                                                           | VCF or Annotator JSON                    | Family tables |
 | ---------------------------------------------------------------------------------- | ---------------------------------------- | ------------- |
@@ -1777,16 +1777,16 @@ some have hundreds. `sv` has `hgnc_ids` as well.
 
 Columns that mean the same thing have the same name and type in every table of a family.
 
-| What                                     | Columns                                                                                                                                                                                             |
-| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| the position                             | `chrom` and `pos`, and `end_pos` in a table whose rows have an end                                                                                                                                  |
-| the allele                               | `variant_id`; `sv` names the row of `variants` that a record is the same allele as in `small_variant_id`                                                                                            |
-| what the VCF record says                 | `ref`, `alt`, `qual` and `filters`, the record's FILTER values                                                                                                                                      |
-| a gene                                   | `gene_symbol`, `gene_id` and its HGNC id `hgnc_id`, in `transcripts`, in `sv_transcripts` and in an entry of `genes`; `hgnc_ids` where a row has several genes                                      |
-| a transcript                             | `transcript_id`, `source`, `biotype`, `consequences`, `protein_id`, `is_mane_select`, `is_canonical`, `exon`, `intron`, `cdna_pos` and `protein_pos`, in `transcripts` and `sv_transcripts`         |
-| what a source holds on the allele itself | gnomAD's values in the `gnomad_genomes_` and `gnomad_exomes_` columns, and ClinVar's records in the `clinvar_` columns, in `variants` and for a record of `sv` that is annotated as a small variant |
-| the members' calls                       | one struct column per sequenced member, named as the sample, after the columns that say what a row is of                                                                                            |
-| the fields of a call                     | `gt`, `gq`, `pl`, `ft`, `dn` and `dq`, and in a table whose rows are variants `carries` and `zygosity`                                                                                              |
+| What                                     | Columns                                                                                                                                                                                                                                                                                             |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the position                             | `chrom` and `pos`, and `end_pos` in a table whose rows have an end                                                                                                                                                                                                                                  |
+| the allele                               | `variant_id`; `sv` names the row of `variants` that a record is the same allele as in `small_variant_id`                                                                                                                                                                                            |
+| what the VCF record says                 | `ref`, `alt`, `qual` and `filters`, the record's FILTER values                                                                                                                                                                                                                                      |
+| a gene                                   | `gene_symbol` and its HGNC id `hgnc_id`, in `transcripts`, in `sv_transcripts` and in an entry of `genes`, and `hgnc_ids` where a row has several genes; `gene_id`, which is the id of the transcript's own gene model in the two tables of transcripts and the Ensembl gene in an entry of `genes` |
+| a transcript                             | `transcript_id`, `source`, `biotype`, `consequences`, `protein_id`, `is_mane_select`, `is_canonical`, `exon`, `intron`, `cdna_pos` and `protein_pos`, in `transcripts` and `sv_transcripts`                                                                                                         |
+| what a source holds on the allele itself | gnomAD's values in the `gnomad_genomes_` and `gnomad_exomes_` columns, and ClinVar's records in the `clinvar_` columns, in `variants` and for a record of `sv` that is annotated as a small variant                                                                                                 |
+| the members' calls                       | one struct column per sequenced member, named as the sample, after the columns that say what a row is of                                                                                                                                                                                            |
+| the fields of a call                     | `gt`, `gq`, `pl`, `ft`, `dn` and `dq`, and in a table whose rows are variants `carries` and `zygosity`                                                                                                                                                                                              |
 
 `variants` and `sv` are the tables whose rows are variants. In both, `carries` says whether the member carries the row's
 variant and `zygosity` on how many copies, with one difference: a member who gains copies of a segment of `sv` carries

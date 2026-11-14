@@ -568,7 +568,8 @@ def position_rows(
     """One position line's row of `variants`, its rows of `transcripts`, and the keys of the sources on its allele.
 
     `hgnc` holds each gene symbol of the document's genes section with its HGNC id (hgnc_ids). The section lists the
-    gene of every transcript, so a transcript whose symbol it lacks fails.
+    gene of every transcript, so a transcript whose symbol it lacks fails. So does a transcript listed twice: with the
+    allele it is the key of a row of `transcripts`, which an entry of `genes` names its transcripts by.
     """
     chrom, pos, ref = position['chromosome'], position['position'], position['refAllele']
     alts = position['altAlleles']
@@ -613,8 +614,12 @@ def position_rows(
         return max(scores) if scores else None
 
     transcript_rows = []
+    listed: set[str] = set()
     for t in transcripts:
         tid = t['transcript']
+        if tid in listed:
+            raise ValueError(f'{chrom}:{pos}: the transcript {tid} twice')
+        listed.add(tid)
         symbol = t.get('hgnc')
         if symbol is not None and symbol not in hgnc:
             raise ValueError(f'{chrom}:{pos}: the genes section lacks {symbol!r}, the gene of the transcript {tid}')
