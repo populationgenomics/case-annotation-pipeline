@@ -1202,27 +1202,31 @@ the affected members share.
 ```python
 affected = [m['sample_id'] for m in members if m['sequenced'] and m['affected']]
 unaffected = [m['sample_id'] for m in members if m['sequenced'] and m['affected'] is False]
-conditions = [f'"{sample}".carries' for sample in affected]
-conditions += [f""""{sample}".zygosity = 'hom_ref'""" for sample in unaffected]
-in_every_affected_member = con.sql(
-    f"""
-    SELECT variant_id, gene_symbol, worst_consequence, gnomad_joint_af
-    FROM variants
-    WHERE {' AND '.join(conditions)}
-      AND coalesce(gnomad_joint_af, 0) < $max_af
-    """,
-    params={'max_af': 0.001},
-).to_arrow_table()
+if affected:
+    conditions = [f'"{sample}".carries' for sample in affected]
+    conditions += [f""""{sample}".zygosity = 'hom_ref'""" for sample in unaffected]
+    in_every_affected_member = con.sql(
+        f"""
+        SELECT variant_id, gene_symbol, worst_consequence, gnomad_joint_af
+        FROM variants
+        WHERE {' AND '.join(conditions)}
+          AND coalesce(gnomad_joint_af, 0) < $max_af
+        """,
+        params={'max_af': 0.001},
+    ).to_arrow_table()
 ```
 
 In the worked example this returns nothing: the daughter is the only affected member, and an unaffected parent carries
 each of her two alleles. Where the affected members may have different causes, the same query runs once for each of
 them, with that member alone in `affected` and the other affected members in neither list. The query asks an unaffected
 member for `zygosity = 'hom_ref'`, which a member without a call does not have, so an allele for which an unaffected
-member has no call is left out; a family with nobody affected among its sequenced members gets no rows. A member whose
-phenotype the PED file gives as unknown has `"affected": null` in the manifest and belongs in neither list. The
-condition `m['affected'] is False` keeps such a member out of `unaffected`, where `not m['affected']` would put the
-member in.
+member has no call is left out.
+
+A member whose phenotype the PED file gives as unknown has `"affected": null` in the manifest and belongs in neither
+list, so the query asks nothing of that member's call. The condition `m['affected'] is False` keeps such a member out of
+`unaffected`, where `not m['affected']` would put the member in. The query runs only for a family with an affected
+sequenced member (`if affected`). Without one it would ask only that the unaffected members lack the allele, and return
+the alleles that members of unknown phenotype carry.
 
 ### ClinVar pathogenic variants in anyone in the family
 
