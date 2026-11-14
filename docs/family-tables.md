@@ -1247,7 +1247,8 @@ compound_het_by_genes = con.sql(
 ```
 
 A gene symbol stands in at most one entry of an allele, so the query needs no `DISTINCT`. It reads the impact of each
-gene's most severe consequence, where the query through `transcripts` reads the impact of every transcript.
+gene's most severe consequence, where the query through `transcripts` reads the impact of every transcript. A whole
+genome takes it 1.2 s, most of it in the read of `genes`.
 
 ### X-linked in a male proband
 
@@ -1336,7 +1337,7 @@ a family of any size. Each row of `member_calls` holds one member's call of one 
 `sample_id` and the struct in `call`.
 
 The query picks the alleles first and then reads `variants` a second time for the calls of those alleles alone.
-Unpivoting in the same read as the ClinVar filter looks shorter and takes 1.9 times as long (see [How fast](#how-fast)).
+Unpivoting in the same read as the ClinVar filter looks shorter and takes 1.4 times as long (see [How fast](#how-fast)).
 
 ```python
 clinvar_pathogenic = con.sql(
@@ -1638,26 +1639,26 @@ DuckDB 2.0.0 on one thread with a memory limit of 2 GB, after the setup above, t
 cache, and the best of three runs; bcftools ran on the same laptop with one thread. They are approximate. An agent's
 sandbox runs on a slower x86 core, where every time is longer.
 
-The last column ran the queries on this page with no field of `genes` in their lists of columns. Where a row names the
-gene, its time does not include the read of `genes`, which a query that lists a gene symbol adds in every row group that
-it does not skip ([the `variants` table](#the-variants-table)). The page gives no query for the first four rows; the
-first three filter on `gnomad_genomes_af`, as their wording says, so that they stay comparable with the JSON scripts.
+The last column ran the queries on this page as they stand. The page gives no query for the first four rows; the first
+three filter on `gnomad_genomes_af`, as their wording says, so that they stay comparable with the JSON scripts. The
+second reads the gene from the first entry of `genes`.
 
 | Question                                                                           | VCF or Annotator JSON                    | Family tables |
 | ---------------------------------------------------------------------------------- | ---------------------------------------- | ------------- |
 | The proband carries the allele, with a gnomAD genomes AF below 0.01 or none: count | 351 s (JSON, Python's `json` module)     | 0.10 s        |
-| The same, returned as Arrow with the gene, worst consequence and AF                |                                          | 0.27 s        |
+| The same, returned as Arrow with the gene, worst consequence and AF                |                                          | 1.2 s         |
 | The proband's DRAGEN `DN` is `DeNovo`, and the allele is as rare                   | 157 s (JSON, with a substring pre-check) | 0.07 s        |
 | Proband heterozygous, both parents homozygous reference, FILTER `PASS`             | 15.5 s (bcftools on the split VCF)       | 0.31 s        |
-| Rare damaging variants in the proband                                              |                                          | 0.35 s        |
+| Rare damaging variants in the proband                                              |                                          | 1.2 s         |
 | Rare variants in a panel of 300 genes                                              |                                          | 0.33 s        |
-| A de novo search, by GQ                                                            |                                          | 1.3 s         |
-| A de novo search, by PL                                                            |                                          | 0.94 s        |
-| Recessive: homozygous in the proband                                               |                                          | 0.38 s        |
+| A de novo search, by GQ                                                            |                                          | 1.8 s         |
+| A de novo search, by PL                                                            |                                          | 1.6 s         |
+| Recessive: homozygous in the proband                                               |                                          | 0.89 s        |
 | Recessive: compound heterozygous candidates                                        |                                          | 1.1 s         |
-| X-linked in a male proband                                                         |                                          | 0.02 s        |
-| Rare variants in every affected member                                             |                                          | 0.32 s        |
-| ClinVar pathogenic variants in anyone in the family                                |                                          | 0.91 s        |
+| Recessive: compound heterozygous candidates, through `genes`                       |                                          | 1.2 s         |
+| X-linked in a male proband                                                         |                                          | 0.05 s        |
+| Rare variants in every affected member                                             |                                          | 1.1 s         |
+| ClinVar pathogenic variants in anyone in the family                                |                                          | 1.8 s         |
 | A count for each member                                                            |                                          | 0.21 s        |
 | A deletion in a region that neither parent carries, over a whole chromosome        |                                          | 0.003 s       |
 | A deletion of both copies                                                          |                                          | 0.005 s       |
@@ -1672,9 +1673,9 @@ The seven rows before the last read the tables of the larger variants, which are
 65,000 rows, its `sv_transcripts` about 670,000 and its `repeats` 77. The sixth of them reads `variants` too. The last
 row is the query of [Shared column names](#shared-column-names).
 
-Each query of this page peaked at 0.12 to 0.25 GB of process memory, and those that read the tables of the larger
+Each query of this page peaked at 0.12 to 0.27 GB of process memory, and those that read the tables of the larger
 variants alone at the lower end of that. Unpivoting the members' columns in the same read as the ClinVar filter, rather
-than in a second read of the matching rows, took 1.7 s.
+than in a second read of the matching rows, took 2.6 s.
 
 ### Against the VCF and the JSON
 
@@ -1699,7 +1700,7 @@ on X or Y, since `GT="RR"` does not match a haploid `0`.
 | a gene through `transcripts` at one locus, both steps | 0.02 s  | mostly `transcripts`, for the gene's alleles; the scan of `variants` then reads the row groups that the gene's span picks out ([A gene without an HGNC id](#a-gene-without-an-hgnc-id)) |
 
 These times include no read of a footer, which the setup's `parquet_metadata_cache` keeps in memory. The footer of
-`variants` describes 103 columns in each of 90 row groups for this trio, and is 1.2 MB; the one of `transcripts` is 3.9
+`variants` describes 103 columns in each of 90 row groups for this trio, and is 1.3 MB; the one of `transcripts` is 3.9
 MB.
 
 ### Where the time goes
@@ -1708,6 +1709,10 @@ Most of the gain over the VCF and the JSON comes from reading typed values inste
 only the columns a query names: the trio filter reads 5 of the 103 columns of `variants`, about 8% of its bytes, and
 skips no row group, since every row group holds heterozygous and homozygous calls. Skipping row groups is what makes a
 lookup by region or variant id take hundredths of a second.
+
+A search over the genome that lists a gene spends most of its time on `genes`. The search for rare damaging variants
+takes 0.32 s without its `gene_symbols` and 1.2 s with them, and the de novo search by GQ 1.4 s without the gene symbol
+and 1.8 s with it ([the `variants` table](#the-variants-table) says when a query reads the column).
 
 ## Why the tables have this shape
 
@@ -1731,8 +1736,8 @@ joins two tables of 9 million rows on the variant id. With the calls in `variant
 | a lookup in one table                                  |                               | 5 to 8 ms more, which the metadata cache removes |
 
 The lookups cost more because the footer of `variants` grows with the members' columns, and DuckDB reads it for every
-query unless the setup's `parquet_metadata_cache` is on. The times of this table were taken without the cache, so they
-differ a little from those above.
+query unless the setup's `parquet_metadata_cache` is on. The times of this table were taken without the cache, and in
+both layouts with the gene symbol in a column of the allele's own, so they differ from those above.
 
 The members' columns are at the top level of the table, one struct per member. Under one struct that holds them all, the
 same queries took 2 to 5 times as long.
@@ -1753,7 +1758,9 @@ layout, one row per allele and member, was measured as well. A trio query on it 
 A column for each member answers trio questions faster because one row holds all three calls; a question about any
 member, which turns the member columns back into rows, is the exception. The trio queries on the other layout also
 peaked at 1.7 to 4.6 GB of process memory, which DuckDB's limit does not wholly bound. That layout was measured with
-DuckDB 1.5.6 and on tables without gnomAD's joint columns, so the comparison is approximate.
+DuckDB 1.5.6 and on tables without gnomAD's joint columns, and both layouts with the gene symbol in a column of the
+allele's own, so the comparison is approximate and the times of `variants` are below those of [How fast](#how-fast) for
+a search that lists a gene.
 
 ### `transcripts` as a table of its own
 
@@ -1929,13 +1936,15 @@ consequence lies on a non-coding transcript shows that transcript's biotype. An 
 `genes`, and every other allele has at least one entry, also an allele that has no `hgnc_ids` because none of its genes
 has an id.
 
-A condition on a field of an entry cannot skip a row group, like one on `hgnc_ids`. DuckDB 2.0 reads `genes` for every
-row group that a query does not skip, with every field of its entries, also where the query's other conditions leave few
-alleles. A query that reads `genes` over the whole genome therefore reads the column whole. One that narrows the alleles
-by their own columns first, as the second query of
-[Recessive: compound heterozygous candidates](#recessive-compound-heterozygous-candidates) does, has fewer entries to
-turn into rows with `unnest(genes)`. Write a search for a field of an entry over the whole table as
-`len(list_filter(genes, lambda g: g.biotype = $biotype)) > 0` or as
+A condition on a field of an entry cannot skip a row group, like one on `hgnc_ids`. A query that lists a field of
+`genes` makes DuckDB 2.0 decode every field of the entries, wherever in the table a row passes the conditions that it
+applies while it scans: those on one column each that `AND` joins. A handful of alleles then costs little, and the
+lookup by rsID takes as long with the gene symbol as without. A few thousand alleles spread over the genome cost most of
+the read of the column, and conditions on several columns that `OR` joins cost all of it, which is most of the time of
+such a search ([Where the time goes](#where-the-time-goes)). A query that narrows the alleles by their own columns
+first, as the second query of [Recessive: compound heterozygous candidates](#recessive-compound-heterozygous-candidates)
+does, also has fewer entries to turn into rows with `unnest(genes)`. Write a search for a field of an entry over the
+whole table as `len(list_filter(genes, lambda g: g.biotype = $biotype)) > 0` or as
 `list_contains(list_transform(genes, lambda g: g.biotype), $biotype)`, and not as
 `$biotype = ANY(list_transform(genes, lambda g: g.biotype))`, for the reason that the warning of
 [Variants in a gene](#variants-in-a-gene) gives for `hgnc_ids`.
@@ -2298,14 +2307,14 @@ A whole-genome trio has about 9 million alleles, and its tables have these sizes
 
 | Table            | Rows              | Size   | Size without the encodings above |
 | ---------------- | ----------------- | ------ | -------------------------------- |
-| `variants`       | about 9 million   | 670 MB | 800 MB                           |
+| `variants`       | about 9 million   | 680 MB | 815 MB                           |
 | `transcripts`    | about 100 million | 565 MB | 645 MB                           |
 | `sv`             | about 65,000      | 7.4 MB | 8.7 MB                           |
 | `sv_transcripts` | about 670,000     | 6.2 MB | 6.4 MB                           |
 | `repeats`        | 77                | 20 KB  | 20 KB                            |
 
-The members' columns of a trio take about 215 MB of `variants`, `hgnc_ids` under 1 MB, and the `hgnc_id` of
-`transcripts` 2.5 MB.
+The members' columns of a trio take about 215 MB of `variants`, `genes` about 39 MB, `hgnc_ids` under 1 MB, and the
+`hgnc_id` of `transcripts` 2.5 MB.
 
 The rows of `sv` are that trio's records from DRAGEN 4.6.2: about 64,000 of the structural-variant caller and about
 1,400 copy number segments away from the reference's copy number. About 51,000 of the records are written as a sequence,
