@@ -1836,7 +1836,11 @@ row group that a query does not skip, with every field of its entries, also wher
 alleles. A query that reads `genes` over the whole genome therefore reads the column whole. One that narrows the alleles
 by their own columns first, as the second query of
 [Recessive: compound heterozygous candidates](#recessive-compound-heterozygous-candidates) does, has fewer entries to
-turn into rows with `unnest(genes)`.
+turn into rows with `unnest(genes)`. Write a search for a field of an entry over the whole table as
+`len(list_filter(genes, lambda g: g.biotype = $biotype)) > 0` or as
+`list_contains(list_transform(genes, lambda g: g.biotype), $biotype)`, and not as
+`$biotype = ANY(list_transform(genes, lambda g: g.biotype))`, for the reason that the warning of
+[Variants in a gene](#variants-in-a-gene) gives for `hgnc_ids`.
 
 An HGNC id comes from the genes section of the Annotator's output, which lists the gene of every transcript by its
 symbol, with the gene's HGNC id where it has one. A transcript's gene is matched to that list by its symbol, whichever
