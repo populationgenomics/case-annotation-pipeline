@@ -1066,17 +1066,22 @@ def test_a_family_without_such_vcfs_has_no_table_of_them(tmp_path: pathlib.Path)
     ]
 
 
-def test_a_manifest_written_before_the_keys_of_the_larger_variants_reads_as_one_without_them(
-    tmp_path: pathlib.Path,
-) -> None:
+def test_the_manifest_of_a_family_without_such_vcfs_states_that_it_has_none(tmp_path: pathlib.Path) -> None:
+    manifest = family_tables.assemble(**_inputs(tmp_path))
+    written = json.loads((tmp_path / 'out' / 'manifest.json').read_text())
+    assert written.keys() == family_tables.FamilyManifest.model_fields.keys()
+    assert (written['sv_callers'], written['sv_annotation'], written['sv_omitted_columns']) == ([], None, [])
+    assert family_tables.FamilyManifest.model_validate(written) == manifest
+
+
+@pytest.mark.parametrize('key', family_tables.FamilyManifest.model_fields)
+def test_a_manifest_without_one_of_its_keys_is_refused(tmp_path: pathlib.Path, key: str) -> None:
+    # Also a key whose value says that the family has nothing for it, as each key of the larger variants does here.
     family_tables.assemble(**_inputs(tmp_path))
     written = json.loads((tmp_path / 'out' / 'manifest.json').read_text())
-    assert (written['sv_callers'], written['sv_annotation'], written['sv_omitted_columns']) == ([], None, [])
-    added = ('sv_callers', 'sv_annotation', 'sv_omitted_columns')
-    earlier = {key: value for key, value in written.items() if key not in added}
-    manifest = family_tables.FamilyManifest.model_validate(earlier)
-    assert (manifest.sv_callers, manifest.sv_annotation, manifest.sv_omitted_columns) == ((), None, ())
-    assert manifest == family_tables.FamilyManifest.model_validate(written)
+    without = {name: value for name, value in written.items() if name != key}
+    with pytest.raises(pydantic.ValidationError, match=f'{key}\n  Field required'):
+        family_tables.FamilyManifest.model_validate(without)
 
 
 def test_a_manifest_with_a_key_the_model_does_not_know_is_refused(tmp_path: pathlib.Path) -> None:

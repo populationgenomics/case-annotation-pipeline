@@ -377,7 +377,6 @@
       "type": "array"
     },
     "sv_callers": {
-      "default": [],
       "items": {
         "$ref": "#/$defs/Caller"
       },
@@ -409,11 +408,9 @@
         {
           "type": "null"
         }
-      ],
-      "default": null
+      ]
     },
     "sv_omitted_columns": {
-      "default": [],
       "items": {
         "type": "string"
       },
@@ -426,10 +423,13 @@
     "family",
     "members",
     "tables",
+    "sv_callers",
     "alleles",
     "annotation",
     "gnomad_joint",
-    "omitted_columns"
+    "omitted_columns",
+    "sv_annotation",
+    "sv_omitted_columns"
   ],
   "title": "FamilyManifest",
   "type": "object"

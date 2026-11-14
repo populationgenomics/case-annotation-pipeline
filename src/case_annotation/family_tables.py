@@ -297,18 +297,16 @@ class FamilyManifest(pydantic.BaseModel, frozen=True, extra='forbid'):
     # variants and transcripts, then sv, sv_transcripts and repeats where the family has them
     tables: tuple[TableFile, ...]
     # The callers whose records sv holds; none in a family without the table. The tables and their rows do not say
-    # it: a caller that reports nothing leaves no row. A manifest written before the key existed, which is of the
-    # same version, has none of the optional tables, so it reads as one without callers.
-    sv_callers: tuple[sv_tables.Caller, ...] = ()
+    # it: a caller that reports nothing leaves no row.
+    sv_callers: tuple[sv_tables.Caller, ...]
     alleles: int
     annotation: annotation_tables.AnnotationInfo
     gnomad_joint: gnomad_joint.GnomadJointInfo  # the archive the gnomad_joint_ columns come from
     omitted_columns: tuple[str, ...]  # variants columns of the dated sources the run did not name
     # What annotated the family's structural variants and copy-number segments, and the sv columns of the dated
-    # sources that run did not name; nothing in a family without the sv table, and in a manifest written before the
-    # keys existed, which is of such a family.
-    sv_annotation: annotation_tables.AnnotationInfo | None = None
-    sv_omitted_columns: tuple[str, ...] = ()
+    # sources that run did not name; None and no columns in a family without the sv table.
+    sv_annotation: annotation_tables.AnnotationInfo | None
+    sv_omitted_columns: tuple[str, ...]
 
 
 @dataclasses.dataclass(frozen=True)

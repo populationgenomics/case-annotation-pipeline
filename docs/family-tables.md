@@ -1760,7 +1760,7 @@ The tables' version, `0.5.0` here, changes when a column of a table is renamed, 
 changes. A table, a column or a manifest key that is added leaves it as it is, because a reader of the Parquet tables by
 column name, or of the manifest as plain JSON, finds what it knew as before: `variants` and `transcripts` are the same
 in a folder with and without the others. A reader that checks the manifest against a fixed set of keys has to allow for
-`sv_callers`, `sv_annotation` and `sv_omitted_columns`, which a manifest written before the keys existed lacks.
+a key that is added under the same version.
 
 The tables share these properties:
 
@@ -2118,6 +2118,7 @@ counts are left out; the VCF has them.
 ### The manifest
 
 `manifest.json` describes the folder: its tables, the family and what annotated the alleles and the structural variants.
+Every manifest holds every key below, also the manifest of a family without the optional tables.
 
 | Key                  | Holds                                                                                                                                                                                                                                                                                               |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -2125,13 +2126,13 @@ counts are left out; the VCF has them.
 | `family`             | the family's id                                                                                                                                                                                                                                                                                     |
 | `members`            | the pedigree: each member with its `sample_id`, `father`, `mother`, `sex`, `affected` (empty where the PED file gives the phenotype as unknown), `sequenced` (whether `variants` has its column, and `sv` and `repeats` where the family has them) and `role`                                       |
 | `tables`             | each table the folder holds, with its rows, size and SHA-256: `variants` and `transcripts`, then `sv`, `sv_transcripts` and `repeats` where the family has them                                                                                                                                     |
-| `sv_callers`         | the callers whose records `sv` holds: `sv`, `cnv`, both, or none in a family without the table. A named caller with no row of `sv` reported nothing. A manifest without the key was written before the key existed, and its family has none of the optional tables                                  |
+| `sv_callers`         | the callers whose records `sv` holds: `sv`, `cnv` or both, and an empty list in a family without the table. A named caller with no row of `sv` reported nothing                                                                                                                                     |
 | `alleles`            | the number of alleles, which is the number of rows of `variants`                                                                                                                                                                                                                                    |
 | `annotation`         | what annotated the alleles: the Annotator, the catalog, the sources named and the versions they pinned, the data sources the JSON header records, and the bundle's sources the run left out, each with its reason: `dated`, `not_applicable`, `current` or `unplaced`                               |
 | `gnomad_joint`       | the archive of gnomAD's joint values: its file name, its size and SHA-256 as the run read it, echtvar's version, and each field the archive's embedded configuration declares, with gnomAD's name for it, the archive's alias, its type, its multiplier and the value that stands for a missing one |
 | `omitted_columns`    | the columns of `variants` that the run left out because it did not name their dated source                                                                                                                                                                                                          |
-| `sv_annotation`      | what annotated the structural variants and copy number segments, in the form of `annotation`: the second Annotator run, which has the catalog and the sources of the first; empty in a family without `sv`, and absent from a manifest written before the key existed                               |
-| `sv_omitted_columns` | the columns of `sv` that the run left out because it did not name their dated source                                                                                                                                                                                                                |
+| `sv_annotation`      | what annotated the structural variants and copy number segments, in the form of `annotation`: the second Annotator run, which has the catalog and the sources of the first; null in a family without `sv`                                                                                           |
+| `sv_omitted_columns` | the columns of `sv` that the run left out because it did not name their dated source; an empty list in a family without `sv`                                                                                                                                                                        |
 
 The reasons, under `annotation.omitted`, follow the groups of sources in [Dated sources](annotation.md#dated-sources):
 `dated` for a dated source, `not_applicable` for one that does not apply to germline small variants, `current` for a
