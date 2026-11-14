@@ -1141,9 +1141,10 @@ compound_het_by_genes = con.sql(
 ).to_arrow_table()
 ```
 
-An allele has one entry for each of its genes, so the query needs no `DISTINCT`. It reads the impact of each gene's most
-severe consequence, where the query through `transcripts` reads the impact of every transcript. A search that groups by
-the allele's own `gene_symbol` instead counts an allele in two genes under one of them, and misses a pair in the other.
+A gene symbol stands in at most one entry of an allele, so the query needs no `DISTINCT`. It reads the impact of each
+gene's most severe consequence, where the query through `transcripts` reads the impact of every transcript. A search
+that groups by the allele's own `gene_symbol` instead counts an allele in two genes under one of them, and misses a pair
+in the other.
 
 ### X-linked in a male proband
 
@@ -1814,11 +1815,11 @@ told by the gene id of its own gene model.
 
 The entries stand in the order of their chosen transcripts under the same rule, so they run from the most to the least
 severe consequence. The first entry is the gene of the allele's own columns: its `gene_symbol`, `gene_id`,
-`worst_consequence` and `worst_impact` are the allele's. The allele's `mane_select_` columns are of that gene where the
-allele has a MANE Select transcript of it, and otherwise of another gene's MANE Select transcript, where the allele has
-one. `biotype` is that of one transcript, so a protein-coding gene whose most severe consequence lies on a non-coding
-transcript shows that transcript's biotype. An allele without a transcript has no `genes`, and every other allele has at
-least one entry, also an allele that has no `hgnc_ids` because none of its genes has an id.
+`worst_consequence` and `worst_impact` are the allele's. The allele's `mane_select_` columns are of a MANE Select
+transcript with the allele's `gene_symbol` where the allele has one, and otherwise of another gene's MANE Select
+transcript. `biotype` is that of one transcript, so a protein-coding gene whose most severe consequence lies on a
+non-coding transcript shows that transcript's biotype. An allele without a transcript has no `genes`, and every other
+allele has at least one entry, also an allele that has no `hgnc_ids` because none of its genes has an id.
 
 A condition on a field of an entry cannot skip a row group, like one on `hgnc_ids`, and it reads a larger column whole.
 A query therefore narrows the alleles by their own columns first and then turns the entries into rows with
