@@ -8,7 +8,6 @@ declared here, and tests/test_contract.py holds each statement to the .nf source
 
 from __future__ import annotations
 
-import importlib.metadata
 import json
 import pathlib
 from collections.abc import Mapping, Sequence
@@ -159,6 +158,7 @@ def _family_tables_workflow() -> dict[str, Any]:
                 'files': [
                     *({'name': f'{table}.parquet'} for table in family_tables.TABLES if table not in TABLE_COLUMNS),
                     {'name': 'manifest.json'},
+                    {'name': family_tables.REFERENCE},
                     *(
                         {'name': f'{table}.parquet', 'row_names_any_of': list(columns)}
                         for table, columns in TABLE_COLUMNS.items()
@@ -224,7 +224,7 @@ def workflows() -> dict[str, Any]:
     the tables' version, and the date on which a listing run started.
     """
     return {
-        'pipeline_version': importlib.metadata.version('case-annotation-tools'),
+        'pipeline_version': family_tables.PIPELINE_VERSION,
         'tables_version': family_tables.SCHEMA_VERSION,
         'workflows': {'family_tables.nf': _family_tables_workflow(), 'annotator.nf': _annotator_workflow()},
     }
@@ -359,6 +359,7 @@ def example_manifest() -> family_tables.FamilyManifest:
     annotation = _example_annotation()
     return family_tables.FamilyManifest(
         schema_version=family_tables.SCHEMA_VERSION,
+        pipeline_version=family_tables.PIPELINE_VERSION,
         family=_EXAMPLE_ROWS[0]['family'],
         members=(
             member(father, None, None, 'male', 'father'),
@@ -375,6 +376,7 @@ def example_manifest() -> family_tables.FamilyManifest:
             )
             for number, (table, rows) in enumerate(sizes.items(), start=1)
         ),
+        reference=family_tables.ReferenceFile(path=family_tables.REFERENCE, bytes=6_000, sha256='f' * 64),
         sv_callers=('sv', 'cnv'),
         alleles=sizes['variants'],
         annotation=annotation,

@@ -26,13 +26,14 @@ runs in an image that the organisation running the pipeline builds itself.
 
 ## The documents
 
-| Document                                           | Its reader                                    | What it holds                                                                                                                                  |
-| -------------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| [Reading the family tables](docs/family-tables.md) | an analyst or an agent who queries the tables | one VCF record followed into its rows, the usual rare-disease queries with DuckDB from Python, and every file, column and manifest key         |
-| [Annotation](docs/annotation.md)                   | the operator who runs the pipeline            | the Annotator's modes and its licence, which sources are dated, what a families sheet holds, the steps, what a run publishes and what stops it |
-| [The Annotator's image](docs/annotator-image.md)   | whoever builds the image of the Annotator     | what the image has to hold, and how a task fetches the licence key                                                                             |
-| [Glossary](docs/glossary.md)                       | everyone                                      | each word that the documents use                                                                                                               |
-| [The contract](contract/README.md)                 | a program that launches or reads a run        | the manifest's JSON Schema, and the sheet's columns, the workflows' params and the tables' columns as JSON                                     |
+| Document                                             | Its reader                                                                    | What it holds                                                                                                                                  |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Reading the family tables](docs/family-tables.md)   | an analyst or an agent who queries the tables                                 | one VCF record followed into its rows, the usual rare-disease queries with DuckDB from Python, and the folder's files and manifest             |
+| [Notes on the tables](src/case_annotation/tables.md) | an agent that queries a family's tables; a copy lies in every family's folder | what the tables do not show and a query gets wrong without an error                                                                            |
+| [Annotation](docs/annotation.md)                     | the operator who runs the pipeline                                            | the Annotator's modes and its licence, which sources are dated, what a families sheet holds, the steps, what a run publishes and what stops it |
+| [The Annotator's image](docs/annotator-image.md)     | whoever builds the image of the Annotator                                     | what the image has to hold, and how a task fetches the licence key                                                                             |
+| [Glossary](docs/glossary.md)                         | everyone                                                                      | each word that the documents use                                                                                                               |
+| [The contract](contract/README.md)                   | a program that launches or reads a run                                        | the manifest's JSON Schema, and the sheet's columns, the workflows' params and the tables' columns as JSON                                     |
 
 `deployments/<organisation>/` holds an organisation's own params files and its runbook.
 [deployments/cpg/](deployments/cpg/README.md) is that of the Centre for Population Genomics.

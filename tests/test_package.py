@@ -32,3 +32,5 @@ def test_the_pipelines_version_is_the_packages() -> None:
     (manifest,) = re.findall(r'^manifest \{\n(.*?)^\}', config, flags=re.MULTILINE | re.DOTALL)
     (version,) = re.findall(r"^    version = '([^']+)'$", manifest, flags=re.MULTILINE)
     assert version == tomllib.loads((repository / 'pyproject.toml').read_text('utf-8'))['project']['version']
+    # A manifest gives the installed package's version, which is the same one where the environment is in step.
+    assert version == family_tables.PIPELINE_VERSION

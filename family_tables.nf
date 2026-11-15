@@ -204,8 +204,8 @@ workflow {
     publish:
     union = union.map { _group, vcf, index -> [vcf, index] }.flatten().mix(tables, joint, sv_published)
     annotator = annotator
-    family_tables = written.map { family, variants, transcripts, manifest, larger ->
-        [family: family, files: [variants, transcripts, manifest] + larger]
+    family_tables = written.map { family, variants, transcripts, manifest, tables_reference, larger ->
+        [family: family, files: [variants, transcripts, manifest, tables_reference] + larger]
     }
 }
 

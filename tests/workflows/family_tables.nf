@@ -126,15 +126,15 @@ workflow {
         sv_union.map,
         '0.5.0',
     )
-    CHECK_TABLES(written.filter { w -> w[0] == 'family-a' }.map { w -> w[0..3] }, archive)
+    CHECK_TABLES(written.filter { w -> w[0] == 'family-a' }.map { w -> w[0..4] }, archive)
     CHECK_NO_ROLES(written.filter { w -> w[0] == 'family-b' }.map { w -> w[3] })
-    CHECK_LARGER(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[1], w[3], w[4]) })
+    CHECK_LARGER(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[1], w[3], w[5]) })
     // A family whose row names no such VCF gets no table of them.
     written
         .filter { w -> w[0] == 'family-b' }
         .map { w ->
-            if (w[4]) {
-                error("family B brought no VCF of its larger variants, and has the tables ${w[4]}")
+            if (w[5]) {
+                error("family B brought no VCF of its larger variants, and has the tables ${w[5]}")
             }
         }
 
@@ -430,16 +430,20 @@ process INVENTED_ARCHIVE {
 // it stores, and each frequency as the 32-bit float echtvar returns: the multiple of 1/2000000 at or below the invented
 // value, or the one below that for 0.062502, and 0 for a filtering allele frequency the invented VCF lacks. An allele
 // the archive lacks, such as the other allele of a site or of a position it holds, has none; the manifest records the
-// archive by its size and SHA-256, with its fields and echtvar's version.
+// archive by its size and SHA-256, with its fields and echtvar's version. The folder's notes on the tables are the
+// file of the tools' package, byte for byte, and the manifest names it with its size and SHA-256. The manifest gives
+// the pipeline's version as the installed package has it.
 process CHECK_TABLES {
     input:
-    tuple val(family), path(variants), path(transcripts), path(manifest)
+    tuple val(family), path(variants), path(transcripts), path(manifest), path(reference)
     path archive
 
     script:
     """
     python3 - <<'EOF'
 import hashlib
+import importlib.metadata
+import importlib.resources
 import json
 import struct
 
@@ -452,6 +456,11 @@ def float32(value):
 
 
 manifest = json.load(open('${manifest}'))
+reference = open('${reference}', 'rb').read()
+assert reference == importlib.resources.files('case_annotation').joinpath('tables.md').read_bytes()
+assert manifest['reference'] == {
+    'path': 'tables.md', 'bytes': len(reference), 'sha256': hashlib.sha256(reference).hexdigest()}, manifest
+assert manifest['pipeline_version'] == importlib.metadata.version('case-annotation-tools'), manifest
 rows = {t['table']: t['rows'] for t in manifest['tables']}
 assert {t: rows[t] for t in ('variants', 'transcripts')} == {'variants': 10, 'transcripts': 10}, rows
 assert manifest['family'] == '${family}', manifest

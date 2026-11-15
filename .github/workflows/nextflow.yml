@@ -171,6 +171,11 @@ jobs:
             annotations/fam-{a,b}/tables-0.5.0-illumina-202610/manifest.json; do
             test -L "${results}/${f}" || { echo "not published: ${f}" >&2; exit 1; }
           done
+          # Every family's folder holds the notes on its tables beside the manifest.
+          for family in fam-a fam-b; do
+            test -L "${results}/annotations/${family}/tables-0.5.0-illumina-202610/tables.md" ||
+              { echo "not published: tables.md of ${family}" >&2; exit 1; }
+          done
           if find "${results}/annotations" -name 'stub-group*' | grep -q .; then
             echo 'the union is published beside a family' >&2
             exit 1

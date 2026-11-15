@@ -23,7 +23,7 @@ exclude-newer = "7 days"
 constraint-dependencies = ["pydantic==2.14.2"]
 
 [tool.uv.build-backend]
-# uv_build packs every file in the module's folder, so a wheel holds tables-version.txt and py.typed.
+# uv_build packs every file in the module's folder, so a wheel holds tables-version.txt, tables.md and py.typed.
 module-name = "case_annotation"
 
 [dependency-groups]

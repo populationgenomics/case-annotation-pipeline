@@ -318,8 +318,9 @@ process SV_ANNOTATION_TABLES {
     """
 }
 
-// One family's variants table, which holds a column of each member's calls, its transcripts table and its manifest,
-// from the union's tables and its gnomAD joint values. The manifest's roles are those of the proband the sheet names
+// One family's variants table, which holds a column of each member's calls, its transcripts table, its manifest and
+// the notes on the tables (tables.md, a copy of the file in the tools' package), from the union's tables and its gnomAD
+// joint values. The manifest's roles are those of the proband the sheet names
 // and of its parents; nobody has one where the sheet names none. DuckDB sorts the union's tables down to the family's
 // alleles, spilling to the boot disk.
 // A family with a structural-variant or a copy-number VCF also gets sv, which holds a column of each member's calls
@@ -344,7 +345,7 @@ process FAMILY_TABLES {
     val schema_version
 
     output:
-    tuple val(family), path('variants.parquet'), path('transcripts.parquet'), path('manifest.json'), path('{sv,sv_transcripts,repeats}.parquet', arity: '0..3')
+    tuple val(family), path('variants.parquet'), path('transcripts.parquet'), path('manifest.json'), path('tables.md'), path('{sv,sv_transcripts,repeats}.parquet', arity: '0..3')
 
     script:
     // Only a family with a caller's VCF reads the annotation of the group's structural variants.
@@ -361,7 +362,7 @@ process FAMILY_TABLES {
     stub:
     def larger = (vcfs(sv) + vcfs(cnv) ? ['sv.parquet', 'sv_transcripts.parquet'] : []) + (vcfs(repeats) ? ['repeats.parquet'] : [])
     """
-    touch variants.parquet transcripts.parquet manifest.json ${larger.join(' ')}
+    touch variants.parquet transcripts.parquet manifest.json tables.md ${larger.join(' ')}
     """
 }
 

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import importlib.metadata
+import importlib.resources
 import json
 import pathlib
 import struct
@@ -17,6 +20,7 @@ import pysam
 import pytest
 import structural_vcfs
 
+import case_annotation
 from case_annotation import (
     annotation_tables,
     cli,
@@ -277,8 +281,14 @@ def test_a_familys_tables_hold_its_alleles_sorted_in_chromosome_order(tmp_path: 
     assert [t['variant_id'] for t in _rows(out / 'transcripts.parquet')] == _ALLELES
     assert manifest.alleles == len(_ALLELES)
     assert {t.table: t.rows for t in manifest.tables} == {'variants': len(_ALLELES), 'transcripts': len(_ALLELES)}
-    # The folder holds the two tables and the manifest, and each table as the manifest records it.
-    assert sorted(f.name for f in out.iterdir()) == ['manifest.json', 'transcripts.parquet', 'variants.parquet']
+    # The folder holds the two tables, the manifest and the notes on the tables, and each table as the manifest
+    # records it.
+    assert sorted(f.name for f in out.iterdir()) == [
+        'manifest.json',
+        'tables.md',
+        'transcripts.parquet',
+        'variants.parquet',
+    ]
     assert {t.table: (t.path, t.bytes) for t in manifest.tables} == {
         table: (f'{table}.parquet', (out / f'{table}.parquet').stat().st_size) for table in ('variants', 'transcripts')
     }
@@ -1093,9 +1103,37 @@ def test_a_family_without_such_vcfs_has_no_table_of_them(tmp_path: pathlib.Path)
     assert (manifest.sv_annotation, manifest.sv_omitted_columns) == (None, ())
     assert sorted(f.name for f in (tmp_path / 'out').iterdir()) == [
         'manifest.json',
+        'tables.md',
         'transcripts.parquet',
         'variants.parquet',
     ]
+
+
+@pytest.mark.parametrize('larger', [False, True])
+def test_a_familys_folder_holds_the_packages_notes_on_the_tables_as_its_manifest_names_them(
+    tmp_path: pathlib.Path, larger: bool
+) -> None:
+    manifest = family_tables.assemble(**{**_inputs(tmp_path), **(_larger(tmp_path) if larger else {})})
+    packaged = importlib.resources.files(case_annotation).joinpath(family_tables.REFERENCE).read_bytes()
+    written = (tmp_path / 'out' / manifest.reference.path).read_bytes()
+    # Byte for byte the file of the package that wrote the tables, so it describes the tables beside it.
+    assert written == packaged
+    assert manifest.reference == family_tables.ReferenceFile(
+        path='tables.md', bytes=len(packaged), sha256=hashlib.sha256(packaged).hexdigest()
+    )
+    recorded = json.loads((tmp_path / 'out' / 'manifest.json').read_text())['reference']
+    assert recorded == {'path': 'tables.md', 'bytes': len(written), 'sha256': hashlib.sha256(written).hexdigest()}
+
+
+def test_the_manifest_gives_the_release_of_the_pipeline_that_wrote_the_folder(tmp_path: pathlib.Path) -> None:
+    manifest = family_tables.assemble(**_inputs(tmp_path))
+    written = json.loads((tmp_path / 'out' / 'manifest.json').read_text())
+    # The version of the installed package, which tests/test_package.py holds to the workflow's and the contract's.
+    installed = importlib.metadata.version('case-annotation-tools')
+    assert written['pipeline_version'] == manifest.pipeline_version == installed
+    without = {name: value for name, value in written.items() if name != 'pipeline_version'}
+    with pytest.raises(pydantic.ValidationError, match='pipeline_version\n  Field required'):
+        family_tables.FamilyManifest.model_validate(without)
 
 
 def test_the_manifest_of_a_family_without_such_vcfs_states_that_it_has_none(tmp_path: pathlib.Path) -> None:

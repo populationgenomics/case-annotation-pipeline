@@ -142,6 +142,9 @@
               "name": "manifest.json"
             },
             {
+              "name": "tables.md"
+            },
+            {
               "name": "sv.parquet",
               "row_names_any_of": [
                 "sv_vcf",

@@ -279,6 +279,30 @@
       "title": "OmittedSource",
       "type": "object"
     },
+    "ReferenceFile": {
+      "description": "The notes on the tables in a family's folder, named as a table's file is (TableFile).",
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "bytes",
+        "sha256"
+      ],
+      "title": "ReferenceFile",
+      "type": "object"
+    },
     "Role": {
       "enum": [
         "proband",
@@ -358,6 +382,10 @@
       "title": "Schema Version",
       "type": "string"
     },
+    "pipeline_version": {
+      "title": "Pipeline Version",
+      "type": "string"
+    },
     "family": {
       "title": "Family",
       "type": "string"
@@ -375,6 +403,9 @@
       },
       "title": "Tables",
       "type": "array"
+    },
+    "reference": {
+      "$ref": "#/$defs/ReferenceFile"
     },
     "sv_callers": {
       "items": {
@@ -420,9 +451,11 @@
   },
   "required": [
     "schema_version",
+    "pipeline_version",
     "family",
     "members",
     "tables",
+    "reference",
     "sv_callers",
     "alleles",
     "annotation",

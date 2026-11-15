@@ -307,7 +307,8 @@ _SUBCOMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Ca
             "writes a family's variants table, with a column of each member's calls, and its transcripts table from "
             "its VCF and the union's tables, its sv, sv_transcripts and repeats tables from the VCFs of its "
             "structural variants, copy numbers and repeats where it has them, with the annotation of the group's "
-            'structural variants, and its manifest with the roles of the proband the run names and of its parents'
+            'structural variants, its manifest with the roles of the proband the run names and of its parents, and '
+            'a copy of the notes on the tables (tables.md)'
         ),
         _family_tables_arguments,
         _family_tables,

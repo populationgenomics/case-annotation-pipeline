@@ -84,8 +84,9 @@ The rest of the document has two halves, and each reads on its own.
   Illumina's data and runs the Annotator. It covers catalogs and sources, which of the sources are dated, the three
   modes, the licence and the machines.
 - [Family tables](#family-tables) is for the operator who runs `family_tables.nf`. It covers what the workflow takes,
-  its steps and what it publishes. What each column of the tables holds is in
-  [Reading the family tables](family-tables.md#reference-files-columns-and-manifest), whose reader writes the queries.
+  its steps and what it publishes. [Reading the family tables](family-tables.md) is for the reader who writes the
+  queries, and the notes on the tables, [`tables.md`](../src/case_annotation/tables.md), hold what a table does not
+  show.
 
 ## Annotating with Illumina's Annotator
 
@@ -275,6 +276,7 @@ family that also brings the calls of its [larger variants](glossary.md#larger-va
 | `sv.parquet`             | optional: the structural variants and the copy-number variants, one row per record of the two callers, told apart by `caller`, with its annotation, and one column per sequenced member that holds the member's call of it |
 | `sv_transcripts.parquet` | optional: one row per structural variant or copy number segment and transcript that the Annotator lists for it                                                                                                             |
 | `repeats.parquet`        | optional: one row per tandem repeat that a repeat genotyper sized, and one column per sequenced member that holds the sizes of the member's alleles                                                                        |
+| `tables.md`              | the notes on the tables: what a table does not show and a query gets wrong without an error                                                                                                                                |
 | `manifest.json`          | the tables the folder holds with their sizes and checksums, the pedigree with each member's role, and what annotated the tables                                                                                            |
 
 The optional tables come from the family's own VCFs of those variants. The Annotator annotates the structural variants
@@ -286,8 +288,8 @@ at the expected copy number are left out. A member carries it by copy number, a 
 have a row from each caller ([Who carries a record](family-tables.md#who-carries-a-record)).
 
 This half explains how the workflow makes them. [Reading the family tables](family-tables.md) follows one VCF record
-into its rows and shows the queries, and its [reference](family-tables.md#reference-files-columns-and-manifest) defines
-every column and the manifest.
+into its rows, shows the queries and defines the manifest. [The contract](../contract/tables.json) has every column with
+its type.
 
 The same workflow serves a laboratory's real families and synthetic ones: it reads a VCF and a PED file per family,
 takes each family's proband from the sheet of families that the run is given, and knows nothing about where they came
@@ -686,9 +688,13 @@ echtvar matches an allele by position, REF and ALT exactly. The union's alleles 
 that gnomAD's VCF writes at another position reads as one gnomAD does not hold. gnomAD is a current source
 ([Dated sources](#dated-sources)), like the frequencies Illumina carries.
 
-How to read the four columns is part of the tables' reference: the step a frequency is stored in, an empty value beside
-a 0, what the archive lacks, and comparing a 32-bit frequency with a threshold
-([gnomAD's joint columns](family-tables.md#gnomads-joint-columns)).
+The archive stores a frequency in steps of 5e-7: the largest multiple that is not above gnomAD's value or, for about
+0.9% of values, the one below that, because its encoder multiplies in 32-bit arithmetic. Its counts are exact. It marks
+an allele that it lacks with a missing allele count, and all four columns are then empty. An allele that gnomAD lists
+with an allele count of 0 has 0 in all four, and a filtering allele frequency that gnomAD did not compute reads 0 as
+well. The archive has no allele number, no hemizygote count, no values per ancestry group and no filter status, and
+gnomAD's joint release has no chrM. The notes on the tables, [`tables.md`](../src/case_annotation/tables.md), have the
+part of this that a query has to know.
 
 ### De novo variants
 
@@ -731,8 +737,7 @@ call that mean the same thing in `sv` and in `variants` have the same names
 The tables do not replace the VCFs. They leave out the assembled contigs, the homology and inserted sequences that the
 structural-variant caller reports, and the repeat genotyper's motif counts.
 
-The workflow adds a little to what the callers wrote, and [the reference](family-tables.md#the-sv-table) defines each
-addition.
+The workflow adds a little to what the callers wrote.
 
 | What the workflow adds                   | Why                                                                                                                                                                                                                                                                                      |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -945,6 +950,7 @@ annotations/family-a/tables-0.5.0-illumina-202610/
                                where the sheet names sv_vcf or cnv_vcf for the family
     repeats.parquet              where the sheet names repeat_vcfs for the family
     manifest.json
+    tables.md
 ```
 
 ### Checks that stop a run
@@ -968,5 +974,4 @@ process has the rest, such as the form of a name, a run config of another catalo
 `FAMILY_CHECK` refuses the sample names above because DuckDB matches column names without regard to case, and each
 sample names a column of `variants` beside the columns that describe the allele, such as `pos` and `revel`, and a column
 of `sv` and of `repeats` beside the columns that describe a record or a repeat, such as `sv_id`. It refuses such a name
-whether or not the family's row names the VCFs of its larger variants
-([The members' columns](family-tables.md#the-members-columns)).
+whether or not the family's row names the VCFs of its larger variants.

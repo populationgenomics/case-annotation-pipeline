@@ -16,7 +16,9 @@ launches the workflows or reads a family's folder. It copies this folder at the 
 
 Both examples are invented: the families, the samples, the paths, the sizes and the checksums belong to no real case.
 
-[Reading the family tables](../docs/family-tables.md) says what each column and each manifest key means, and
+The notes on the tables, [`tables.md`](../src/case_annotation/tables.md), say what the tables do not show and a query
+gets wrong without an error, and every family's folder has a copy of them under that name.
+[Reading the family tables](../docs/family-tables.md) says what each manifest key means, and
 [Annotation](../docs/annotation.md) what each param does.
 
 ## Reading the files
