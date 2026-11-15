@@ -14,7 +14,7 @@
 # user-mode emulators, 8.0.4 and 8.1.5 ran the wheel, while 9.2.2, 10.0.4 and 10.2.3 crashed as soon as pyarrow or
 # DuckDB was imported.
 
-FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.8@sha256:5cc1805e2426484abca4ad46ea783bab281fdb225fd82d8ce6d66a81254bac85 AS uv
 
 # The package without its sources or its dev groups. Its metadata names the README, so the build reads that too.
 FROM python:3.12.16-slim-trixie@sha256:b18b261e1b4974b4f321451ad5251ded85abb22c2b8b262da527dda1d031ab30 AS python-packages
