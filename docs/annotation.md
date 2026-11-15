@@ -612,10 +612,11 @@ That folder is what `annotated` takes ([Reusing an annotation](#reusing-an-annot
 
 A run into folders that an earlier run wrote replaces what that run published. The unions' tables and joint values are
 removed whole and written again, so the union's folder holds the tables that the families' newest tables were cut from.
-A run that annotates replaces the Annotator's output of an earlier run of the group with the same catalog, whatever
-version of the tables that run wrote. A run that reuses an annotation publishes no Annotator JSON, and leaves one that
-an earlier run published there. A family's folder keeps an `sv.parquet`, an `sv_transcripts.parquet` or a
-`repeats.parquet` of an earlier run as well, where the family's row no longer names the VCFs: the new manifest's
+A run that annotates replaces the files that an earlier run of the group with the same catalog published for the
+Annotator, whatever version of the tables that run wrote. It replaces only the files that it writes itself
+([Reusing an annotation](#reusing-an-annotation)). A run that reuses an annotation publishes no Annotator JSON, and
+leaves one that an earlier run published there. A family's folder keeps an `sv.parquet`, an `sv_transcripts.parquet` or
+a `repeats.parquet` of an earlier run as well, where the family's row no longer names the VCFs: the new manifest's
 `tables` lists the tables that belong to it.
 
 ### Reusing an annotation
@@ -643,7 +644,17 @@ group with structural variants.
 A reusing run does not say which sources or which Annotator it expects, so it accepts an annotation that was made with
 other sources or another Annotator. Each family's manifest then records what annotated its tables (`annotation` and
 `sv_annotation`), and the tables leave out the columns of a dated source that `run.json` does not list. Tables with
-other sources need a run with `sources`: the Annotator runs again, and its output replaces what the folder held.
+other sources need a run with `sources`: the Annotator runs again, and each file that it writes replaces the folder's.
+
+> [!WARNING]
+>
+> The folder has one `run.json` for both JSONs, and an annotating run leaves a file that it does not write. A run with
+> other sources can publish the JSON of the alleles with its `run.json` and no JSON of the structural variants, because
+> its sheet names no such VCF or because it stopped before the second Annotator run ended. The earlier
+> `out/<group>.sv.json.gz` then stays beside the new `run.json`, and a reusing run reads it as made with the new
+> sources. If the union of the structural variants is still the same, the checks above stop that run only where the
+> earlier JSON holds data of a dated source that the new `run.json` does not list. After such a run, remove
+> `out/<group>.sv.json.gz` from the folder before reusing it.
 
 ### Groups
 
@@ -859,7 +870,7 @@ as JSON, for a program that writes a sheet or launches a run.
 | `workers`                                                                 | the Annotator's worker processes, 8 by default                                                                                       |
 | `annotator_container`, `annotator`, `annotator_version`, `license_secret` | the Annotator's image, path and version, and the licence's secret, as for `annotator.nf`; needed unless the run reuses an annotation |
 | `tools_container`                                                         | the image `case-annotation-tools`, which runs every other step                                                                       |
-| `output_dir`                                                              | where the two folders below are published                                                                                            |
+| `output_dir`                                                              | where the folders below are published                                                                                                |
 
 ### Params of `annotator.nf`
 

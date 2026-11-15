@@ -176,6 +176,11 @@ annotated: gs://cpg-rd-benchmark-test/annotation-unions/<group>/illumina-<catalo
 That folder can be reused when it holds `out/<group>.json.gz` and `run.json`, and `out/<group>.sv.json.gz` as well when
 a family of the group names an `sv_vcf` or a `cnv_vcf`.
 
+A release before `0.3.0` published the Annotator's output to
+`gs://cpg-rd-benchmark-test/annotation-unions/<group>/tables-<tables version>-illumina-<catalog>/annotator/`. Such a
+folder is reused by giving it as `annotated`, or by copying its contents to the folder above, where a launcher that
+fills in the contract's folder looks for it.
+
 | Output                                      | Where                                                                                              |
 | ------------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | each family's folder                        | `gs://cpg-rd-benchmark-test/annotations/<family>/tables-<tables version>-illumina-<catalog>/`      |
