@@ -1888,6 +1888,119 @@ The tables share these properties:
 The tables hold no gene-level knowledge beyond a gene's identifiers. What OMIM, ClinGen and other gene–disease sources
 say about a gene is knowledge that the reader brings.
 
+### Column vocabularies
+
+Several string columns hold one of a small set of values, the column's vocabulary. A query has to write a value exactly
+as this section gives it. DuckDB compares strings with regard to case, so a condition on another spelling, such as
+`biotype = 'protein_coding'` or `worst_impact = 'HIGH'`, matches no row and raises no error.
+
+The vocabularies of the first group are closed. The pipeline writes these values itself, or fails a run whose input
+holds another value, so a folder has no value outside the lists.
+
+| Column                                                                                                              | Values                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `chrom`, in every table                                                                                             | `chr1` to `chr22`, `chrX`, `chrY` and `chrM`                                            |
+| `zygosity`, in a member's call of `variants` and of `sv`                                                            | `hom_ref`, `het`, `hom_alt`                                                             |
+| `caller`                                                                                                            | `sv`, `cnv`                                                                             |
+| `sv_type`                                                                                                           | `DEL`, `INS`, `DUP`, `INV`, `BND`, `CNV`                                                |
+| `annotated_as`                                                                                                      | `structural`, `small_variant`                                                           |
+| `bnd_extends`, `mate_extends`                                                                                       | `left`, `right`                                                                         |
+| `variant_type` of `sv_transcripts`                                                                                  | the Annotator's ten types that [the table's reference](#the-sv_transcripts-table) lists |
+| `consequences`, `worst_consequence` and `mane_select_consequence`, wherever a table or an entry of `genes` has them | the 50 terms of the severity order below                                                |
+
+A consequence is a Sequence Ontology term as the Annotator writes it. The conversion ranks the terms by this list, from
+most to least severe, and fails on a term outside it: `transcript_ablation`, `splice_acceptor_variant`,
+`splice_donor_variant`, `stop_gained`, `frameshift_variant`, `stop_lost`, `start_lost`, `transcript_amplification`,
+`feature_elongation`, `feature_truncation`, `unidirectional_gene_fusion`, `inframe_insertion`, `inframe_deletion`,
+`inframe_indel`, `missense_variant`, `protein_altering_variant`, `splice_donor_5th_base_variant`,
+`splice_region_variant`, `splice_donor_region_variant`, `splice_polypyrimidine_tract_variant`,
+`incomplete_terminal_codon_variant`, `start_retained_variant`, `stop_retained_variant`, `synonymous_variant`,
+`coding_sequence_variant`, `mature_miRNA_variant`, `5_prime_UTR_variant`, `3_prime_UTR_variant`,
+`non_coding_transcript_exon_variant`, `exon_variant`, `intron_variant`, `NMD_transcript_variant`,
+`non_coding_transcript_variant`, `coding_transcript_variant`, `transcript_variant`, `upstream_gene_variant`,
+`downstream_gene_variant`, `TFBS_ablation`, `TFBS_amplification`, `TF_binding_site_variant`,
+`regulatory_region_ablation`, `regulatory_region_amplification`, `regulatory_region_variant`, `intergenic_variant`,
+`five_prime_duplicated_transcript`, `three_prime_duplicated_transcript`, `copy_number_increase`, `copy_number_decrease`,
+`structural_variant` and `sequence_variant`. Ensembl VEP writes 41 of the terms, in the same spelling and order. The
+other nine are the Annotator's own: `unidirectional_gene_fusion`, `inframe_indel`, `exon_variant`, `transcript_variant`,
+the two that end in `_duplicated_transcript`, `copy_number_increase`, `copy_number_decrease` and `structural_variant`.
+
+The other vocabularies are open. Their values are passed through unchanged from whoever defines them: the Annotator, a
+source that it carries, or the family's caller. A new catalog of the Annotator, a new release of a source or another
+caller can therefore bring a value that this section does not list. The lists give the values in the tables of one
+whole-genome trio, which DRAGEN called and the Annotator's catalog `202610` annotated. This query lists the values in a
+reader's own table:
+
+```python
+biotypes = con.sql('SELECT DISTINCT biotype FROM transcripts ORDER BY biotype').to_arrow_table()
+```
+
+The values of a list come from `SELECT DISTINCT unnest(filters)`. Those of a field of a list's entries come from
+`SELECT DISTINCT unnest(list_transform(clinvar_records, lambda r: r.classification))`, and those of a field of a
+member's call come from `SELECT DISTINCT "<sample>".ft`.
+
+| Column                                                                                 | Whose values           | Values                                                                                                                                                          |
+| -------------------------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `source`, in `transcripts` and `sv_transcripts`                                        | the Annotator's        | `Ensembl`, `RefSeq`                                                                                                                                             |
+| `impact` in `transcripts`, and `worst_impact` in `variants` and in an entry of `genes` | the Annotator's        | `high`, `moderate`, `low`, `modifier`                                                                                                                           |
+| `biotype`, in `transcripts`, in `sv_transcripts` and in an entry of `genes`            | the Annotator's        | the 23 values below                                                                                                                                             |
+| `variant_type` of `variants`                                                           | the Annotator's        | `SNV`, `insertion`, `deletion`; the Annotator also has `MNV` and `delins`, which some small variants of `sv_transcripts` have                                   |
+| `variant_type` of an entry of `gnomad_sv_matches`                                      | the Annotator's        | `deletion`, `duplication`, `tandem_duplication`, `insertion`, `mobile_element_insertion`                                                                        |
+| `variant_type` of an entry of `clinvar_records`                                        | the Annotator's        | in `variants`: `SNV`, `insertion`, `deletion`, `duplication`, `delins`; in `sv`: `deletion`, `duplication`, `insertion`, `copy_number_loss`, `copy_number_gain` |
+| `record_type` of an entry of `clinvar_records`                                         | ClinVar's              | `classified`                                                                                                                                                    |
+| `clinvar_classification`, and `classification` in an entry of `clinvar_records`        | ClinVar's              | one of the terms below, or several joined by `; `                                                                                                               |
+| `clinvar_review_status`, and `review_status` in an entry of `clinvar_records`          | ClinVar's              | the twelve statuses below                                                                                                                                       |
+| `alphamissense_max_class` in `variants`, and `alphamissense_class` in `transcripts`    | AlphaMissense's        | `likely_benign`, `ambiguous`, `likely_pathogenic`                                                                                                               |
+| `filters`, in `variants`, in `sv` and in a member's genotype of `repeats`              | the caller's           | the FILTER names below                                                                                                                                          |
+| `ft`, in a member's call of `variants` and of `sv`                                     | the caller's           | `PASS`, or the names below joined by `;`                                                                                                                        |
+| `dn`, in a member's call of `variants` and of `sv`                                     | DRAGEN's               | `DeNovo`, `Inherited`, `LowDQ`                                                                                                                                  |
+| `so`, in a member's genotype of `repeats`                                              | the repeat genotyper's | `SPANNING`, `FLANKING`, `INREPEAT`                                                                                                                              |
+
+`impact` and `worst_impact` are written in lowercase. Ensembl VEP's `IMPACT` has the same four words in capitals.
+
+`biotype` is the Annotator's own type of a transcript, for Ensembl's transcripts as for RefSeq's. Ensembl VEP's
+`BIOTYPE` holds Ensembl's biotypes instead, and where VEP has `protein_coding` the value here is `mRNA`. A transcript
+with a protein has `mRNA`, or one of the four values that end in `_gene_segment`.
+
+| Transcripts of   | Values of `biotype`                                                                                                               |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| both gene models | `mRNA`, `lncRNA`, `rRNA`, `tRNA`, `snRNA`, `snoRNA`, `scRNA`, `transcript`                                                        |
+| Ensembl alone    | `miRNA`, `processed_transcript`, `pseudogenic_transcript`, `C_gene_segment`, `D_gene_segment`, `J_gene_segment`, `V_gene_segment` |
+| RefSeq alone     | `ncRNA`, `antisense_RNA`, `primary_transcript`, `Y_RNA`, `vault_RNA`, `telomerase_RNA`, `RNase_MRP_RNA`, `RNase_P_RNA`            |
+
+`clinvar_classification`, and the `classification` of a record, hold ClinVar's germline classification. It is one of
+ClinVar's terms, or several joined by `; `, as in `Pathogenic; risk factor`. The terms keep ClinVar's capitals, so
+`Pathogenic` starts with one and `risk factor` has none. The terms are `Pathogenic`, `Pathogenic/Likely pathogenic`,
+`Likely pathogenic`, `Uncertain significance`, `Likely benign`, `Benign/Likely benign`, `Benign`,
+`Conflicting classifications of pathogenicity`, `Established risk allele`, `Likely risk allele`,
+`Uncertain risk allele`, `VUS-mid`, `Affects`, `association`, `association not found`, `confers sensitivity`,
+`drug response`, `protective`, `risk factor`, `other`, `not provided` and `no classifications from unflagged records`. A
+record of `sv` also has `conflicting data from submitters`. A query therefore matches a classification by a pattern
+([ClinVar pathogenic variants in anyone in the family](#clinvar-pathogenic-variants-in-anyone-in-the-family)).
+
+The conversion gives a record its `stars` from its review status, by ClinVar's own rule. A status outside this list
+keeps its text and has no stars.
+
+| Review status                                                                                                                                                                        | Stars |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----- |
+| `practice guideline`                                                                                                                                                                 | 4     |
+| `reviewed by expert panel`                                                                                                                                                           | 3     |
+| `criteria provided, multiple submitters, no conflicts`; `criteria provided, multiple submitters`                                                                                     | 2     |
+| `criteria provided, conflicting classifications`; `criteria provided, conflicting interpretations`; `criteria provided, single submitter`                                            | 1     |
+| `no assertion criteria provided`; `no assertion provided`; `no classification provided`; `no classification for the individual variant`; `no classifications from unflagged records` | 0     |
+
+`filters` holds the FILTER names of the VCF record, which the caller defines in the VCF's header, and `ft` the names of
+the sample filters that a member's call failed. `ft` is one string, as the VCF writes it: `PASS`, or the names joined by
+`;`, as in `LowDepth;LowGQ`. The condition `"<sample>".ft = 'LowGQ'` misses that call, and
+`list_contains(string_split("<sample>".ft, ';'), 'LowGQ')` finds it.
+
+| Rows                                   | Names in `filters`                                                                                                                                                                                                                                             | Names in `ft`                                                                                                                                                                                                                                                                    |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `variants`                             | `PASS`, `DRAGENSnpHardQUAL`, `DRAGENIndelHardQUAL`, `LowDepth`, `StrandArtifact`, `base_quality`, `filtered_reads`, `low_af`, `low_frac_info_reads`, `low_tlen`, `mapping_quality`, `no_reliable_supporting_read`, `too_few_supporting_reads`, `weak_evidence` | `PASS`, `LowDepth`, `LowGQ`, `PloidyConflict`, `MosaicLowAF`, `TargetedConflict`, `StrandArtifact`, `base_quality`, `filtered_reads`, `low_af`, `low_frac_info_reads`, `low_tlen`, `mapping_quality`, `no_reliable_supporting_read`, `too_few_supporting_reads`, `weak_evidence` |
+| `sv`, of the structural-variant caller | `PASS`, `Duplicate`, `FailedDepth`, `LowSupport`, `LowVAF`, `MaxDepth`, `MaxMQ0Frac`, `MinQUAL`, `Ploidy`, `SampleFT`                                                                                                                                          | `PASS`, `MinGQ`, `Ploidy`                                                                                                                                                                                                                                                        |
+| `sv`, of the copy-number caller        | `PASS`, `SampleFT`                                                                                                                                                                                                                                             | `PASS`, `cnvBinSupportRatio`, `cnvLength`, `cnvLikelihoodRatio`, `cnvQual`, `dinucQual`, `highCN`                                                                                                                                                                                |
+| `repeats`                              | `PASS`                                                                                                                                                                                                                                                         | the genotype has no `ft`                                                                                                                                                                                                                                                         |
+
 ### The `variants` table
 
 `variants` has one row per allele: the columns that describe the allele, which this section lists, and then one column
@@ -1909,11 +2022,11 @@ without a record, and not an empty list).
 The consequence columns summarise the allele's rows of `transcripts`. An allele with no transcript nearby has none of
 them.
 
-| Column                              | Type                    | Holds                                                                                                                                                                                                                     |
-| ----------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `worst_consequence`, `worst_impact` | strings                 | the allele's own, to filter on: the most severe consequence over all the allele's transcripts, Ensembl's and RefSeq's, by Ensembl's ordering of Sequence Ontology terms, and the impact of the transcript that has it     |
-| `hgnc_ids`                          | list of 32-bit integers | the HGNC ids of the genes of all the allele's transcripts, each once, in ascending order; `HGNC:1100` is 1100                                                                                                             |
-| `genes`                             | list of structs         | one entry for each gene of the allele's transcripts, with what is of that gene: its identifiers, its own most severe consequence and its MANE Select transcript; the gene of the allele's `worst_consequence` comes first |
+| Column                              | Type                    | Holds                                                                                                                                                                                                                                                          |
+| ----------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `worst_consequence`, `worst_impact` | strings                 | the allele's own, to filter on: the most severe consequence over all the allele's transcripts, Ensembl's and RefSeq's, by Ensembl's ordering of Sequence Ontology terms, and the impact of the transcript that has it: `high`, `moderate`, `low` or `modifier` |
+| `hgnc_ids`                          | list of 32-bit integers | the HGNC ids of the genes of all the allele's transcripts, each once, in ascending order; `HGNC:1100` is 1100                                                                                                                                                  |
+| `genes`                             | list of structs         | one entry for each gene of the allele's transcripts, with what is of that gene: its identifiers, its own most severe consequence and its MANE Select transcript; the gene of the allele's `worst_consequence` comes first                                      |
 
 A column of `variants` beside `genes` describes the allele as a whole. What is of one gene or of one transcript of an
 allele is in the allele's entry of `genes` for that gene, and in `transcripts`. An entry describes one transcript chosen
@@ -1925,7 +2038,7 @@ allele's genes gives the allele its `worst_consequence` and `worst_impact`.
 | ------------------------------------------------------------------------------------------------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `gene_symbol`, `gene_id`, `hgnc_id`                                                              | strings, and a 32-bit integer for `hgnc_id` | the gene: the chosen transcript's symbol, its Ensembl gene, and the HGNC id of the symbol, where it has one                                                                                                                                |
 | `worst_consequence`, `worst_impact`                                                              | strings                                     | the most severe consequence among the gene's transcripts, and the impact of the chosen transcript                                                                                                                                          |
-| `worst_transcript_id`, `biotype`                                                                 | strings                                     | the chosen transcript and its biotype; the variant id and this id are the key of the transcript's row of `transcripts`                                                                                                                     |
+| `worst_transcript_id`, `biotype`                                                                 | strings                                     | the chosen transcript and its biotype, such as `mRNA`; the variant id and this id are the key of the transcript's row of `transcripts`                                                                                                     |
 | `mane_select_transcript_id`, `mane_select_consequence`, `mane_select_hgvsc`, `mane_select_hgvsp` | strings                                     | the gene's MANE Select transcript, which Illumina flags on RefSeq's copy: its id, the most severe consequence on it and the HGVS names on it and on its protein; all four empty where the allele has no MANE Select transcript of the gene |
 
 `gene_id` is the gene's Ensembl id also where the chosen transcript is RefSeq's: the Ensembl gene of the allele's
@@ -1978,7 +2091,7 @@ Illumina gives. Illumina's bundle has no joint values, and the two joint frequen
 
 | Score column                                   | Type                 | Holds                                                                                                                                       |
 | ---------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `alphamissense_max`, `alphamissense_max_class` | 64-bit float, string | the highest AlphaMissense score of the allele, with its class                                                                               |
+| `alphamissense_max`, `alphamissense_max_class` | 64-bit float, string | the highest AlphaMissense score of the allele, with its class: `likely_benign`, `ambiguous` or `likely_pathogenic`                          |
 | `revel`                                        | 64-bit float         | the REVEL score                                                                                                                             |
 | `spliceai_max`                                 | 64-bit float         | the largest of SpliceAI's four delta scores; Illumina's filtered release leaves out low scores, so no value means none passed its threshold |
 | `primateai3d_max`, `dann`, `phylop`, `gerp`    | 64-bit floats        | the highest PrimateAI-3D score, and the DANN, phyloP and GERP scores                                                                        |
@@ -1996,6 +2109,8 @@ A record's fields are named `accession`, `version`, `record_type`, `variant_type
 `stars`, `last_evaluated` and `conditions`. The records are ordered by stars (a record without a germline
 classification, or with a review status ClinVar does not list, last), then by the date last evaluated (latest first),
 then by accession. Records that disagree show in the list, not in the summary.
+[Column vocabularies](#column-vocabularies) lists the values of `classification`, `review_status`, `record_type` and
+`variant_type`.
 
 > [!WARNING]
 >
@@ -2018,8 +2133,8 @@ field as `"<sample>".gt`.
 | `pl`                 | list of 32-bit integers              | the Phred-scaled genotype likelihoods                                                                                                                                                                                                                                                                                   |
 | `ad_ref`, `ad_alt`   | 32-bit integers                      | the reads of the reference and of the allele                                                                                                                                                                                                                                                                            |
 | `allele_balance`     | 64-bit float                         | the allele's share of the reads of the reference and the allele, empty unless both depths are known and not both 0                                                                                                                                                                                                      |
-| `ps`, `ft`           | 32-bit integer, string               | the call's phase set and its sample filter                                                                                                                                                                                                                                                                              |
-| `dn`, `dq` and `msc` | string, 64-bit float, 32-bit integer | DRAGEN's DN, DQ and MSC, which are empty for a VCF from another caller                                                                                                                                                                                                                                                  |
+| `ps`, `ft`           | 32-bit integer, string               | the call's phase set and its sample filter: `PASS`, or the names of the filters that the call failed, joined by `;`                                                                                                                                                                                                     |
+| `dn`, `dq` and `msc` | string, 64-bit float, 32-bit integer | DRAGEN's DN (`DeNovo`, `Inherited` or `LowDQ`), DQ and MSC, which are empty for a VCF from another caller                                                                                                                                                                                                               |
 
 `pl` holds three likelihoods for a diploid call (`0/0`, `0/1`, `1/1`) and two for a haploid one (`0`, `1`), as DRAGEN
 calls a male's X and Y outside the pseudoautosomal regions. It is empty where the VCF has none. When
@@ -2048,16 +2163,16 @@ family that brings no VCF for them, so that a name is refused or accepted whatev
 
 `transcripts` has one row per allele and transcript, about eleven per allele in a whole genome.
 
-| Column                                                                                                        | Type                                        | Holds                                                                                                                                                       |
-| ------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `chrom`, `pos`, `variant_id`                                                                                  | string, 32-bit integer, string              | the allele                                                                                                                                                  |
-| `transcript_id`, `source`, `biotype`                                                                          | strings                                     | the transcript, its `source` (Ensembl or RefSeq) and its biotype                                                                                            |
-| `gene_symbol`, `gene_id`, `hgnc_id`                                                                           | strings, and a 32-bit integer for `hgnc_id` | the transcript's gene: its symbol, Ensembl's gene id for an Ensembl transcript and NCBI's for a RefSeq one, and the HGNC id of the symbol, where it has one |
-| `consequences`, `worst_consequence`                                                                           | list of strings, string                     | the transcript's `consequences` and the most severe of them                                                                                                 |
-| `impact`, `hgvsc`, `hgvsp`, `protein_id`                                                                      | strings                                     | the impact, the HGVS names on the transcript and its protein, and the protein's id                                                                          |
-| `is_mane_select`, `is_canonical`                                                                              | booleans                                    | whether Illumina flags the transcript as MANE Select, and as canonical                                                                                      |
-| `exon`, `intron`, `cdna_pos`, `cds_pos`, `protein_pos`, `codons`, `amino_acids`                               | strings                                     | the exon, intron and positions                                                                                                                              |
-| `alphamissense_pathogenicity`, `alphamissense_class`, `primateai3d_score`, `spliceai_max`, `promoterai_score` | 64-bit floats, and a string for the class   | the scores Illumina gives per transcript or gene: AlphaMissense, PrimateAI-3D, SpliceAI (through the transcript's Ensembl genes) and PromoterAI             |
+| Column                                                                                                        | Type                                        | Holds                                                                                                                                                            |
+| ------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chrom`, `pos`, `variant_id`                                                                                  | string, 32-bit integer, string              | the allele                                                                                                                                                       |
+| `transcript_id`, `source`, `biotype`                                                                          | strings                                     | the transcript, its `source` (`Ensembl` or `RefSeq`) and its biotype, which is the Annotator's own, such as `mRNA` ([Column vocabularies](#column-vocabularies)) |
+| `gene_symbol`, `gene_id`, `hgnc_id`                                                                           | strings, and a 32-bit integer for `hgnc_id` | the transcript's gene: its symbol, Ensembl's gene id for an Ensembl transcript and NCBI's for a RefSeq one, and the HGNC id of the symbol, where it has one      |
+| `consequences`, `worst_consequence`                                                                           | list of strings, string                     | the transcript's `consequences` and the most severe of them                                                                                                      |
+| `impact`, `hgvsc`, `hgvsp`, `protein_id`                                                                      | strings                                     | the impact (`high`, `moderate`, `low` or `modifier`), the HGVS names on the transcript and its protein, and the protein's id                                     |
+| `is_mane_select`, `is_canonical`                                                                              | booleans                                    | whether Illumina flags the transcript as MANE Select, and as canonical                                                                                           |
+| `exon`, `intron`, `cdna_pos`, `cds_pos`, `protein_pos`, `codons`, `amino_acids`                               | strings                                     | the exon, intron and positions                                                                                                                                   |
+| `alphamissense_pathogenicity`, `alphamissense_class`, `primateai3d_score`, `spliceai_max`, `promoterai_score` | 64-bit floats, and a string for the class   | the scores Illumina gives per transcript or gene: AlphaMissense, PrimateAI-3D, SpliceAI (through the transcript's Ensembl genes) and PromoterAI                  |
 
 Identifiers are matched without their version, since Illumina's score sources and gene models carry different versions.
 Where a source gives several entries for one transcript or gene, the highest score is kept, as it is for the
@@ -2182,7 +2297,7 @@ record in a whole genome, and none for a record that touches no transcript. Its 
 | ------------------------------------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `chrom`, `pos`, `end_pos`, `sv_id`   | string, two 32-bit integers, string         | the record, as in `sv`                                                                                                                                                                                                               |
 | `variant_type`                       | string                                      | the Annotator's type of the allele: `deletion`, `insertion`, `tandem_duplication`, `duplication`, `inversion`, `translocation` for a breakend, `copy_number_loss`, `copy_number_gain`, and `delins` or `MNV` for some small variants |
-| `transcript_id`, `source`, `biotype` | strings                                     | the transcript, its `source` (Ensembl or RefSeq) and its biotype                                                                                                                                                                     |
+| `transcript_id`, `source`, `biotype` | strings                                     | the transcript, its `source` (`Ensembl` or `RefSeq`) and its biotype, as in `transcripts`                                                                                                                                            |
 | `gene_symbol`, `gene_id`, `hgnc_id`  | strings, and a 32-bit integer for `hgnc_id` | the transcript's gene: its symbol, Ensembl's gene id for an Ensembl transcript and NCBI's for a RefSeq one, and the HGNC id of the symbol, where it has one                                                                          |
 | `consequences`                       | list of strings                             | the Annotator's terms for the transcript, from most to least severe                                                                                                                                                                  |
 | `protein_id`                         | string                                      | the id of the transcript's protein, for a transcript that codes for one                                                                                                                                                              |
