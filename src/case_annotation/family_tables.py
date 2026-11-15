@@ -2,7 +2,8 @@
 
 The input is the family's normalised VCF (one allele per record, primary chromosomes only, each allele carried by some
 member), its PED file, the proband that the run's sheet names for it, if any, and the tables and the gnomAD joint values
-of the union that its alleles were annotated in. The output folder holds two Parquet files and a manifest:
+of the union that its alleles were annotated in. The output folder holds two Parquet files, a manifest and the notes on
+the tables:
 
 - `variants.parquet`: one row per allele. It holds the union's `variants` row of the allele, less the columns of the
   dated sources the run did not name, gnomAD's joint values of it, the family's own QUAL and FILTER and, as in a VCF,
@@ -10,7 +11,8 @@ of the union that its alleles were annotated in. The output folder holds two Par
   own call of the allele;
 - `transcripts.parquet`: the union's `transcripts` rows of the family's alleles;
 - `manifest.json`: the tables, the pedigree with the roles of the named proband and its parents, and what annotated the
-  alleles: the Annotator's run and the archive of gnomAD's joint values.
+  alleles: the Annotator's run and the archive of gnomAD's joint values;
+- `tables.md`: a copy of the notes on the tables in this package (NOTES), which the manifest names.
 
 A family whose sheet row also names VCFs of its structural variants, its copy-number segments or its members' repeats
 (Structural) gets up to three more tables, which the manifest lists with the others:
@@ -33,6 +35,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import importlib.metadata
 import importlib.resources
 import pathlib
 import tempfile
@@ -62,6 +65,14 @@ from case_annotation import (
 # which forbids unknown keys, refuses the new key; nothing in this repository reads a manifest back.
 # It is the one line of tables-version.txt in this package, so that a caller outside Python can read the same value.
 SCHEMA_VERSION = importlib.resources.files('case_annotation').joinpath('tables-version.txt').read_text().strip()
+# The notes on the tables (tables.md in this package): what a reader of the tables cannot see in them and gets wrong
+# without an error. They list no columns: a table's schema and the contract's tables.json do. A family's folder gets a
+# copy under the same name, so that a reader of the folder has the notes on the tables it reads.
+NOTES = 'tables.md'
+# The release of the pipeline that writes a folder: the version of this package as installed, which the tests hold to
+# pyproject.toml, to nextflow.config and to the contract's workflow.json. A run takes its tools from an image, and the
+# family-tables command refuses to write for a workflow of another version, so the value is the workflow's as well.
+PIPELINE_VERSION = importlib.metadata.version('case-annotation-tools')
 ROW_GROUP_ROWS = 100_000
 PRIMARY = tuple(f'chr{c}' for c in (*range(1, 23), 'X', 'Y', 'M'))
 _CHROM_RANK = {c: i for i, c in enumerate(PRIMARY)}
@@ -274,6 +285,14 @@ class TableFile(pydantic.BaseModel, frozen=True, extra='forbid'):
     sha256: str
 
 
+class NotesFile(pydantic.BaseModel, frozen=True, extra='forbid'):
+    """The notes on the tables in a family's folder, named as a table's file is (TableFile)."""
+
+    path: str  # relative to the manifest
+    bytes: int
+    sha256: str
+
+
 # The proband that the run's sheet names (member_roles) and that member's parents by the PED file.
 type Role = Literal['proband', 'father', 'mother']
 
@@ -290,10 +309,14 @@ class FamilyMember(pydantic.BaseModel, frozen=True, extra='forbid'):
 
 class FamilyManifest(pydantic.BaseModel, frozen=True, extra='forbid'):
     schema_version: str
+    # The release of the pipeline that wrote the folder (PIPELINE_VERSION), the same in every run of one release.
+    pipeline_version: str
     family: str
     members: tuple[FamilyMember, ...]
     # variants and transcripts, then sv, sv_transcripts and repeats where the family has them
     tables: tuple[TableFile, ...]
+    # The notes on the tables (NOTES), which every folder holds beside its manifest.
+    notes: NotesFile
     # The callers whose records sv holds; none in a family without the table. The tables and their rows do not say
     # it: a caller that reports nothing leaves no row.
     sv_callers: tuple[sv_tables.Caller, ...]
@@ -494,6 +517,13 @@ def _sha256(path: pathlib.Path) -> str:
         while chunk := f.read(1 << 20):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def write_notes(output: pathlib.Path) -> NotesFile:
+    """Copies the notes on the tables into a family's folder, byte for byte, and returns what names them there."""
+    path = output / NOTES
+    path.write_bytes(importlib.resources.files('case_annotation').joinpath(NOTES).read_bytes())
+    return NotesFile(path=path.name, bytes=path.stat().st_size, sha256=_sha256(path))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -812,6 +842,7 @@ def assemble(
     sequenced = set(samples)
     manifest = FamilyManifest(
         schema_version=SCHEMA_VERSION,
+        pipeline_version=PIPELINE_VERSION,
         family=family,
         members=tuple(
             FamilyMember(
@@ -826,6 +857,7 @@ def assemble(
             for m in ped.members
         ),
         tables=tuple(files),
+        notes=write_notes(output),
         sv_callers=tuple(caller for caller, _vcf in structural.callers),
         alleles=next(f.rows for f in files if f.table == 'variants'),
         annotation=info,

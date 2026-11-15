@@ -5,7 +5,8 @@ calls, with up to three more tables for its structural variants, copy number seg
 `sv`, holds the structural variants and the copy-number variants together: the records of two callers, told apart by its
 `caller` column. This page is for an analyst who queries them, and for someone who writes an agent that does: it follows
 one record of a joint VCF into the rows it becomes, shows how to ask the usual rare-disease questions with DuckDB from
-Python, and ends with a reference of every file, column and manifest field.
+Python, and ends with the folder's files and its manifest. It lists no columns: `DESCRIBE` shows them, and
+[`tables.md`](../src/case_annotation/tables.md), which every family's folder holds, has what a table does not show.
 
 ```mermaid
 flowchart LR
@@ -160,7 +161,7 @@ erDiagram
 ```
 
 The diagram shows the key that joins the tables and a selection of their columns. The
-[reference](#reference-files-columns-and-manifest) at the end of the page has every column.
+[contract](../contract/tables.json) has every column.
 
 ### The pedigree and the roles
 
@@ -317,8 +318,9 @@ Several values in these rows need a word.
   gene's identifiers, its own most severe consequence with the transcript that has it, and its MANE Select transcript
   with the HGVS names on it.
 - The joint columns hold gnomAD's own values over its exomes and genomes together, which the workflow reads from a
-  public archive rather than from the VCF ([gnomAD's joint columns](#gnomads-joint-columns)). gnomAD does not hold the
-  `A` allele, so its joint columns are empty too; an allele that gnomAD holds with a count of 0 would read 0 instead.
+  public archive rather than from the VCF ([gnomAD's joint values](annotation.md#gnomads-joint-values)). gnomAD does not
+  hold the `A` allele, so its joint columns are empty too; an allele that gnomAD holds with a count of 0 would read 0
+  instead.
 - The four frequency columns (`gnomad_genomes_af`, `gnomad_exomes_af`, `gnomad_joint_af` and `gnomad_joint_faf95_max`)
   are 32-bit floats. DuckDB shows the `T` allele's joint frequency as 9.5e-06, and Python reads it as
   9.499999578110874e-06, the 64-bit number equal to the stored one.
@@ -516,7 +518,7 @@ erDiagram
     }
 ```
 
-The diagram shows a selection of the columns, and the [reference](#the-sv-table) has all of them.
+The diagram shows a selection of the columns, and the [contract](../contract/tables.json) has all of them.
 
 ### One deletion in both callers' records
 
@@ -537,7 +539,7 @@ wants one event for the deletion compares their positions.
 
 A member's column of `sv` is a struct, as in `variants`, and the fields that mean the same thing in both tables have the
 same names: `gt`, `carries`, `zygosity`, `gq`, `pl`, `ft`, `dn` and `dq`. The other fields are these callers' own, such
-as the copy number `cn` ([The members' columns of `sv`](#the-members-columns-of-sv)).
+as the copy number `cn`.
 
 The copy-number caller writes each parent's genotype above as `./.`, although it did call them, at 2 copies. DRAGEN
 writes a member at the expected copy number that way, and a member with more copies as `./1` whatever their number. A
@@ -802,10 +804,10 @@ records with the annotation still packed into INFO.
 
 A column of `variants` beside `genes` describes the allele as a whole. What is of one gene, such as its symbol or the
 HGVS names on its MANE Select transcript, is in the allele's entry of `genes` for that gene, and the entries run from
-the most to the least severe consequence ([the `variants` table](#the-variants-table)). It stands in the entry because
-an allele can lie in several genes: a column of the allele's own could name only one of them, and a search that groups
-by such a column misses the allele under its other genes. A listing with one line for each allele reads the first entry,
-which is the gene of the allele's `worst_consequence`:
+the most to the least severe consequence. It stands in the entry because an allele can lie in several genes: a column of
+the allele's own could name only one of them, and a search that groups by such a column misses the allele under its
+other genes. A listing with one line for each allele reads the first entry, which is the gene of the allele's
+`worst_consequence`:
 
 ```python
 region = {'chrom': 'chr2', 'start': 1_200_000, 'end': 1_300_000}
@@ -903,6 +905,19 @@ condition on VEP's word matches no row and raises no error. `SELECT DISTINCT bio
 of a table. Both steps name the region, so that each table's statistics of `chrom` and `pos` pick out its row groups. In
 the worked example the search returns nothing, because the transcripts of `EXMPL1` are all `mRNA`.
 
+A condition on a field of an entry cannot skip a row group, like one on `hgnc_ids`. A query that lists a field of
+`genes` makes DuckDB 2.0 decode every field of the entries, wherever in the table a row passes the conditions that it
+applies while it scans: those on one column each that `AND` joins. A handful of alleles then costs little, and the
+lookup by rsID takes as long with the gene symbol as without. A few thousand alleles spread over the genome cost most of
+the read of the column, and conditions on several columns that `OR` joins cost all of it, which is most of the time of
+such a search ([Where the time goes](#where-the-time-goes)). A query that narrows the alleles by their own columns
+first, as the second query of [Recessive: compound heterozygous candidates](#recessive-compound-heterozygous-candidates)
+does, also has fewer entries to turn into rows with `unnest(genes)`. Write a search for a field of an entry over the
+whole table as `len(list_filter(genes, lambda g: g.worst_consequence = $consequence)) > 0` or as
+`list_contains(list_transform(genes, lambda g: g.worst_consequence), $consequence)`, and not as
+`$consequence = ANY(list_transform(genes, lambda g: g.worst_consequence))`, for the reason that the warning of
+[Variants in a gene](#variants-in-a-gene) gives for `hgnc_ids`.
+
 ### Variants in a gene
 
 `hgnc_ids` lists every gene that one of the allele's transcripts belongs to, by its HGNC id, so one condition finds a
@@ -937,10 +952,11 @@ every record of the file, since a VCF index knows positions and not genes.
 ### A gene without an HGNC id
 
 Many genes have no HGNC id. Of the 78,000 or so gene symbols in a whole-genome trio's `transcripts`, about 42,500 have
-one. Nearly every protein-coding gene with a symbol of its own does (19,447 of 19,471), and none of the 35,000 genes
-whose symbol is the id that Ensembl or NCBI gave them, an `ENSG` or a `LOC` name. A gene without an HGNC id is found by
-its symbol, or by its gene id, in `transcripts`, which has a row for every gene an allele touches. The lookup takes two
-steps:
+one. Of the trio's alleles, 60% have a list in `hgnc_ids`, 24% have no transcript, and the other 16% lie only in genes
+without an id. Nearly every protein-coding gene with a symbol of its own does (19,447 of 19,471), and none of the 35,000
+genes whose symbol is the id that Ensembl or NCBI gave them, an `ENSG` or a `LOC` name. A gene without an HGNC id is
+found by its symbol, or by its gene id, in `transcripts`, which has a row for every gene an allele touches. The lookup
+takes two steps:
 
 1. the gene's alleles from `transcripts`, each with its chromosome and position;
 1. those alleles' rows of `variants`.
@@ -1029,8 +1045,8 @@ by_rsid = con.sql(
 ```
 
 As for `hgnc_ids`, the query reads the whole column, which is larger here and takes about a quarter of a second
-([How fast](#how-fast)). A family whose run did not name dbSNP has no `rsids` column, and the query fails
-([the `variants` table](#the-variants-table)).
+([How fast](#how-fast)). A family whose run did not name dbSNP has no `rsids` column, and the query fails: the manifest
+lists the column under `omitted_columns`.
 
 ### Rare damaging variants in the proband
 
@@ -1041,10 +1057,10 @@ allele; `gnomad_genomes_failed_filter` and `gnomad_exomes_failed_filter` do, for
 
 `worst_consequence` and `worst_impact` are the columns to filter on. They are the allele's own: the most severe
 consequence among the transcripts of all the allele's genes, and the impact of the transcript that has it. They say what
-the allele does at its worst and not to which gene, and `genes` has the consequence and the impact in each gene
-([the `variants` table](#the-variants-table)). An allele whose every consequence has the impact `modifier`, such as one
-in an exon of a non-coding RNA gene, passes no threshold on the impact, in this column or in an entry of `genes`. A
-query for such alleles names their consequence instead, such as `non_coding_transcript_exon_variant`.
+the allele does at its worst and not to which gene, and `genes` has the consequence and the impact in each gene. An
+allele whose every consequence has the impact `modifier`, such as one in an exon of a non-coding RNA gene, passes no
+threshold on the impact, in this column or in an entry of `genes`. A query for such alleles names their consequence
+instead, such as `non_coding_transcript_exon_variant`.
 
 ```python
 rare_damaging = con.sql(
@@ -1744,7 +1760,7 @@ lookup by region or variant id take hundredths of a second.
 
 A search over the genome that lists a gene pays for the read of `genes`. The search for rare damaging variants takes
 0.32 s without its `gene_symbols` and 1.2 s with them, and the de novo search by GQ 1.4 s without the gene symbol and
-1.8 s with it ([the `variants` table](#the-variants-table) says when a query reads the column).
+1.8 s with it ([An allele's genes](#an-alleles-genes) says when a query reads the column).
 
 ## Why the tables have this shape
 
@@ -1884,18 +1900,23 @@ a small variant on one copy of a gene and a deletion on the other.
 > Not built: the sizes from which a repeat of `repeats` counts as pathogenic. The table holds what the repeat genotyper
 > wrote, and nothing annotates it.
 
-## Reference: files, columns and manifest
+## The folder: files and manifest
 
-This section defines what a family's folder holds. [Annotation](annotation.md#family-tables) explains how
-`family_tables.nf` writes it. [The contract](../contract/README.md) has the manifest's JSON Schema and each table's
-columns with their types as JSON, for a program that reads a folder.
+This section defines what a family's folder holds beside the rows of its tables. The page has no list of the columns: a
+table's own schema has them, which `DESCRIBE` shows, and [the contract](../contract/tables.json) has every table's
+columns with their types as JSON. What a table does not show, and what a query gets wrong without an error, is in the
+notes on the tables, [`tables.md`](../src/case_annotation/tables.md). A run copies that file into every family's folder,
+so a reader of a folder has the notes on the tables it reads.
+
+[Annotation](annotation.md#family-tables) explains how `family_tables.nf` writes the folder, and
+[the contract](../contract/README.md) has the manifest's JSON Schema.
 
 ### The folder and its files
 
-A family's folder holds `variants.parquet`, `transcripts.parquet` and `manifest.json`. A family whose VCFs of larger
-variants were given to the workflow also has `sv.parquet` and `sv_transcripts.parquet`, `repeats.parquet`, or all three,
-and the manifest's `tables` lists the tables that are there. `family_tables.nf` publishes the folder as
-`annotations/<family>/tables-<version>-illumina-<catalog>/`, such as
+A family's folder holds `variants.parquet`, `transcripts.parquet`, `manifest.json` and `tables.md`, the notes on the
+tables. A family whose VCFs of larger variants were given to the workflow also has `sv.parquet` and
+`sv_transcripts.parquet`, `repeats.parquet`, or all three, and the manifest's `tables` lists the tables that are there.
+`family_tables.nf` publishes the folder as `annotations/<family>/tables-<version>-illumina-<catalog>/`, such as
 `annotations/family-a/tables-0.5.0-illumina-202610/` ([What a run publishes](annotation.md#what-a-run-publishes)).
 
 The tables' version, `0.5.0` here, changes when a column of a table is renamed, retyped or removed, or when its meaning
@@ -1919,373 +1940,26 @@ The tables share these properties:
 The tables hold no gene-level knowledge beyond a gene's identifiers. What OMIM, ClinGen and other gene–disease sources
 say about a gene is knowledge that the reader brings.
 
-### The `variants` table
-
-`variants` has one row per allele: the columns that describe the allele, which this section lists, and then one column
-per sequenced member ([The members' columns](#the-members-columns)). The first table has the columns that name the
-allele and carry the family's own record of it; in the file, `qual` and `filters` are the last columns before the
-members'.
-
-| Column                       | Type                            | Holds                                                                                |
-| ---------------------------- | ------------------------------- | ------------------------------------------------------------------------------------ |
-| `chrom`, `pos`, `ref`, `alt` | string, 32-bit integer, strings | the allele, after the split and the left-alignment                                   |
-| `variant_id`                 | string                          | the allele's id in both tables                                                       |
-| `variant_type`, `hgvsg`      | strings                         | Illumina's `variant_type`, such as `SNV`, and the allele's genomic HGVS name         |
-| `qual`, `filters`            | 64-bit float, list of strings   | the family's own `qual` and `filters`, the QUAL and FILTER of the VCF record         |
-| `rsids`                      | list of strings                 | dbSNP's ids of the allele in the order Illumina gives them, when the run named dbSNP |
-
-dbSNP gives some alleles several ids. An allele without one has no value (a null, as in `clinvar_records` for an allele
-without a record, and not an empty list).
-
-The consequence columns summarise the allele's rows of `transcripts`. An allele with no transcript nearby has none of
-them.
-
-| Column                              | Type                    | Holds                                                                                                                                                                                                                     |
-| ----------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `worst_consequence`, `worst_impact` | strings                 | the allele's own, to filter on: the most severe consequence over all the allele's transcripts, Ensembl's and RefSeq's, by Ensembl's ordering of Sequence Ontology terms, and the impact of the transcript that has it     |
-| `hgnc_ids`                          | list of 32-bit integers | the HGNC ids of the genes of all the allele's transcripts, each once, in ascending order; `HGNC:1100` is 1100                                                                                                             |
-| `genes`                             | list of structs         | one entry for each gene of the allele's transcripts, with what is of that gene: its identifiers, its own most severe consequence and its MANE Select transcript; the gene of the allele's `worst_consequence` comes first |
-
-A column of `variants` beside `genes` describes the allele as a whole. What is of one gene or of one transcript of an
-allele is in the allele's entry of `genes` for that gene, and in `transcripts`. An entry describes one transcript chosen
-among the gene's own: the one with the most severe consequence, and among transcripts with the same consequence the MANE
-Select one, then a canonical one, then Ensembl's, then the first by id. The same rule over the transcripts of all the
-allele's genes gives the allele its `worst_consequence` and `worst_impact`.
-
-| Field of an entry                                                                                | Type                                        | Holds                                                                                                                                                                                                                                      |
-| ------------------------------------------------------------------------------------------------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `gene_symbol`, `ensembl_gene_id`, `hgnc_id`                                                      | strings, and a 32-bit integer for `hgnc_id` | the gene: the chosen transcript's symbol, the gene's Ensembl id, and the HGNC id of the symbol, where it has one                                                                                                                           |
-| `worst_consequence`, `worst_impact`                                                              | strings                                     | the most severe consequence among the gene's transcripts, and the impact of the chosen transcript                                                                                                                                          |
-| `worst_transcript_id`                                                                            | string                                      | the chosen transcript; the variant id and this id are the key of the transcript's row of `transcripts`                                                                                                                                     |
-| `mane_select_transcript_id`, `mane_select_consequence`, `mane_select_hgvsc`, `mane_select_hgvsp` | strings                                     | the gene's MANE Select transcript, which Illumina flags on RefSeq's copy: its id, the most severe consequence on it and the HGVS names on it and on its protein; all four empty where the allele has no MANE Select transcript of the gene |
-
-`ensembl_gene_id` is the gene's Ensembl id also where the chosen transcript is RefSeq's: the Ensembl gene of the
-allele's Ensembl transcripts with the same symbol. It has no value where the symbol names none or more than one (as in
-the pseudoautosomal regions). The field is not called `gene_id`, because `gene_id` in `transcripts` is the id that the
-transcript's own gene model gives the gene, which is NCBI's for a RefSeq transcript. An allele in two genes can have two
-MANE Select transcripts, and each stands in the entry of its own gene. Of several MANE Select transcripts of one gene,
-the entry has the first by id.
-
-Two transcripts are of one gene where they have the same HGNC id, which Ensembl's and RefSeq's transcripts of a gene
-share. A gene without an HGNC id is told by its symbol, and its entry has no `hgnc_id`. A transcript without a symbol is
-told by the gene id of its own gene model.
-
-The entries stand in the order of their chosen transcripts under the same rule, so they run from the most to the least
-severe consequence. The first entry is the gene of the allele's `worst_consequence`: its `worst_consequence` and
-`worst_impact` are the allele's. An entry has no biotype, which is a transcript's and stands in `transcripts`. An
-entry's `worst_consequence` tells an exon of a non-coding transcript, which has `non_coding_transcript_exon_variant`,
-from an exon of a coding one. An allele without a transcript has no `genes`, and every other allele has at least one
-entry, also an allele that has no `hgnc_ids` because none of its genes has an id.
-
-A condition on a field of an entry cannot skip a row group, like one on `hgnc_ids`. A query that lists a field of
-`genes` makes DuckDB 2.0 decode every field of the entries, wherever in the table a row passes the conditions that it
-applies while it scans: those on one column each that `AND` joins. A handful of alleles then costs little, and the
-lookup by rsID takes as long with the gene symbol as without. A few thousand alleles spread over the genome cost most of
-the read of the column, and conditions on several columns that `OR` joins cost all of it, which is most of the time of
-such a search ([Where the time goes](#where-the-time-goes)). A query that narrows the alleles by their own columns
-first, as the second query of [Recessive: compound heterozygous candidates](#recessive-compound-heterozygous-candidates)
-does, also has fewer entries to turn into rows with `unnest(genes)`. Write a search for a field of an entry over the
-whole table as `len(list_filter(genes, lambda g: g.worst_consequence = $consequence)) > 0` or as
-`list_contains(list_transform(genes, lambda g: g.worst_consequence), $consequence)`, and not as
-`$consequence = ANY(list_transform(genes, lambda g: g.worst_consequence))`, for the reason that the warning of
-[Variants in a gene](#variants-in-a-gene) gives for `hgnc_ids`. A search by a property of a transcript that an entry
-lacks, such as its biotype, goes through `transcripts` ([An allele's genes](#an-alleles-genes)).
-
-An HGNC id comes from the genes section of the Annotator's output, which lists the gene of every transcript by its
-symbol, with the gene's HGNC id where it has one. A transcript's gene is matched to that list by its symbol, whichever
-gene model the transcript is of. An allele none of whose genes has an HGNC id has no `hgnc_ids`, like an allele without
-a transcript: in a whole-genome trio 60% of the alleles have a list, 24% have no transcript, and the other 16% lie only
-in genes without an id ([A gene without an HGNC id](#a-gene-without-an-hgnc-id)).
-
-The frequency columns come from two places: Illumina's bundle for each of gnomAD's two sets, and gnomAD's own joint
-release for the two together.
-
-| Column                                                                             | Type                                            | Holds                                                                                                                                              |
-| ---------------------------------------------------------------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `gnomad_genomes_{af,ac,an,hom,failed_filter}`                                      | 32-bit float, three 32-bit integers, boolean    | gnomAD v4.1 genomes as Illumina carries them, with the allele number and whether gnomAD filtered the allele                                        |
-| `gnomad_exomes_{af,ac,an,hom,failed_filter}`                                       | the same                                        | gnomAD v4.1 exomes, likewise                                                                                                                       |
-| `gnomad_joint_af`, `gnomad_joint_ac`, `gnomad_joint_hom`, `gnomad_joint_faf95_max` | 32-bit float, two 32-bit integers, 32-bit float | gnomAD v4.1's own values over exomes and genomes together, which are gnomAD's `AF_joint`, `AC_joint`, `nhomalt_joint` and `fafmax_faf95_max_joint` |
-
-The two frequencies, `gnomad_genomes_af` and `gnomad_exomes_af`, are 32-bit floats, which hold the six decimal places
-Illumina gives. Illumina's bundle has no joint values, and the two joint frequencies are 32-bit floats too
-([gnomAD's joint columns](#gnomads-joint-columns)).
-
-| Score column                                   | Type                 | Holds                                                                                                                                       |
-| ---------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `alphamissense_max`, `alphamissense_max_class` | 64-bit float, string | the highest AlphaMissense score of the allele, with its class                                                                               |
-| `revel`                                        | 64-bit float         | the REVEL score                                                                                                                             |
-| `spliceai_max`                                 | 64-bit float         | the largest of SpliceAI's four delta scores; Illumina's filtered release leaves out low scores, so no value means none passed its threshold |
-| `primateai3d_max`, `dann`, `phylop`, `gerp`    | 64-bit floats        | the highest PrimateAI-3D score, and the DANN, phyloP and GERP scores                                                                        |
-
-The ClinVar columns are there when the run named ClinVar. They come from the records of this very allele; Illumina also
-lists records of other alleles at the position, which are left out. An allele can have several records, such as one of
-the allele alone and one of a haplotype that holds it.
-
-| Column                                                                                                                                     | Type                                                               | Holds                                                                                                                                                           |
-| ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `clinvar_records`                                                                                                                          | list of structs                                                    | every record, each with its accession, version, record and variant type, germline classification, review status, gold stars, date last evaluated and conditions |
-| `clinvar_accession`, `clinvar_classification`, `clinvar_review_status`, `clinvar_stars`, `clinvar_conditions` and `clinvar_last_evaluated` | strings, an 8-bit integer for the stars, a list for the conditions | a summary of the first record                                                                                                                                   |
-
-A record's fields are named `accession`, `version`, `record_type`, `variant_type`, `classification`, `review_status`,
-`stars`, `last_evaluated` and `conditions`. The records are ordered by stars (a record without a germline
-classification, or with a review status ClinVar does not list, last), then by the date last evaluated (latest first),
-then by accession. Records that disagree show in the list, not in the summary.
-
-> [!WARNING]
->
-> The columns of a dated source the run did not name are left out rather than left empty, so that a query on them fails
-> instead of reading as "not in ClinVar". The manifest lists them under `omitted_columns`.
-
-### The members' columns
-
-After the allele's columns, `variants` has one column per sequenced member, named exactly as the member's sample in the
-VCF and in the VCF's order, like the sample columns of a split VCF. The schema names no roles; the manifest says which
-column is the proband's. Each member's column is a struct of that member's own call of the allele, and a query reads a
-field as `"<sample>".gt`.
-
-| Field of a call      | Type                                 | Holds                                                                                                                                                                                                                                                                                                                        |
-| -------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `gt`                 | string                               | the genotype as written in the VCF after the split (so a `1/2` becomes `1/0` and `0/1`)                                                                                                                                                                                                                                      |
-| `carries`            | boolean                              | whether the member carries the allele, by the genotype alone: true where it holds a copy of the allele, also beside a missing one, as in `./1`; false where every allele is called and none is the allele; empty where the genotype is missing or has a missing allele and no copy of the allele, as in `./.` and `0/.`      |
-| `zygosity`           | string                               | `hom_ref`, `het` or `hom_alt`, where the genotype determines it: `hom_ref` where `carries` is false, `hom_alt` where every allele is the allele, and `het` where every allele is called and only some are the allele; empty for a genotype with a missing allele, also for `./1`, whose missing allele may be the allele too |
-| `gq`, `dp`           | 32-bit integers                      | the call's GQ and DP                                                                                                                                                                                                                                                                                                         |
-| `pl`                 | list of 32-bit integers              | the Phred-scaled genotype likelihoods                                                                                                                                                                                                                                                                                        |
-| `ad_ref`, `ad_alt`   | 32-bit integers                      | the reads of the reference and of the allele                                                                                                                                                                                                                                                                                 |
-| `allele_balance`     | 64-bit float                         | the allele's share of the reads of the reference and the allele, empty unless both depths are known and not both 0                                                                                                                                                                                                           |
-| `ps`, `ft`           | 32-bit integer, list of strings      | the call's phase set, and the names of its sample filters, the FORMAT `FT` split at `;`: `PASS` alone for a call that passed, and no list for a call without the field                                                                                                                                                       |
-| `dn`, `dq` and `msc` | string, 64-bit float, 32-bit integer | DRAGEN's DN, DQ and MSC, which are empty for a VCF from another caller                                                                                                                                                                                                                                                       |
-
-`pl` holds three likelihoods for a diploid call (`0/0`, `0/1`, `1/1`) and two for a haploid one (`0`, `1`), as DRAGEN
-calls a male's X and Y outside the pseudoautosomal regions. It is empty where the VCF has none. When
-`bcftools norm -m -any` splits a multi-allelic record, it keeps for each allele the likelihoods of the genotypes made of
-the reference and that allele, per call and so also for the haploid calls of a record with diploid ones. It does not
-normalise them again, so the smallest is not 0 where the member's call was of another allele of the record. A list whose
-length does not fit the call's ploidy, or with a value missing among others, fails the run, so a query can rely on the
-two lengths.
-
-`carries` says whether the member has the allele at all, and a query for the members who carry an allele reads it alone.
-`zygosity` says on how many of the member's copies of the chromosome the allele lies, and a haploid call of the allele
-is `hom_alt`. It is empty wherever the genotype does not determine it: a member with `./1` carries the allele, and the
-missing allele may be the allele too. Both fields are read from the genotype alone, whatever the member's sex and the
-chromosome, and both are empty where the genotype does not say whether the member has the allele, as for a member
-without a call. The two fields have the same meaning in the members' columns of `sv`, where the copy number decides for
-a row of the copy-number caller ([The members' columns of `sv`](#the-members-columns-of-sv)).
-
-A query that reads one field in place of the other has to know where the two agree, in each table:
-
-| Conditions on a member                         | In `variants`                                                                                            | In `sv`                                                                                                                  |
-| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `NOT carries` and `zygosity = 'hom_ref'`       | match the same calls: the member was called and lacks the allele ([A de novo search](#a-de-novo-search)) | match the same calls, of both callers                                                                                    |
-| `carries` and `zygosity IN ('het', 'hom_alt')` | the condition on `zygosity` leaves out a carried allele beside a missing one, `./1`                      | the condition on `zygosity` leaves out a `./1` of the structural-variant caller too, and a gain of copies                |
-| `carries IS NULL` and `zygosity IS NULL`       | `zygosity` is empty wherever `carries` is, and for `./1` as well                                         | `zygosity` is empty wherever `carries` is, and for a `./1` of the structural-variant caller and a gain of copies as well |
-
-DuckDB matches column names without regard to case, and a member's column stands beside the columns that say what a row
-is of in `variants`, in `sv` and in `repeats`. `FAMILY_CHECK` therefore refuses a sample named as one of those columns
-of any of the three tables in any case, such as `pos`, `Revel` or `sv_id`, and two samples whose names differ only in
-case. The columns of a dated source count as well in a run that leaves them out, and those of `sv` and `repeats` in a
-family that brings no VCF for them, so that a name is refused or accepted whatever the run names.
-
-### The `transcripts` table
-
-`transcripts` has one row per allele and transcript, about eleven per allele in a whole genome.
-
-| Column                                                                                                        | Type                                        | Holds                                                                                                                                                       |
-| ------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `chrom`, `pos`, `variant_id`                                                                                  | string, 32-bit integer, string              | the allele                                                                                                                                                  |
-| `transcript_id`, `source`, `biotype`                                                                          | strings                                     | the transcript, its `source` (Ensembl or RefSeq) and its biotype                                                                                            |
-| `gene_symbol`, `gene_id`, `hgnc_id`                                                                           | strings, and a 32-bit integer for `hgnc_id` | the transcript's gene: its symbol, Ensembl's gene id for an Ensembl transcript and NCBI's for a RefSeq one, and the HGNC id of the symbol, where it has one |
-| `consequences`, `worst_consequence`                                                                           | list of strings, string                     | the Annotator's terms for the transcript, from most to least severe, and the first of them                                                                  |
-| `impact`, `hgvsc`, `hgvsp`, `protein_id`                                                                      | strings                                     | the impact, the HGVS names on the transcript and its protein, and the protein's id                                                                          |
-| `is_mane_select`, `is_canonical`                                                                              | booleans                                    | whether Illumina flags the transcript as MANE Select, and as canonical                                                                                      |
-| `exon`, `intron`, `cdna_pos`, `cds_pos`, `protein_pos`, `codons`, `amino_acids`                               | strings                                     | the exon, intron and positions                                                                                                                              |
-| `alphamissense_pathogenicity`, `alphamissense_class`, `primateai3d_score`, `spliceai_max`, `promoterai_score` | 64-bit floats, and a string for the class   | the scores Illumina gives per transcript or gene: AlphaMissense, PrimateAI-3D, SpliceAI (through the transcript's Ensembl genes) and PromoterAI             |
-
-Identifiers are matched without their version, since Illumina's score sources and gene models carry different versions.
-Where a source gives several entries for one transcript or gene, the highest score is kept, as it is for the
-variant-level maxima.
-
-### The `sv` table
-
-`sv` has one row per record of the family's structural-variant caller and of its copy-number caller, on the primary
-chromosomes: the columns that describe the record, then those of its annotation, both of which this section lists, and
-then one column per sequenced member ([The members' columns of `sv`](#the-members-columns-of-sv)). The copy-number
-caller also writes the segments at the reference's copy number, which have no alternate allele; those have no row. A
-breakend keeps its own row, and so does its mate.
-
-| Column                              | Type                                  | Holds                                                                                                                                                                                                                                                                                  |
-| ----------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `chrom`, `pos`                      | string, 32-bit integer                | the record's place as the VCF writes it                                                                                                                                                                                                                                                |
-| `end_pos`                           | 32-bit integer                        | the record's end as htslib reads it: INFO `END`, or for a symbolic allele other than an insertion `pos` plus the length in `SVLEN` where that lies further; without either, the last base of REF, which is `pos` for a breakend and for a symbolic insertion                           |
-| `sv_id`                             | string                                | the caller's ID of the record, which is the table's key; no two records of the family's callers share one                                                                                                                                                                              |
-| `caller`                            | string                                | `sv` for the structural-variant caller, `cnv` for the copy-number caller                                                                                                                                                                                                               |
-| `sv_type`                           | string                                | for `sv`, INFO `SVTYPE`: `DEL`, `INS`, `DUP`, `INV` or `BND`; for `cnv`, `DEL` for a loss, `DUP` for a gain, and `CNV` for a segment that one member loses and another gains                                                                                                           |
-| `svlen`                             | 32-bit integer                        | INFO `SVLEN` as the caller writes it, negative for a deletion; empty without one, and for a `CNV` segment, which has a length for each allele                                                                                                                                          |
-| `ref`, `alt`                        | strings                               | the alleles as written: a sequence, a symbolic allele such as `<DEL>`, a breakend, or `<DEL>,<DUP>`                                                                                                                                                                                    |
-| `qual`, `filters`                   | 64-bit float, list of strings         | the record's QUAL and FILTER                                                                                                                                                                                                                                                           |
-| `imprecise`, `cipos`, `ciend`       | boolean, two lists of 32-bit integers | INFO `IMPRECISE`, and the two bounds each of `CIPOS` and `CIEND`, by which the breakpoints of an imprecise record are uncertain                                                                                                                                                        |
-| `mate_id`, `mate_chrom`, `mate_pos` | string, string, 32-bit integer        | for a breakend: its INFO `MATEID`, and its mate's contig and position, read from its ALT                                                                                                                                                                                               |
-| `bnd_extends`, `mate_extends`       | strings                               | for a breakend: `bnd_extends` is `left` where the junction keeps the sequence up to `pos` (ALT `t[p[` or `t]p]`) and `right` where it keeps the sequence from `pos` on (`]p]t` or `[p[t`); `mate_extends` is the side of `mate_pos` that is joined, `right` for `[` and `left` for `]` |
-| `event_id`                          | string                                | INFO `EVENT`, which the records of one complex event share                                                                                                                                                                                                                             |
-| `small_variant_id`                  | string                                | the `variant_id` of the row of `variants` that is the same allele, where there is one                                                                                                                                                                                                  |
-
-The columns above are the caller's record. The ones below are what Illumina's Annotator says of it, and
-[What the annotation says of a record](#what-the-annotation-says-of-a-record) explains them. A match's `pos` and
-`end_pos` are read as a record's: the bases concerned run from `pos + 1` to `end_pos`.
-
-| Column                                                                                                                                  | Type                                                                    | Holds                                                                                                                                                                                                                                          |
-| --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `annotated_as`                                                                                                                          | string                                                                  | `structural`, or `small_variant` for a record written as a sequence whose two alleles are each at most 50 bases, which the Annotator treats as a small variant                                                                                 |
-| `annotated_pos`, `annotated_end_pos`                                                                                                    | 32-bit integers                                                         | the interval the Annotator annotated, which differs from `pos` and `end_pos` where it trimmed or left-aligned an allele written as a sequence; empty for a record of two alleles whose intervals differ                                        |
-| `hgnc_ids`                                                                                                                              | list of 32-bit integers                                                 | the HGNC ids of the genes of all the record's transcripts, each once, in ascending order; `HGNC:1100` is 1100                                                                                                                                  |
-| `gnomad_sv_id`                                                                                                                          | string                                                                  | the best match among gnomAD's structural variants: gnomAD's id of it                                                                                                                                                                           |
-| `gnomad_sv_af`, `gnomad_sv_ac`, `gnomad_sv_an`, `gnomad_sv_hom`                                                                         | 32-bit float, three 32-bit integers                                     | that match's allele frequency, allele count, allele number and number of homozygotes                                                                                                                                                           |
-| `gnomad_sv_failed_filter`                                                                                                               | boolean                                                                 | whether gnomAD filtered that match                                                                                                                                                                                                             |
-| `gnomad_sv_overlap`                                                                                                                     | 32-bit float                                                            | that match's reciprocal overlap with the record; empty for an insertion and a breakend                                                                                                                                                         |
-| `gnomad_sv_distance`                                                                                                                    | 32-bit integer                                                          | for an insertion and a breakend, the bases between `pos` and that match; empty for the others                                                                                                                                                  |
-| `gnomad_sv_max_af`                                                                                                                      | 32-bit float                                                            | the highest allele frequency among all the record's matches                                                                                                                                                                                    |
-| `gnomad_sv_matches`                                                                                                                     | list of structs                                                         | every match, the best first: `id`, `variant_type`, `pos`, `end_pos`, `af`, `ac`, `an`, `hom`, `failed_filter`, `reciprocal_overlap`, and `annotation_overlap`, the bases shared over the entry's length                                        |
-| `onekg_sv_id`, `onekg_sv_af`, `onekg_sv_ac`, `onekg_sv_an`, `onekg_sv_overlap`, `onekg_sv_distance`                                     | string, 32-bit float, two 32-bit integers, 32-bit float, 32-bit integer | the best match among the 1000 Genomes structural variants, as for gnomAD                                                                                                                                                                       |
-| `gnomad_cnv_id`, `gnomad_cnv_sf`, `gnomad_cnv_failed_filter`, `gnomad_cnv_overlap`                                                      | string, 32-bit float, boolean, 32-bit float                             | the best match among gnomAD's copy-number variants, which come from exomes: its id, its site frequency (the fraction of samples that carry it), whether gnomAD filtered it, and its reciprocal overlap                                         |
-| `gnomad_genomes_{af,ac,an,hom,failed_filter}`, `gnomad_exomes_{af,ac,an,hom,failed_filter}`                                             | as in `variants`                                                        | for a record annotated as a small variant, gnomAD's values of the allele itself                                                                                                                                                                |
-| `clinvar_accession`, `clinvar_classification`, `clinvar_review_status`, `clinvar_stars`, `clinvar_conditions`, `clinvar_last_evaluated` | as in `variants`                                                        | the first of `clinvar_records`, when the run named ClinVar                                                                                                                                                                                     |
-| `clinvar_overlap`                                                                                                                       | 32-bit float                                                            | that record's reciprocal overlap with this one; empty for a record annotated as a small variant, whose ClinVar records are of the allele itself                                                                                                |
-| `clinvar_records`                                                                                                                       | list of structs                                                         | every ClinVar record matched: the fields of a record in `variants`, then `pos`, `end_pos`, `reciprocal_overlap` and `annotation_overlap`. The best-overlapping record comes first, then the one with more stars, the later date, the accession |
-
-The best match of a record with an extent is the entry with the highest reciprocal overlap, and that of an insertion or
-a breakend the nearest entry. Among equals the more frequent entry comes first, then the one whose id sorts first. A
-record without a match has none of a source's columns, and of the columns from `hgnc_ids` on a record of two alleles has
-that one and the two lists alone.
-
-An HGNC id comes from the genes section of the Annotator's output, by the rule of `variants`
-([The `variants` table](#the-variants-table)). A record none of whose genes has an HGNC id has no `hgnc_ids`, like a
-record without a transcript: in a whole-genome trio 56% of the records have a list, 29% have no transcript, and the
-other 15% lie only in genes without an id.
-
-The ClinVar columns are left out of a folder whose run did not name ClinVar, as they are in `variants`, and the manifest
-lists them under `sv_omitted_columns`.
-
-The table leaves out the Annotator's other sources for structural variants: ClinGen's dosage sensitivity map and
-gnomAD's gene scores, ClinGen's legacy records, DECIPHER's common copy-number variants and MITOMAP's structural entries.
-[Annotation](annotation.md#annotating-the-structural-variants) gives the reason for each.
-
-For a deletion, a duplication, an inversion and a copy number segment the reference bases concerned run from `pos + 1`
-to `end_pos`: `pos` is the base before them, as in a VCF. A record therefore overlaps a region from `start` to `end`
-where `pos < end` and `end_pos >= start`. The column is called `end_pos` because `end` is a reserved word in SQL.
-
-A structural variant that the caller wrote as a sequence can be the same allele as a small variant, since DRAGEN's
-small-variant caller and its structural-variant caller both report indels of a few tens of bases. Such a record stays in
-`sv` and names the row of `variants` in `small_variant_id`. The two are compared after the same split and
-left-alignment, so a deletion that the two callers wrote at different places of a repeat is still found, and the record
-keeps the position and alleles its caller wrote. Only an allele of the family's own `variants` is named. A symbolic
-allele, a breakend and a copy number segment have no sequence to compare and name none.
-
-The table leaves out what else the structural-variant caller reports: the assembled contigs, and the homology and
-inserted sequences. The VCF has them.
-
-### The members' columns of `sv`
-
-After the record's columns and the annotation's, `sv` has one column per sequenced member, named and ordered as the
-members' columns of `variants` are, and the manifest says which is the proband's. Each member's column is a struct of
-that member's call of the record. The fields that a call in `variants` has too come under the same names and types and
-in the same order: `gt`, `carries`, `zygosity`, `gq`, `pl`, `ft`, `dn` and `dq`. The fields between them are these
-callers' own. A field that the caller's VCF does not define is empty, so a row of the structural-variant caller has no
-`cn` and a row of DRAGEN's copy-number caller no `gq` or `pl`.
-
-| Field of a call                                            | Type                         | Holds                                                                                                                                                                                                                                                                                                                                                                   |
-| ---------------------------------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `gt`                                                       | string                       | the genotype as written in the VCF                                                                                                                                                                                                                                                                                                                                      |
-| `carries`                                                  | boolean                      | whether the member carries the record: for the structural-variant caller as in `variants`, by the genotype; for the copy-number caller true where the copy number is not the expected one and false where it is; empty for a member without a call, whose genotype does not say for the structural-variant caller and who has no copy number for the copy-number caller |
-| `zygosity`                                                 | string                       | `hom_ref`, `het` or `hom_alt`: for the structural-variant caller classified as in `variants`, for the copy-number caller by the copy number; empty wherever the call does not determine it: for a member without a call, for a genotype of the structural-variant caller with a missing allele, and for a gain of copies                                                |
-| `gq`                                                       | 32-bit integer               | the call's GQ, from the structural-variant caller                                                                                                                                                                                                                                                                                                                       |
-| `pl`                                                       | list of 32-bit integers      | the Phred-scaled genotype likelihoods, from the structural-variant caller: three for a diploid call and two for a haploid one, as in `variants`                                                                                                                                                                                                                         |
-| `pr_ref`, `pr_alt`, `sr_ref`, `sr_alt`, `vf_ref`, `vf_alt` | 32-bit integers              | the structural-variant caller's counts for the reference and for the allele: spanning read pairs (`PR`), split reads (`SR`) and fragments (`VF`)                                                                                                                                                                                                                        |
-| `cn`                                                       | 32-bit integer               | the copy number, from the copy-number caller                                                                                                                                                                                                                                                                                                                            |
-| `sm`, `bc`                                                 | 64-bit float, 32-bit integer | the copy-number caller's mean copy ratio of the segment (`SM`) and its number of bins (`BC`)                                                                                                                                                                                                                                                                            |
-| `pe_start`, `pe_end`                                       | 32-bit integers              | improperly paired reads at the segment's start and at its end (`PE`)                                                                                                                                                                                                                                                                                                    |
-| `qs`                                                       | 32-bit integer               | the quality of the copy-number call (`QS`)                                                                                                                                                                                                                                                                                                                              |
-| `ft`                                                       | list of strings              | the names of the call's sample filters, as in `variants`                                                                                                                                                                                                                                                                                                                |
-| `dn`, `dq`                                                 | string, 64-bit float         | DRAGEN's DN and DQ, which are empty for a VCF from another caller                                                                                                                                                                                                                                                                                                       |
-
-[Who carries a record](#who-carries-a-record) defines `carries` and `zygosity` for both callers. They mean what they
-mean in `variants`, and a copy number adds one case in which the zygosity is not determined: a member who gains copies
-carries the segment and has no zygosity ([The members' columns](#the-members-columns) compares the two fields in each
-table). In a `CNV` segment, `cn` and the allele of `alt` that `gt` names say which way a member differs: in DRAGEN's
-`<DEL>,<DUP>`, `1` is the loss and `2` the gain. Only a loss has a zygosity, so `zygosity IN ('het', 'hom_alt')` finds
-the members who lose copies there.
-
-### The `sv_transcripts` table
-
-`sv_transcripts` has one row per record of `sv`, allele and transcript that the Annotator lists for it, about ten per
-record in a whole genome, and none for a record that touches no transcript. Its key is `sv_id`, `variant_type` and
-`transcript_id`. [How a record hits a transcript](#how-a-record-hits-a-transcript) says how to read a row. A column that
-`transcripts` has too is named and typed as there, and the columns stand in the same order.
-
-| Column                               | Type                                        | Holds                                                                                                                                                                                                                                |
-| ------------------------------------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `chrom`, `pos`, `end_pos`, `sv_id`   | string, two 32-bit integers, string         | the record, as in `sv`                                                                                                                                                                                                               |
-| `variant_type`                       | string                                      | the Annotator's type of the allele: `deletion`, `insertion`, `tandem_duplication`, `duplication`, `inversion`, `translocation` for a breakend, `copy_number_loss`, `copy_number_gain`, and `delins` or `MNV` for some small variants |
-| `transcript_id`, `source`, `biotype` | strings                                     | the transcript, its `source` (Ensembl or RefSeq) and its biotype                                                                                                                                                                     |
-| `gene_symbol`, `gene_id`, `hgnc_id`  | strings, and a 32-bit integer for `hgnc_id` | the transcript's gene: its symbol, Ensembl's gene id for an Ensembl transcript and NCBI's for a RefSeq one, and the HGNC id of the symbol, where it has one                                                                          |
-| `consequences`                       | list of strings                             | the Annotator's terms for the transcript, from most to least severe                                                                                                                                                                  |
-| `protein_id`                         | string                                      | the id of the transcript's protein, for a transcript that codes for one                                                                                                                                                              |
-| `is_mane_select`, `is_canonical`     | booleans                                    | whether Illumina flags the transcript as MANE Select, and as canonical                                                                                                                                                               |
-| `complete_overlap`                   | boolean                                     | the Annotator's flag that the variant covers the whole transcript                                                                                                                                                                    |
-| `exon`, `intron`                     | strings                                     | the exons and the introns concerned, out of the transcript's                                                                                                                                                                         |
-| `cdna_pos`, `protein_pos`            | strings                                     | the bases of the transcript and the amino acids of its protein concerned, each out of their number                                                                                                                                   |
-
-The table has no `worst_consequence`, `impact`, `hgvsc`, `hgvsp` or `cds_pos`, and no scores
-([How a record hits a transcript](#how-a-record-hits-a-transcript) gives the reasons).
-
-### The `repeats` table
-
-`repeats` has one row per tandem repeat of the repeat genotyper's catalogue, whether or not anyone's alleles differ from
-the reference: the columns that describe the repeat, and then one column per sequenced member. Every member's repeat VCF
-has to hold the same repeats, described alike, so that the files are of one catalogue.
-
-| Column         | Type                   | Holds                                                                                                                                |
-| -------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `chrom`, `pos` | string, 32-bit integer | the repeat's place as the VCF writes it                                                                                              |
-| `end_pos`      | 32-bit integer         | the record's end as htslib reads it: INFO `END`, the last base of the repeat in the reference, and `pos` for a record without one    |
-| `repeat_id`    | string                 | the catalogue's id of the repeat, INFO `VARID`, which is the table's key; DRAGEN's files give it again as `REPID`, which is not read |
-| `repeat_unit`  | string                 | the repeated unit, INFO `RU`                                                                                                         |
-| `ref_copies`   | 32-bit integer         | the reference's number of units, INFO `REF`                                                                                          |
-
-The members' columns are named and ordered as in `variants`. Each is a struct of that member's genotype of the repeat. A
-list holds one value per allele in the genotype's order, so two for a diploid genotype and one for a haploid one, and is
-empty for a member without a call.
-
-| Field of a genotype          | Type                     | Holds                                                                                                                                                                                |
-| ---------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `gt`                         | string                   | the genotype as written in the member's own VCF. Its allele numbers refer to the alleles of that file, so a `1` of one member and a `1` of another can be alleles of different sizes |
-| `repcn`                      | list of 32-bit integers  | the number of repeat units of each allele (`REPCN`)                                                                                                                                  |
-| `repci_lower`, `repci_upper` | lists of 32-bit integers | the bounds of each allele's confidence interval (`REPCI`)                                                                                                                            |
-| `so`                         | list of strings          | the kind of reads that sized each allele: `SPANNING`, `FLANKING` or `INREPEAT`                                                                                                       |
-| `adsp`, `adfl`, `adir`       | lists of 32-bit integers | the spanning, flanking and in-repeat reads consistent with each allele                                                                                                               |
-| `lc`                         | 64-bit float             | the locus coverage                                                                                                                                                                   |
-| `filters`                    | list of strings          | the FILTER of the member's own record                                                                                                                                                |
-
-The struct has no `carries` and no `zygosity`, because the table holds no threshold. Which size of a repeat is in the
-normal range or causes disease is knowledge about the locus, which the reader brings. The repeat genotyper's motif
-counts are left out; the VCF has them.
-
 ### The manifest
 
 `manifest.json` describes the folder: its tables, the family and what annotated the alleles and the structural variants.
 Every manifest holds every key below, also the manifest of a family without the optional tables.
 
-| Key                  | Holds                                                                                                                                                                                                                                                                                               |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema_version`     | the tables' version, such as `0.5.0`                                                                                                                                                                                                                                                                |
-| `family`             | the family's id                                                                                                                                                                                                                                                                                     |
-| `members`            | the pedigree: each member with its `sample_id`, `father`, `mother`, `sex`, `affected` (empty where the PED file gives the phenotype as unknown), `sequenced` (whether `variants` has its column, and `sv` and `repeats` where the family has them) and `role`                                       |
-| `tables`             | each table the folder holds, with its rows, size and SHA-256: `variants` and `transcripts`, then `sv`, `sv_transcripts` and `repeats` where the family has them                                                                                                                                     |
-| `sv_callers`         | the callers whose records `sv` holds: `sv`, `cnv` or both, and an empty list in a family without the table. A named caller with no row of `sv` reported nothing                                                                                                                                     |
-| `alleles`            | the number of alleles, which is the number of rows of `variants`                                                                                                                                                                                                                                    |
-| `annotation`         | what annotated the alleles: the Annotator, the catalog, the sources named and the versions they pinned, the data sources the JSON header records, and the bundle's sources the run left out, each with its reason: `dated`, `not_applicable`, `current` or `unplaced`                               |
-| `gnomad_joint`       | the archive of gnomAD's joint values: its file name, its size and SHA-256 as the run read it, echtvar's version, and each field the archive's embedded configuration declares, with gnomAD's name for it, the archive's alias, its type, its multiplier and the value that stands for a missing one |
-| `omitted_columns`    | the columns of `variants` that the run left out because it did not name their dated source                                                                                                                                                                                                          |
-| `sv_annotation`      | what annotated the structural variants and copy number segments, in the form of `annotation`: the second Annotator run, which has the catalog and the sources of the first; null in a family without `sv`                                                                                           |
-| `sv_omitted_columns` | the columns of `sv` that the run left out because it did not name their dated source; an empty list in a family without `sv`                                                                                                                                                                        |
+| Key                  | Holds                                                                                                                                                                                                                                                                                                   |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema_version`     | the tables' version, such as `0.5.0`                                                                                                                                                                                                                                                                    |
+| `pipeline_version`   | the release of the pipeline that wrote the folder, such as `0.3.0`: the version of the workflow and of the tools image at once, because the workflow gives its own version to the step that writes the folder, which refuses to write with tools of another. It is the same in every run of one release |
+| `family`             | the family's id                                                                                                                                                                                                                                                                                         |
+| `members`            | the pedigree: each member with its `sample_id`, `father`, `mother`, `sex`, `affected` (empty where the PED file gives the phenotype as unknown), `sequenced` (whether `variants` has its column, and `sv` and `repeats` where the family has them) and `role`                                           |
+| `notes`              | the notes on the tables in the folder: the `path`, which is `tables.md`, with the file's size in `bytes` and its `sha256`, as an entry of `tables` gives a table's                                                                                                                                      |
+| `tables`             | each table the folder holds, with its rows, size and SHA-256: `variants` and `transcripts`, then `sv`, `sv_transcripts` and `repeats` where the family has them                                                                                                                                         |
+| `sv_callers`         | the callers whose records `sv` holds: `sv`, `cnv` or both, and an empty list in a family without the table. A named caller with no row of `sv` reported nothing                                                                                                                                         |
+| `alleles`            | the number of alleles, which is the number of rows of `variants`                                                                                                                                                                                                                                        |
+| `annotation`         | what annotated the alleles: the Annotator, the catalog, the sources named and the versions they pinned, the data sources the JSON header records, and the bundle's sources the run left out, each with its reason: `dated`, `not_applicable`, `current` or `unplaced`                                   |
+| `gnomad_joint`       | the archive of gnomAD's joint values: its file name, its size and SHA-256 as the run read it, echtvar's version, and each field the archive's embedded configuration declares, with gnomAD's name for it, the archive's alias, its type, its multiplier and the value that stands for a missing one     |
+| `omitted_columns`    | the columns of `variants` that the run left out because it did not name their dated source                                                                                                                                                                                                              |
+| `sv_annotation`      | what annotated the structural variants and copy number segments, in the form of `annotation`: the second Annotator run, which has the catalog and the sources of the first; null in a family without `sv`                                                                                               |
+| `sv_omitted_columns` | the columns of `sv` that the run left out because it did not name their dated source; an empty list in a family without `sv`                                                                                                                                                                            |
 
 The reasons, under `annotation.omitted`, follow the groups of sources in [Dated sources](annotation.md#dated-sources):
 `dated` for a dated source, `not_applicable` for one that does not apply to germline small variants, `current` for a
@@ -2301,27 +1975,6 @@ role. In a family whose sheet names no proband, no member has one. The roles are
 with two affected siblings the sheet decides which is the proband, and with an empty field neither is. A member whose
 phenotype the PED file gives as unknown (`0` or `-9`) has `"affected": null`, which says neither affected nor
 unaffected.
-
-### gnomAD's joint columns
-
-The four `gnomad_joint_` columns come from a public echtvar archive of gnomAD v4.1's joint release
-([gnomAD's joint values](annotation.md#gnomads-joint-values) says which, and how the workflow reads it). The columns
-hold the values as the archive stores them, which a query has to know in these respects:
-
-| What a query sees                                             | Why                                                                                                                                                                                                        |
-| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| the counts are exact                                          | `gnomad_joint_ac` and `gnomad_joint_hom` are gnomAD's own                                                                                                                                                  |
-| a frequency is a multiple of 5e-7                             | that is the step the archive stores a frequency (`gnomad_joint_af`, `gnomad_joint_faf95_max`) in. It comes back as a 32-bit float, which the column holds as echtvar returns it                            |
-| a frequency can be slightly below gnomAD's                    | the multiple is the largest that is not above gnomAD's value or, for about 0.9% of values, the one below that, because the archive's encoder multiplies in 32-bit arithmetic                               |
-| all four columns are empty                                    | only for an allele that the archive lacks, which it marks with a missing allele count                                                                                                                      |
-| all four columns are 0                                        | an allele that gnomAD's joint file lists with an allele count of 0 has 0 in all four                                                                                                                       |
-| a filtering allele frequency of 0                             | a filtering allele frequency that gnomAD did not compute reads 0 as well                                                                                                                                   |
-| no allele number, hemizygote count, ancestry or filter status | the archive has no allele number, no hemizygote count, no values per ancestry group and no filter status. The per-type columns from Illumina carry each type's allele number and filter flag               |
-| a chrM allele's joint columns are empty                       | gnomAD's joint release has no chrM                                                                                                                                                                         |
-| an indel that gnomAD holds can read as absent                 | echtvar matches an allele by position, REF and ALT exactly, and the tables' alleles are split and left-aligned, so an indel that gnomAD's VCF writes at another position reads as one gnomAD does not hold |
-
-The joint frequencies and Illumina's `gnomad_genomes_af` and `gnomad_exomes_af` are 32-bit floats.
-[Querying the tables from Python](#querying-the-tables-from-python) says what that means for a threshold.
 
 ### Column encodings
 

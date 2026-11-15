@@ -108,7 +108,9 @@ workflow {
         .map { row ->
             tuple(row.family, indexed([row.sv_vcf]), indexed([row.cnv_vcf]), indexed(repeatVcfs(row)))
         }
-    checked = FAMILY_CHECK(families.join(structural))
+    // The first step in the tools image, which refuses an image of another release than this workflow's. Every step
+    // before the Annotator's reads a family that it has checked.
+    checked = FAMILY_CHECK(families.join(structural), workflow.manifest.version)
     reference = channel.value(tuple(params.reference, reference_index))
     normalised = NORMALISE_FAMILY(
         families.join(checked.map { f -> [f] }).map { family, vcf, _ped, _proband -> tuple(family, vcf) },
@@ -198,14 +200,15 @@ workflow {
         sv_tables,
         sv_map,
         tablesVersion(),
+        workflow.manifest.version,
     )
     sv_published = annotates_sv ? sv_union.union.map { _group, vcf, index -> [vcf, index] }.flatten().mix(sv_tables, sv_map) : channel.empty()
 
     publish:
     union = union.map { _group, vcf, index -> [vcf, index] }.flatten().mix(tables, joint, sv_published)
     annotator = annotator
-    family_tables = written.map { family, variants, transcripts, manifest, larger ->
-        [family: family, files: [variants, transcripts, manifest] + larger]
+    family_tables = written.map { family, variants, transcripts, manifest, notes, larger ->
+        [family: family, files: [variants, transcripts, manifest, notes] + larger]
     }
 }
 

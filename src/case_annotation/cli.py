@@ -68,9 +68,35 @@ def _family_check_arguments(parser: argparse.ArgumentParser) -> None:
     )
     _proband_arguments(parser)
     _structural_arguments(parser)
+    _release_argument(parser)
+
+
+def _release_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        '--pipeline-version',
+        required=True,
+        help=(
+            "the version of the pipeline whose workflow runs this command, which a family's manifest records as the "
+            "release that wrote its folder; another than this package's fails"
+        ),
+    )
+
+
+def _require_release(given: str) -> None:
+    """Fails unless the workflow that runs a command is of this package's release of the pipeline.
+
+    A run takes its tools from an image, which a params file names apart from the workflow. The first command of a
+    run checks it, before anything is annotated, and so does the command that writes the release into a manifest.
+    """
+    if given != family_tables.PIPELINE_VERSION:
+        raise SystemExit(
+            f'these tools are of version {family_tables.PIPELINE_VERSION} of the pipeline, and the workflow of '
+            f"{given}: a run takes the tools image of the workflow's release"
+        )
 
 
 def _family_check(args: argparse.Namespace) -> None:
+    _require_release(args.pipeline_version)
     family_tables.check_inputs(args.family, args.ped, args.vcf, args.proband, _structural(args))
 
 
@@ -221,6 +247,7 @@ def _family_tables_arguments(parser: argparse.ArgumentParser) -> None:
         required=True,
         help="the tables' layout version the caller expects, which names its output folder; another fails",
     )
+    _release_argument(parser)
     parser.add_argument(
         '--output', type=path, required=True, help='the folder to write the tables into; it must not exist'
     )
@@ -230,6 +257,7 @@ def _family_tables_arguments(parser: argparse.ArgumentParser) -> None:
 def _family_tables(args: argparse.Namespace) -> None:
     if args.schema_version != family_tables.SCHEMA_VERSION:
         raise SystemExit(f'the tables are of version {family_tables.SCHEMA_VERSION}, not {args.schema_version}')
+    _require_release(args.pipeline_version)
     if (args.sv_annotation is None) != (args.sv_map is None):
         raise SystemExit('--sv-annotation and --sv-map are given together')
     sv_annotated = None
@@ -307,7 +335,8 @@ _SUBCOMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Ca
             "writes a family's variants table, with a column of each member's calls, and its transcripts table from "
             "its VCF and the union's tables, its sv, sv_transcripts and repeats tables from the VCFs of its "
             "structural variants, copy numbers and repeats where it has them, with the annotation of the group's "
-            'structural variants, and its manifest with the roles of the proband the run names and of its parents'
+            'structural variants, its manifest with the roles of the proband the run names and of its parents, and '
+            'a copy of the notes on the tables (tables.md)'
         ),
         _family_tables_arguments,
         _family_tables,

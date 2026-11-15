@@ -84,8 +84,9 @@ The rest of the document has two halves, and each reads on its own.
   Illumina's data and runs the Annotator. It covers catalogs and sources, which of the sources are dated, the three
   modes, the licence and the machines.
 - [Family tables](#family-tables) is for the operator who runs `family_tables.nf`. It covers what the workflow takes,
-  its steps and what it publishes. What each column of the tables holds is in
-  [Reading the family tables](family-tables.md#reference-files-columns-and-manifest), whose reader writes the queries.
+  its steps and what it publishes. [Reading the family tables](family-tables.md) is for the reader who writes the
+  queries, and the notes on the tables, [`tables.md`](../src/case_annotation/tables.md), hold what a table does not
+  show.
 
 ## Annotating with Illumina's Annotator
 
@@ -275,6 +276,7 @@ family that also brings the calls of its [larger variants](glossary.md#larger-va
 | `sv.parquet`             | optional: the structural variants and the copy-number variants, one row per record of the two callers, told apart by `caller`, with its annotation, and one column per sequenced member that holds the member's call of it |
 | `sv_transcripts.parquet` | optional: one row per structural variant or copy number segment and transcript that the Annotator lists for it                                                                                                             |
 | `repeats.parquet`        | optional: one row per tandem repeat that a repeat genotyper sized, and one column per sequenced member that holds the sizes of the member's alleles                                                                        |
+| `tables.md`              | the notes on the tables: what a table does not show and a query gets wrong without an error                                                                                                                                |
 | `manifest.json`          | the tables the folder holds with their sizes and checksums, the pedigree with each member's role, and what annotated the tables                                                                                            |
 
 The optional tables come from the family's own VCFs of those variants. The Annotator annotates the structural variants
@@ -286,8 +288,8 @@ at the expected copy number are left out. A member carries it by copy number, a 
 have a row from each caller ([Who carries a record](family-tables.md#who-carries-a-record)).
 
 This half explains how the workflow makes them. [Reading the family tables](family-tables.md) follows one VCF record
-into its rows and shows the queries, and its [reference](family-tables.md#reference-files-columns-and-manifest) defines
-every column and the manifest.
+into its rows, shows the queries and defines the manifest. [The contract](../contract/tables.json) has every column with
+its type.
 
 The same workflow serves a laboratory's real families and synthetic ones: it reads a VCF and a PED file per family,
 takes each family's proband from the sheet of families that the run is given, and knows nothing about where they came
@@ -686,9 +688,13 @@ echtvar matches an allele by position, REF and ALT exactly. The union's alleles 
 that gnomAD's VCF writes at another position reads as one gnomAD does not hold. gnomAD is a current source
 ([Dated sources](#dated-sources)), like the frequencies Illumina carries.
 
-How to read the four columns is part of the tables' reference: the step a frequency is stored in, an empty value beside
-a 0, what the archive lacks, and comparing a 32-bit frequency with a threshold
-([gnomAD's joint columns](family-tables.md#gnomads-joint-columns)).
+The archive stores a frequency in steps of 5e-7: the largest multiple that is not above gnomAD's value or, for about
+0.9% of values, the one below that, because its encoder multiplies in 32-bit arithmetic. Its counts are exact. It marks
+an allele that it lacks with a missing allele count, and all four columns are then empty. An allele that gnomAD lists
+with an allele count of 0 has 0 in all four, and a filtering allele frequency that gnomAD did not compute reads 0 as
+well. The archive has no allele number, no hemizygote count, no values per ancestry group and no filter status, and
+gnomAD's joint release has no chrM. The notes on the tables, [`tables.md`](../src/case_annotation/tables.md), have the
+part of this that a query has to know.
 
 ### De novo variants
 
@@ -731,8 +737,7 @@ call that mean the same thing in `sv` and in `variants` have the same names
 The tables do not replace the VCFs. They leave out the assembled contigs, the homology and inserted sequences that the
 structural-variant caller reports, and the repeat genotyper's motif counts.
 
-The workflow adds a little to what the callers wrote, and [the reference](family-tables.md#the-sv-table) defines each
-addition.
+The workflow adds a little to what the callers wrote.
 
 | What the workflow adds                   | Why                                                                                                                                                                                                                                                                                      |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -945,6 +950,7 @@ annotations/family-a/tables-0.5.0-illumina-202610/
                                where the sheet names sv_vcf or cnv_vcf for the family
     repeats.parquet              where the sheet names repeat_vcfs for the family
     manifest.json
+    tables.md
 ```
 
 ### Checks that stop a run
@@ -955,7 +961,7 @@ process has the rest, such as the form of a name, a run config of another catalo
 | Process                | The run stops when                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | the workflow itself    | `sources` and `annotated` are both given or neither; a run that annotates lacks one of the Annotator's params; the sheet is empty, has no `proband` column, or has a row without `family`, `vcf` or `ped` or one that ends before `proband`; the sheet has a column other than its seven; a named VCF of the larger variants has no `.tbi` beside it, or `repeat_vcfs` has an empty entry; a family is listed twice; the reference has no `.fai` beside it; no JSON is named after the group, among the Annotator's outputs or in the folder that `annotated` names, or none after `<group>.sv` in a group with structural variants                                                                                                                  |
-| `FAMILY_CHECK`         | the PED file is of another family or lacks a sample of the VCF; a sample is named, in any case, as a column of `variants`, `sv` or `repeats` that is not a member's, or two samples' names differ only in case; the named proband is not an individual of the PED file and a sample of the VCF; the samples of a structural-variant or copy-number VCF are not exactly the VCF's; the repeat VCFs are not one single-sample VCF of each sample of the VCF                                                                                                                                                                                                                                                                                            |
+| `FAMILY_CHECK`         | the tools image is of another release of the pipeline than the workflow, which stops a run before anything is annotated; the PED file is of another family or lacks a sample of the VCF; a sample is named, in any case, as a column of `variants`, `sv` or `repeats` that is not a member's, or two samples' names differ only in case; the named proband is not an individual of the PED file and a sample of the VCF; the samples of a structural-variant or copy-number VCF are not exactly the VCF's; the repeat VCFs are not one single-sample VCF of each sample of the VCF                                                                                                                                                                   |
 | `NORMALISE_FAMILY`     | a record's REF is not the reference's sequence; two records hold the same allele after normalising; no allele is left on the primary chromosomes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `NORMALISE_SV`         | a structural variant written as a sequence has a REF that is not the reference's sequence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `SV_UNION`             | a record has no ID, or two records of a family's callers share one; a record that is not a breakend has no INFO `END`, or a breakend has one; a record has no `SVTYPE`, or one that is none of `DEL`, `INS`, `DUP`, `INV`, `BND` and `CNV`, or a copy-number segment has an allele other than `<DEL>` and `<DUP>`; a record's `END` lies before its position; a record has another number of `SVLEN` values than of alleles; the families' files declare a contig with two lengths; no record is left on the primary chromosomes                                                                                                                                                                                                                     |
@@ -963,10 +969,9 @@ process has the rest, such as the form of a name, a run config of another catalo
 | `ILLUMINA_ANNOTATE`    | the bundle lacks a source named or is of another catalog; the licence is invalid for a source                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `ANNOTATION_TABLES`    | the JSON's alleles are not exactly the union's; the JSON holds ClinVar or dbSNP records, or a dated source's entry in its header, that the run did not name; the genes section holds a record without a symbol, an HGNC id that is not a positive integer or two HGNC ids for one symbol, or lacks the symbol of a transcript; the JSON lists a transcript twice for one allele                                                                                                                                                                                                                                                                                                                                                                      |
 | `SV_ANNOTATION_TABLES` | a record of the union has an ID that is not the id of its content; the JSON's positions are not exactly the union's sites, each once and with its site's place and alleles; a structural record has no `svEnd`, or does not end at its `END`; the Annotator gives a record a type that its `SVTYPE` cannot have, or a term outside the severity order; a position or a variant has a key the conversion does not know; the JSON holds ClinVar, ClinGen, MITOMAP or dbSNP records, or a dated source's entry in its header, that the run did not name; an entry of gnomAD, 1000 Genomes or ClinVar has a reciprocal overlap below 0.5, or none on a record with an extent, or is a loss on a gain; the genes section fails as for `ANNOTATION_TABLES` |
-| `FAMILY_TABLES`        | a call's `PL` has a length that does not fit its ploidy, or a value missing among others; a record of the larger variants has no ID, or two share one; a copy-number genotype contradicts its copy number; a VCF of the larger variants has records and none on the primary chromosomes; the members' repeat VCFs do not hold the same repeats; the map of the union of the structural variants does not name exactly the alleles of the family's records, or the union's tables lack one of their sites; the structural variants were annotated with another catalog or other sources than the alleles                                                                                                                                              |
+| `FAMILY_TABLES`        | the tools image is of another release of the pipeline than the workflow, as in `FAMILY_CHECK`; a call's `PL` has a length that does not fit its ploidy, or a value missing among others; a record of the larger variants has no ID, or two share one; a copy-number genotype contradicts its copy number; a VCF of the larger variants has records and none on the primary chromosomes; the members' repeat VCFs do not hold the same repeats; the map of the union of the structural variants does not name exactly the alleles of the family's records, or the union's tables lack one of their sites; the structural variants were annotated with another catalog or other sources than the alleles                                               |
 
 `FAMILY_CHECK` refuses the sample names above because DuckDB matches column names without regard to case, and each
 sample names a column of `variants` beside the columns that describe the allele, such as `pos` and `revel`, and a column
 of `sv` and of `repeats` beside the columns that describe a record or a repeat, such as `sv_id`. It refuses such a name
-whether or not the family's row names the VCFs of its larger variants
-([The members' columns](family-tables.md#the-members-columns)).
+whether or not the family's row names the VCFs of its larger variants.

@@ -14,13 +14,15 @@
 // variants table (no two names, and no name and a column's of variants, sv or repeats, that differ only in case), and
 // the proband the sheet names, if any, is an individual of the PED file and a sample of the VCF, before anything is
 // annotated. The structural-variant and copy-number VCFs must hold exactly the VCF's samples, and the repeat VCFs one
-// of them each and all of them together.
+// of them each and all of them together. It is the first step of a run in the tools image, so it also refuses an
+// image of another release of the pipeline than the workflow's (pipeline_version), before the Annotator runs.
 process FAMILY_CHECK {
     tag "${family}"
     label 'tools'
 
     input:
     tuple val(family), path(vcf, stageAs: 'input/*'), path(ped, stageAs: 'input/*'), val(proband), path(sv, stageAs: 'sv/*'), path(cnv, stageAs: 'cnv/*'), path(repeats, stageAs: 'repeats/*')
+    val pipeline_version
 
     output:
     val family
@@ -28,7 +30,7 @@ process FAMILY_CHECK {
     script:
     """
     case-annotation family-check --family ${family} --ped ${ped} --vcf ${vcf} ${probandOption(proband)} \\
-        ${structuralOptions(sv, cnv, repeats)}
+        ${structuralOptions(sv, cnv, repeats)} --pipeline-version ${pipeline_version}
     """
 
     stub:
@@ -318,8 +320,9 @@ process SV_ANNOTATION_TABLES {
     """
 }
 
-// One family's variants table, which holds a column of each member's calls, its transcripts table and its manifest,
-// from the union's tables and its gnomAD joint values. The manifest's roles are those of the proband the sheet names
+// One family's variants table, which holds a column of each member's calls, its transcripts table, its manifest and
+// the notes on the tables (tables.md, a copy of the file in the tools' package), from the union's tables and its gnomAD
+// joint values. The manifest's roles are those of the proband the sheet names
 // and of its parents; nobody has one where the sheet names none. DuckDB sorts the union's tables down to the family's
 // alleles, spilling to the boot disk.
 // A family with a structural-variant or a copy-number VCF also gets sv, which holds a column of each member's calls
@@ -342,9 +345,10 @@ process FAMILY_TABLES {
     path sv_annotation, stageAs: 'sv-union/*'
     path sv_map, stageAs: 'sv-union/*'
     val schema_version
+    val pipeline_version
 
     output:
-    tuple val(family), path('variants.parquet'), path('transcripts.parquet'), path('manifest.json'), path('{sv,sv_transcripts,repeats}.parquet', arity: '0..3')
+    tuple val(family), path('variants.parquet'), path('transcripts.parquet'), path('manifest.json'), path('tables.md'), path('{sv,sv_transcripts,repeats}.parquet', arity: '0..3')
 
     script:
     // Only a family with a caller's VCF reads the annotation of the group's structural variants.
@@ -354,14 +358,14 @@ process FAMILY_TABLES {
         ${structuralOptions(sv, cnv, repeats)} ${vcfs(sv_alleles).collect { f -> "--sv-alleles ${f}" }.join(' ')} \\
         ${annotated} \\
         --annotation ${tables} --gnomad-joint ${gnomad_joint} --schema-version ${schema_version} \\
-        --output out --scratch /tmp
+        --pipeline-version ${pipeline_version} --output out --scratch /tmp
     mv out/* .
     """
 
     stub:
     def larger = (vcfs(sv) + vcfs(cnv) ? ['sv.parquet', 'sv_transcripts.parquet'] : []) + (vcfs(repeats) ? ['repeats.parquet'] : [])
     """
-    touch variants.parquet transcripts.parquet manifest.json ${larger.join(' ')}
+    touch variants.parquet transcripts.parquet manifest.json tables.md ${larger.join(' ')}
     """
 }
 
