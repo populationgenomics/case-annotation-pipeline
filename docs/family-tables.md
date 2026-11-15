@@ -100,6 +100,7 @@ erDiagram
         string worst_consequence "over all transcripts"
         string gene_symbol "of the worst consequence"
         list hgnc_ids "of every gene it touches"
+        list genes "every gene it touches, with its own consequence"
         string mane_select_hgvsp
         list rsids "dbSNP's ids of the allele"
         float gnomad_genomes_af "32-bit, like the three below"
@@ -294,6 +295,7 @@ allele; the members' columns of the same two rows follow [further down](#the-mem
 | `worst_transcript_id`       | `NM_999901.1`               | `NM_999901.1`               |
 | `gene_symbol`, `gene_id`    | `EXMPL1`, `ENSG00000999901` | `EXMPL1`, `ENSG00000999901` |
 | `hgnc_ids`                  | `[99901]`                   | `[99901]`                   |
+| `genes`                     | one entry, of `EXMPL1`      | one entry, of `EXMPL1`      |
 | `mane_select_hgvsp`         | `NP_999901.1:p.(Ser134Leu)` | `NP_999901.1:p.(Ser134Ter)` |
 | `rsids`                     | `['rs9999990001']`          | empty                       |
 | `gnomad_genomes_af`         | 0.000013                    | empty                       |
@@ -311,8 +313,11 @@ Several values in these rows need a word.
 - `rsids` is a list, because dbSNP gives some alleles several ids, and the `A` allele, which dbSNP does not hold, has no
   list rather than an empty one.
 - `hgnc_ids` is a list too, because an allele can lie in several genes: it holds the HGNC id of each gene that one of
-  the allele's transcripts belongs to, here the id of `EXMPL1` alone. `gene_symbol` and `gene_id` name only the gene of
-  the most severe consequence.
+  the allele's transcripts belongs to, here the id of `EXMPL1` alone.
+- `worst_consequence`, `worst_impact`, `gene_symbol` and `gene_id` are those of one transcript: the one with the most
+  severe consequence among the transcripts of all the allele's genes. For an allele in two overlapping genes they
+  describe one of the two. `genes` has an entry for each gene, with that gene's own most severe consequence and its
+  impact, here one entry for `EXMPL1`.
 - The joint columns hold gnomAD's own values over its exomes and genomes together, which the workflow reads from a
   public archive rather than from the VCF ([gnomAD's joint columns](#gnomads-joint-columns)). gnomAD does not hold the
   `A` allele, so its joint columns are empty too; an allele that gnomAD holds with a count of 0 would read 0 instead.
@@ -913,6 +918,13 @@ score. The genotype and the annotation are columns of the same row, so the query
 from gnomAD has no frequency, which `coalesce` reads as 0. The joint columns do not say whether gnomAD filtered an
 allele; `gnomad_genomes_failed_filter` and `gnomad_exomes_failed_filter` do, for each set.
 
+`worst_impact` is the impact of one transcript, the one that `worst_consequence` and `gene_symbol` are of: the
+transcript with the most severe consequence among those of all the allele's genes. For an allele in two overlapping
+genes it is the impact in one of them, and `genes` has the impact in each ([the `variants` table](#the-variants-table)).
+An allele whose every consequence has the impact `modifier`, such as one in an exon of a non-coding RNA gene, passes no
+threshold on the impact, in this column or in an entry of `genes`. A query for such alleles names their consequence
+instead, such as `non_coding_transcript_exon_variant`.
+
 ```python
 rare_damaging = con.sql(
     """
@@ -1098,6 +1110,41 @@ In the worked example this returns `EXMPL1` with `chr2-1234567-C-T` from the fat
 mother. A whole genome takes a little over a second here, most of it in the join with `transcripts`. A VCF has no
 one-line equivalent, because the pairing is by gene across records: it takes a script over `bcftools query` output, or a
 tool built for it.
+
+`genes` gives the same attribution without the join. The query filters on the allele's own columns first, turns the
+entries of the alleles that are left into rows with `unnest`, and counts each allele under each of its genes:
+
+```python
+compound_het_by_genes = con.sql(
+    """
+    WITH candidates AS (
+        SELECT gene.gene_symbol AS gene_symbol, variant_id, from_parent
+        FROM (SELECT variant_id, spliceai_max, unnest(genes) AS gene,
+                     CASE WHEN father.zygosity = 'het' AND mother.zygosity = 'hom_ref' THEN 'father'
+                          WHEN mother.zygosity = 'het' AND father.zygosity = 'hom_ref' THEN 'mother'
+                     END AS from_parent
+              FROM trio
+              WHERE proband.zygosity = 'het'
+                AND coalesce(gnomad_joint_af, 0) < $max_af)
+        WHERE gene.worst_impact IN ('high', 'moderate') OR spliceai_max >= $min_spliceai
+    )
+    SELECT gene_symbol,
+           list(variant_id) FILTER (WHERE from_parent = 'father') AS from_father,
+           list(variant_id) FILTER (WHERE from_parent = 'mother') AS from_mother
+    FROM candidates
+    WHERE from_parent IS NOT NULL
+    GROUP BY gene_symbol
+    HAVING count(*) FILTER (WHERE from_parent = 'father') > 0
+       AND count(*) FILTER (WHERE from_parent = 'mother') > 0
+    """,
+    params={'max_af': 0.01, 'min_spliceai': 0.2},
+).to_arrow_table()
+```
+
+A gene symbol stands in at most one entry of an allele, so the query needs no `DISTINCT`. It reads the impact of each
+gene's most severe consequence, where the query through `transcripts` reads the impact of every transcript. A search
+that groups by the allele's own `gene_symbol` instead counts an allele in two genes under one of them, and misses a pair
+in the other.
 
 ### X-linked in a male proband
 
@@ -1609,7 +1656,9 @@ for one. Two ways of holding both in one table were measured and rejected.
 | one row per allele and transcript, with the allele's columns repeated in each | The table was 32% larger and questions about alleles took 4 to 7 times as long. A query that forgets to count each allele once returns counts 10 to 27 times too high, without an error                                                                               |
 
 `hgnc_ids` gives `variants` the part of `transcripts` that most questions need, the genes of an allele, in a column of
-under 1 MB.
+under 1 MB. `genes` holds a summary for each of those genes. It is a list of structs as well, with an entry for each
+gene instead of each transcript, and DuckDB 2.0 reads it in the same way: every field of the entries to read one of
+them.
 
 `sv_transcripts` is a table of its own beside `sv` for the same reason: a record has ten transcripts on average, and
 some have hundreds. `sv` has `hgnc_ids` as well.
@@ -1709,7 +1758,7 @@ The tables share these properties:
 | key-value metadata | the tables' version (`schema_version`), the table's name, the family, and the annotation's provenance (`annotation` and `gnomad_joint`, as in the manifest); `sv` and `sv_transcripts` carry the provenance of the annotation of the structural variants instead (`annotation`, which is the manifest's `sv_annotation`), and `repeats` none, since nothing annotated it                                                                               |
 | variant id         | `<chrom>-<pos>-<ref>-<alt>` with the VCF's contig name, such as `chr2-1234567-C-T`                                                                                                                                                                                                                                                                                                                                                                     |
 | shared columns     | a column that means the same thing has the same name and type in every table ([Shared column names](#shared-column-names))                                                                                                                                                                                                                                                                                                                             |
-| a missing value    | a null. That holds for the list columns `rsids`, `hgnc_ids`, `clinvar_records`, `clinvar_conditions`, `gnomad_sv_matches` and `pl` too, and for `cipos`, `ciend` and the lists of a repeat's genotype: an allele without an rsID has no `rsids`, not an empty list. `filters` differs: in every table it holds the VCF record's FILTER values, and an empty list for a record whose FILTER is `.`                                                      |
+| a missing value    | a null. That holds for the list columns `rsids`, `hgnc_ids`, `genes`, `clinvar_records`, `clinvar_conditions`, `gnomad_sv_matches` and `pl` too, and for `cipos`, `ciend` and the lists of a repeat's genotype: an allele without an rsID has no `rsids`, not an empty list. `filters` differs: in every table it holds the VCF record's FILTER values, and an empty list for a record whose FILTER is `.`                                             |
 
 The tables hold no gene-level knowledge beyond a gene's identifiers. What OMIM, ClinGen and other gene–disease sources
 say about a gene is knowledge that the reader brings.
@@ -1740,12 +1789,48 @@ them.
 | `worst_consequence`, `worst_impact`, `worst_transcript_id`                                       | strings                 | the most severe consequence over all transcripts, Ensembl's and RefSeq's, by Ensembl's ordering of Sequence Ontology terms; among transcripts with the same consequence, the MANE Select one is chosen, then a canonical one, then Ensembl's |
 | `gene_symbol`, `gene_id`                                                                         | strings                 | `gene_symbol` is that transcript's, and `gene_id` its Ensembl gene                                                                                                                                                                           |
 | `hgnc_ids`                                                                                       | list of 32-bit integers | the HGNC ids of the genes of all the allele's transcripts, each once, in ascending order; `HGNC:1100` is 1100                                                                                                                                |
+| `genes`                                                                                          | list of structs         | one entry for each gene of the allele's transcripts, with that gene's own most severe consequence; the gene of `gene_symbol` comes first                                                                                                     |
 | `mane_select_transcript_id`, `mane_select_consequence`, `mane_select_hgvsc`, `mane_select_hgvsp` | strings                 | the MANE Select transcript, which Illumina flags on RefSeq's copy                                                                                                                                                                            |
 
 For a RefSeq transcript, `gene_id` is the Ensembl gene of the allele's Ensembl transcripts with the same symbol, and it
 has no value where the symbol names none or more than one (as in the pseudoautosomal regions). An allele in two genes
 can have two MANE Select transcripts; the one of the worst consequence's gene is shown, and the transcripts table holds
 both.
+
+`worst_consequence`, `worst_impact`, `worst_transcript_id`, `gene_symbol` and `gene_id` are all of one transcript,
+chosen among the transcripts of every gene of the allele, so for an allele in two overlapping genes they describe one of
+the two. `genes` describes each gene: the same rule chooses one transcript among the gene's own, and the gene's entry
+holds what that transcript says.
+
+| Field of an entry                   | Type                                        | Holds                                                                                                                                        |
+| ----------------------------------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gene_symbol`, `gene_id`, `hgnc_id` | strings, and a 32-bit integer for `hgnc_id` | the gene: the chosen transcript's symbol, its Ensembl gene as in the allele's own `gene_id`, and the HGNC id of the symbol, where it has one |
+| `biotype`                           | string                                      | the biotype of the chosen transcript                                                                                                         |
+| `worst_consequence`, `worst_impact` | strings                                     | the most severe consequence among the gene's transcripts, and the impact of the chosen transcript                                            |
+| `mane_select_consequence`           | string                                      | the most severe consequence on the gene's MANE Select transcript, where the allele has such a transcript of the gene                         |
+
+Two transcripts are of one gene where they have the same HGNC id, which Ensembl's and RefSeq's transcripts of a gene
+share. A gene without an HGNC id is told by its symbol, and its entry has no `hgnc_id`. A transcript without a symbol is
+told by the gene id of its own gene model.
+
+The entries stand in the order of their chosen transcripts under the same rule, so they run from the most to the least
+severe consequence. The first entry is the gene of the allele's own columns: its `gene_symbol`, `gene_id`,
+`worst_consequence` and `worst_impact` are the allele's. The allele's `mane_select_` columns are of a MANE Select
+transcript with the allele's `gene_symbol` where the allele has one, and otherwise of another gene's MANE Select
+transcript. `biotype` is that of one transcript, so a protein-coding gene whose most severe consequence lies on a
+non-coding transcript shows that transcript's biotype. An allele without a transcript has no `genes`, and every other
+allele has at least one entry, also an allele that has no `hgnc_ids` because none of its genes has an id.
+
+A condition on a field of an entry cannot skip a row group, like one on `hgnc_ids`. DuckDB 2.0 reads `genes` for every
+row group that a query does not skip, with every field of its entries, also where the query's other conditions leave few
+alleles. A query that reads `genes` over the whole genome therefore reads the column whole. One that narrows the alleles
+by their own columns first, as the second query of
+[Recessive: compound heterozygous candidates](#recessive-compound-heterozygous-candidates) does, has fewer entries to
+turn into rows with `unnest(genes)`. Write a search for a field of an entry over the whole table as
+`len(list_filter(genes, lambda g: g.biotype = $biotype)) > 0` or as
+`list_contains(list_transform(genes, lambda g: g.biotype), $biotype)`, and not as
+`$biotype = ANY(list_transform(genes, lambda g: g.biotype))`, for the reason that the warning of
+[Variants in a gene](#variants-in-a-gene) gives for `hgnc_ids`.
 
 An HGNC id comes from the genes section of the Annotator's output, which lists the gene of every transcript by its
 symbol, with the gene's HGNC id where it has one. A transcript's gene is matched to that list by its symbol, whichever

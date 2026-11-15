@@ -110,6 +110,31 @@ def _float32(value: float) -> float:
 _RSIDS: tuple[list[str] | None, ...] = (['rs1', 'rs2'], None, ['rs3'], ['rs4'], ['rs5'], ['rs6'])
 # The invented HGNC ids of the genes of the union's alleles, in the alleles' order: one gene, two, none, then one each.
 _HGNC_IDS: tuple[list[int] | None, ...] = ([90001], [90001, 90002], None, [90002], [90001], [90003])
+
+
+def _gene(symbol: str, hgnc_id: int | None) -> dict[str, Any]:
+    """An entry of `genes` (annotation_tables.GENE) as the union's table holds it."""
+    return {
+        'gene_symbol': symbol,
+        'gene_id': None,
+        'hgnc_id': hgnc_id,
+        'biotype': 'mRNA',
+        'worst_consequence': 'intron_variant',
+        'worst_impact': 'modifier',
+        'mane_select_consequence': None,
+    }
+
+
+# The genes of the union's alleles, in the alleles' order: those of the HGNC ids, between the second allele's two a
+# gene without an id, and for the third allele no list.
+_GENES: tuple[list[dict[str, Any]] | None, ...] = (
+    [_gene('GENEA', 90001)],
+    [_gene('GENEB', 90002), _gene('GENEX', None), _gene('GENEA', 90001)],
+    None,
+    [_gene('GENEB', 90002)],
+    [_gene('GENEA', 90001)],
+    [_gene('GENEC', 90003)],
+)
 # gnomAD's genomes and exomes values of every allele of the union.
 _PER_TYPE = {
     f'gnomad_{kind}_{value}': held
@@ -123,7 +148,7 @@ def _write_union(path: pathlib.Path, alleles: Sequence[str], info: annotation_ta
     (path / 'variants').mkdir(parents=True)
     (path / 'transcripts').mkdir()
     variants, transcripts = [], []
-    for vid, rsids, hgnc_ids in zip([*alleles, 'chr2-500-C-A'], _RSIDS, _HGNC_IDS, strict=True):
+    for vid, rsids, hgnc_ids, genes in zip([*alleles, 'chr2-500-C-A'], _RSIDS, _HGNC_IDS, _GENES, strict=True):
         chrom, pos, ref, alt = vid.split('-')
         variants.append(
             {
@@ -134,6 +159,7 @@ def _write_union(path: pathlib.Path, alleles: Sequence[str], info: annotation_ta
                 'variant_id': vid,
                 'gene_symbol': 'GENEA',
                 'hgnc_ids': hgnc_ids,
+                'genes': genes,
                 'rsids': rsids,
                 'clinvar_accession': 'VCV1',
                 **_PER_TYPE,
@@ -320,6 +346,24 @@ def test_an_alleles_hgnc_ids_are_a_list_of_integers_and_a_lookup_by_one_finds_it
     assert sorted(f['variant_id'] for f in found) == sorted([_ALLELES[1], _ALLELES[3]])
     by_transcript = _rows(out / 'transcripts.parquet', 'SELECT variant_id FROM t WHERE hgnc_id = 90002')
     assert by_transcript == [{'variant_id': _ALLELES[3]}]
+
+
+def test_an_alleles_genes_are_a_list_of_structs_and_unnest_gives_a_row_for_each_gene(tmp_path: pathlib.Path) -> None:
+    family_tables.assemble(**_inputs(tmp_path))
+    path = tmp_path / 'out' / 'variants.parquet'
+    assert pq.read_schema(path).field('genes').type == pa.list_(annotation_tables.GENE)
+    # Each allele has its entries in the union's order, and an allele without genes no list rather than an empty one.
+    rows = {v['variant_id']: v['genes'] for v in _rows(path)}
+    assert rows == dict(zip(_ALLELES, _GENES[: len(_ALLELES)], strict=True))
+    # A count by gene counts an allele under each of its genes, also under one without an HGNC id.
+    counted = _rows(
+        path,
+        'SELECT gene.gene_symbol AS gene_symbol, count(*) AS alleles '
+        'FROM (SELECT unnest(genes) AS gene FROM t) GROUP BY 1',
+    )
+    held = [g['gene_symbol'] for genes in _GENES[: len(_ALLELES)] for g in genes or ()]
+    assert {c['gene_symbol']: c['alleles'] for c in counted} == {symbol: held.count(symbol) for symbol in set(held)}
+    assert {'GENEA', 'GENEX'} <= set(held)
 
 
 def test_a_call_without_likelihoods_has_none(tmp_path: pathlib.Path) -> None:
