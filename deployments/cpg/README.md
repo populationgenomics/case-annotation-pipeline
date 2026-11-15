@@ -23,7 +23,7 @@ lands. [Annotation](../../docs/annotation.md) explains what the workflows do.
 
 - The tools image is built from [containers/tools/Dockerfile](../../containers/tools/Dockerfile) at a release tag, and
   the Dockerfile shows the command. The params file pins it by digest, so a new tag means a new build and a new digest
-  there. The pinned image was built at the tag `v0.1.0`, which is the commit `a01ee26d6d4ddd1ec5fcdf5307d336b2ecf4adbb`,
+  there. The pinned image was built at the tag `v0.2.0`, which is the commit `360633f4403f76275cf4375d52392cfa78e35ddc`,
   and the registry tags it with both.
 
 - The licence is CPG's DRAGEN licence, whose API key the Annotator takes as an API key file. The dataset's accounts can
@@ -121,7 +121,7 @@ sources: [<source>, <source>, ...]
 ```
 
 A run over a few regions takes `regions`, a BED file in a bucket, and a `label` for its folder. It cuts the VCF in the
-tools image, which the params file pins as built at the tag `v0.1.0`.
+tools image, which the params file pins as built at the tag `v0.2.0`.
 
 ## Family tables
 
@@ -136,7 +136,7 @@ and the VCFs of its larger variants where it has them
 writes one, and [contract/examples/families.csv](../../contract/examples/families.csv) is an invented one.
 
 The params are the ones that [contract/workflow.json](../../contract/workflow.json) lists for `family_tables.nf`. Every
-line of `test.annotator.params.yaml` is one of them, and its tools image is the one built at the tag `v0.1.0`. A run
+line of `test.annotator.params.yaml` is one of them, and its tools image is the one built at the tag `v0.2.0`. A run
 adds CPG's reference and archive, and its own sheet, group and catalog:
 
 ```sh
