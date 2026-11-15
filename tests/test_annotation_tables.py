@@ -286,6 +286,17 @@ def test_a_transcripts_consequences_run_from_the_most_to_the_least_severe_whatev
         assert transcript['consequences'] == annotation_tables.by_severity(consequences)
 
 
+def test_a_transcripts_biotype_is_the_annotators_own_word_for_it() -> None:
+    transcripts = [
+        _transcript('ENST01.1', 'Ensembl', 'G', 'E', 'intron_variant', bioType='lncRNA'),
+        _transcript('NM_01.1', 'RefSeq', 'G', 'E', 'intron_variant'),
+    ]
+    row, rows, _ = _position_rows(_position('chr1', 5, 'C', 'T', transcripts=transcripts))
+    # Passed through unchanged, and a transcript's alone: an entry of `genes` has none.
+    assert {r['transcript_id']: r['biotype'] for r in rows} == {'ENST01.1': 'lncRNA', 'NM_01.1': 'mRNA'}
+    assert all('biotype' not in gene for gene in row['genes'])
+
+
 def test_a_transcript_without_consequences_fails() -> None:
     position = _position('chr1', 5, 'C', 'T', transcripts=[_transcript('T1', 'Ensembl', 'G', 'E')])
     with pytest.raises(ValueError, match='without consequences'):
