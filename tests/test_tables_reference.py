@@ -20,11 +20,13 @@ LIMIT = 8_000
 # How the notes write a member's column, which each family names as its sample.
 MEMBER = '<member>'
 
-# A name written with its table, or with MEMBER alone, wherever it stands between backticks: `table.column`,
-# `table.column.field` for a field of a struct or of a list's entries, `table.<member>.field` and `<member>.field` for
-# a field of a member's column. A `*` ends a name that stands for every name it starts.
-_TABLES = '|'.join(sorted(family_tables.TABLES, key=len, reverse=True))
-_NAME = re.compile(rf'(?<![\w.>])(?:(?P<table>{_TABLES})\.|(?={re.escape(MEMBER)}\.))(?P<path>[\w<>*]+(?:\.[\w*]+)*)')
+# A name with its head, wherever it stands between backticks: `table.column`, `table.column.field` for a field of a
+# struct or of a list's entries, `table.<member>.field` and `<member>.field` for a field of a member's column. A `*`
+# ends a name that stands for every name it starts.
+_HEADED = re.compile(
+    r'(?<![\w.>])(?P<head>[A-Za-z_]\w*|<\w+>)\.(?P<path>(?:<\w+>|[A-Za-z_][\w*]*)(?:\.[A-Za-z_][\w*]*)*)'
+)
+_WORD = re.compile(r'[A-Za-z_]\w*')
 
 
 def _fields(described: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -51,9 +53,11 @@ def _held(name: str, among: Mapping[str, Any]) -> bool:
 def name_problems(text: str) -> list[str]:
     """The names between backticks that no table has as the notes write them.
 
-    A name written with its table is looked up in that table, and one written with MEMBER alone in the members' columns
-    of every table that has them. A bare word that is a column or a field of some table is a problem too: without its
-    table nothing can hold it to a schema.
+    Every word with a dot after it heads a name, and the head is a table or MEMBER. A name headed by a table is looked
+    up in that table, and one headed by MEMBER in the members' columns of every table that has them. Any other word
+    that is a column or a field of some table is a problem too, also inside a condition: without its head nothing can
+    hold it to a schema. So is a field read after an index, as in `genes[1].field`. What stands between single quotes
+    is a value and is not read.
     """
     tables = by_the_schemas()
     every = {name for columns in tables.values() for name in columns} | {
@@ -61,17 +65,22 @@ def name_problems(text: str) -> list[str]:
     }
     problems = []
     for span in re.findall(r'`([^`]+)`', text):
-        if re.fullmatch(r'[a-z_][a-z0-9_]*', span) and span in every and span not in tables:
-            problems.append(f'{span} is written without its table')
-        for match in _NAME.finditer(span):
-            parts = match['path'].split('.')
+        code = re.sub(r"'[^']*'", ' ', span)
+        if re.search(r'\]\s*\.', code):
+            problems.append(f'{span} reads a field after an index, which nothing holds to a schema')
+        for match in _HEADED.finditer(code):
+            head, parts = match['head'], match['path'].split('.')
+            if head == MEMBER:
+                candidates, parts = [table for table in tables if MEMBER in tables[table]], [MEMBER, *parts]
+            elif head in tables:
+                candidates = [head]
+            else:
+                problems.append(f'{match[0]} is headed by neither a table nor {MEMBER}')
+                continue
             if len(parts) > 2:
                 problems.append(f'{match[0]} is deeper than a field')
                 continue
             column, field = parts[0], (parts[1] if len(parts) == 2 else None)
-            candidates = [match['table']] if match['table'] else [t for t in tables if MEMBER in tables[t]]
-            if match['table'] is None and field is None:
-                continue
             found = False
             for table in candidates:
                 columns = tables[table]
@@ -83,13 +92,15 @@ def name_problems(text: str) -> list[str]:
                     found = found or _held(field, fields)
             if not found:
                 problems.append(f'{match[0]} is no column or field of {" or ".join(candidates)}')
+        bare = _WORD.findall(_HEADED.sub(' ', code))
+        problems += [f'{word} is written without its table' for word in bare if word in every and word not in tables]
     return problems
 
 
 def test_every_name_the_notes_write_as_a_column_or_a_field_is_one_of_its_table() -> None:
     assert name_problems(NOTES) == []
     # The notes do write such names, of every table.
-    named = {match['table'] for span in re.findall(r'`([^`]+)`', NOTES) for match in _NAME.finditer(span)}
+    named = {match['head'] for span in re.findall(r'`([^`]+)`', NOTES) for match in _HEADED.finditer(span)}
     assert named >= set(family_tables.TABLES)
 
 
@@ -114,6 +125,11 @@ NAMES_WRONG = {
         'ensembl_gene_id is written without its table',
     ),
     'a name deeper than a field': ('`variants.genes.gene_symbol.first`', 'is deeper than a field'),
+    'a table that is misspelt': ('`variant.gene_symbol`', 'variant.gene_symbol is headed by neither a table nor'),
+    'a member that is misspelt': ('`<membr>.carries`', '<membr>.carries is headed by neither a table nor'),
+    'a column without its table inside a condition': ("`zygosity = 'het'`", 'zygosity is written without its table'),
+    'a column without its table inside a call': ('`unnest(genes)`', 'genes is written without its table'),
+    'a field that follows an index': ('`variants.genes[1].zzz`', 'reads a field after an index'),
 }
 
 
@@ -159,11 +175,9 @@ def test_the_notes_are_short_enough_to_be_read_whole() -> None:
 
 
 def links_out(text: str) -> list[str]:
-    """The links of a text that do not lead to one of its own headings."""
-    headings = re.findall(r'^#+ (.+)$', text, flags=re.MULTILINE)
-    anchors = {re.sub(r'[^\w\- ]', '', heading).lower().replace(' ', '-') for heading in headings}
-    targets = re.findall(r'\]\(([^)]*)\)', text)
-    return [target for target in targets if not (target.startswith('#') and target[1:] in anchors)]
+    """What in a text leads out of it: a link of any Markdown or HTML form, or an address."""
+    patterns = (r'\]\([^)]*\)', r'^\[[^\]]+\]:.*$', r'<[a-z]+:[^>]*>', r'https?://\S+', r'<a\s[^>]*>')
+    return [found for pattern in patterns for found in re.findall(pattern, text, flags=re.MULTILINE)]
 
 
 def test_the_notes_stand_alone_in_a_familys_folder() -> None:
@@ -172,7 +186,15 @@ def test_the_notes_stand_alone_in_a_familys_folder() -> None:
 
 
 @pytest.mark.parametrize(
-    'target', ['../../docs/family-tables.md', 'manifest.json', '#a-heading-the-file-lacks', 'https://example.org']
+    'written',
+    [
+        '[the page](../../docs/family-tables.md)',
+        '[a heading](#rows)',
+        '[the page]\n\n[the page]: ../../docs/family-tables.md',
+        '<https://example.org>',
+        'https://example.org',
+        '<a href="manifest.json">the manifest</a>',
+    ],
 )
-def test_a_link_out_of_the_notes_is_caught(target: str) -> None:
-    assert links_out(f'{NOTES}\nSee [this]({target}).\n') == [target]
+def test_a_link_out_of_the_notes_is_caught(written: str) -> None:
+    assert links_out(f'{NOTES}\nSee {written}.\n')

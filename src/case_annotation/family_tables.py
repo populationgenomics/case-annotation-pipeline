@@ -69,8 +69,9 @@ SCHEMA_VERSION = importlib.resources.files('case_annotation').joinpath('tables-v
 # without an error. They list no columns: a table's schema and the contract's tables.json do. A family's folder gets a
 # copy under the same name, so that a reader of the folder has the notes on the tables it reads.
 REFERENCE = 'tables.md'
-# The release of the pipeline that writes a folder: the version of this package as installed, which the tests hold to
-# pyproject.toml, to nextflow.config and to the contract's workflow.json.
+# The release of the pipeline's tools that writes a folder: the version of this package as installed, which the tests
+# hold to pyproject.toml, to nextflow.config and to the contract's workflow.json within one commit. A run takes its
+# tools from an image, so this is the release that the image was built from, whatever commit the workflow is of.
 PIPELINE_VERSION = importlib.metadata.version('case-annotation-tools')
 ROW_GROUP_ROWS = 100_000
 PRIMARY = tuple(f'chr{c}' for c in (*range(1, 23), 'X', 'Y', 'M'))
@@ -308,7 +309,7 @@ class FamilyMember(pydantic.BaseModel, frozen=True, extra='forbid'):
 
 class FamilyManifest(pydantic.BaseModel, frozen=True, extra='forbid'):
     schema_version: str
-    # The release of the pipeline that wrote the folder (PIPELINE_VERSION), the same in every run of one release.
+    # The release of the tools that wrote the folder (PIPELINE_VERSION), the same in every run with one tools image.
     pipeline_version: str
     family: str
     members: tuple[FamilyMember, ...]
