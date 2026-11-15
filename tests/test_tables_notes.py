@@ -175,13 +175,13 @@ def test_the_notes_are_short_enough_to_be_read_whole() -> None:
 
 
 def links_out(text: str) -> list[str]:
-    """What in a text leads out of it: a link of any Markdown or HTML form, or an address."""
+    """What in a text leads out of it: an inline link, a link definition, an autolink, an address or an HTML anchor."""
     patterns = (r'\]\([^)]*\)', r'^\[[^\]]+\]:.*$', r'<[a-z]+:[^>]*>', r'https?://\S+', r'<a\s[^>]*>')
     return [found for pattern in patterns for found in re.findall(pattern, text, flags=re.MULTILINE)]
 
 
 def test_the_notes_stand_alone_in_a_familys_folder() -> None:
-    # The file is copied into a folder that holds no other document, so a link could only lead to one of its headings.
+    # The file is copied into a folder that holds no other document, and is short enough to need no link into itself.
     assert links_out(NOTES) == []
 
 
