@@ -197,10 +197,9 @@ def test_an_empty_proband_reaches_the_tools_as_no_proband() -> None:
     for command in ('family-check', 'family-tables'):
         stated = f'{command} --family ${{family}} --ped ${{ped}} --vcf ${{vcf}} ${{probandOption(proband)}}'
         assert f'case-annotation {stated}' in FAMILY_MODULES
-        options = ['--family', 'f', '--ped', 'p', '--vcf', 'v', '--no-proband']
+        options = ['--family', 'f', '--ped', 'p', '--vcf', 'v', '--no-proband', '--pipeline-version', 'p']
         if command == 'family-tables':
-            options += ['--annotation', 'a', '--gnomad-joint', 'g', '--schema-version', 's', '--pipeline-version', 'p']
-            options += ['--output', 'o']
+            options += ['--annotation', 'a', '--gnomad-joint', 'g', '--schema-version', 's', '--output', 'o']
         assert cli.parser().parse_args([command, *options]).proband is None
 
 

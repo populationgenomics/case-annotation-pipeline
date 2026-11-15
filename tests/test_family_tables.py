@@ -595,9 +595,24 @@ def _tables_command(
     return [*args, '--schema-version', version, '--pipeline-version', pipeline]
 
 
-def _check_command(inputs: Mapping[str, Any], family: str = 'fam-1') -> list[str]:
+def _check_command(
+    inputs: Mapping[str, Any], family: str = 'fam-1', pipeline: str = family_tables.PIPELINE_VERSION
+) -> list[str]:
     """The family-check command of the inputs, without its proband."""
-    return ['family-check', '--family', family, '--ped', str(inputs['ped_path']), '--vcf', str(inputs['vcf_path'])]
+    args = ['family-check', '--family', family, '--ped', str(inputs['ped_path']), '--vcf', str(inputs['vcf_path'])]
+    return [*args, '--pipeline-version', pipeline]
+
+
+def test_the_family_check_refuses_a_workflow_of_another_release_of_the_pipeline(tmp_path: pathlib.Path) -> None:
+    inputs = _inputs(tmp_path)
+    # The first command of a run says so, in the words of the command that writes a family's folder.
+    refusals = []
+    for command in (_check_command(inputs, pipeline='0.0.0'), _tables_command(inputs, pipeline='0.0.0')):
+        with pytest.raises(SystemExit, match=r'and the workflow of 0\.0\.0') as refused:
+            cli.main([*command, '--proband', 'S3'])
+        refusals.append(str(refused.value))
+    assert refusals[0] == refusals[1]
+    cli.main([*_check_command(inputs), '--proband', 'S3'])
 
 
 def test_the_family_check_refuses_a_ped_file_of_another_family(tmp_path: pathlib.Path) -> None:

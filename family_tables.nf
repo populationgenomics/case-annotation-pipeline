@@ -108,7 +108,9 @@ workflow {
         .map { row ->
             tuple(row.family, indexed([row.sv_vcf]), indexed([row.cnv_vcf]), indexed(repeatVcfs(row)))
         }
-    checked = FAMILY_CHECK(families.join(structural))
+    // The first step in the tools image, which refuses an image of another release than this workflow's. Every step
+    // before the Annotator's reads a family that it has checked.
+    checked = FAMILY_CHECK(families.join(structural), workflow.manifest.version)
     reference = channel.value(tuple(params.reference, reference_index))
     normalised = NORMALISE_FAMILY(
         families.join(checked.map { f -> [f] }).map { family, vcf, _ped, _proband -> tuple(family, vcf) },

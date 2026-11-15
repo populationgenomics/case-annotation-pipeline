@@ -78,7 +78,7 @@ workflow {
         }
     structural = larger.mix(channel.of(tuple('family-b', [], [], [])))
 
-    checked = FAMILY_CHECK(families.join(structural))
+    checked = FAMILY_CHECK(families.join(structural), '0.3.0')
     normalised = NORMALISE_FAMILY(
         families.join(checked.map { f -> [f] }).map { f, vcf, _ped, _proband -> tuple(f, vcf) },
         reference,
@@ -183,13 +183,16 @@ workflow {
         reference,
     )
     other_proband = FAMILY_CHECK_PROBAND_REFUSED(
-        channel.of(tuple('family-a', file("${fixture}/family-a.vcf"), file("${fixture}/family-a.ped"), 'B3', [], [], []))
+        channel.of(tuple('family-a', file("${fixture}/family-a.vcf"), file("${fixture}/family-a.ped"), 'B3', [], [], [])),
+        '0.3.0',
     )
     two_repeats = FAMILY_CHECK_REPEATS_REFUSED(
-        channel.of(tuple('family-a', file("${fixture}/family-a.vcf"), file("${fixture}/family-a.ped"), 'A3', [], [], [file("${fixture}/A1.repeats.vcf"), file("${fixture}/A2.repeats.vcf")]))
+        channel.of(tuple('family-a', file("${fixture}/family-a.vcf"), file("${fixture}/family-a.ped"), 'A3', [], [], [file("${fixture}/A1.repeats.vcf"), file("${fixture}/A2.repeats.vcf")])),
+        '0.3.0',
     )
     other_samples = FAMILY_CHECK_SV_SAMPLES_REFUSED(
-        channel.of(tuple('family-b', file("${fixture}/family-b.vcf"), file("${fixture}/family-b.ped"), '', [file("${fixture}/family-a.sv.vcf")], [], []))
+        channel.of(tuple('family-b', file("${fixture}/family-b.vcf"), file("${fixture}/family-b.ped"), '', [file("${fixture}/family-a.sv.vcf")], [], [])),
+        '0.3.0',
     )
     sv_mismatch = NORMALISE_SV_REF_MISMATCH_REFUSED(
         channel.of(tuple('sv-mismatch', [file("${fixture}/sv-ref-mismatch.vcf")])),

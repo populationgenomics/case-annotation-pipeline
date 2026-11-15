@@ -25,9 +25,9 @@ lands. [Annotation](../../docs/annotation.md) explains what the workflows do.
   the Dockerfile shows the command. The params file pins it by digest, so a new tag means a new build and a new digest
   there. The pinned image was built at the tag `v0.1.0`, which is the commit `a01ee26d6d4ddd1ec5fcdf5307d336b2ecf4adbb`,
   and the registry tags it with both. The image has to be of the release of the workflow that a run launches:
-  `family_tables.nf` gives its own version to the step that writes a family's folder, and that step refuses to write
-  with tools of another version. A run of a later release therefore needs the image built at that release's tag, and the
-  pin moved to it.
+  `family_tables.nf` gives its own version to its first step and to the step that writes a family's folder, and each
+  refuses to run with tools of another version, the first before anything is annotated. A run of a later release
+  therefore needs the image built at that release's tag, and the pin moved to it.
 
 - The licence is CPG's DRAGEN licence, whose API key the Annotator takes as an API key file. The dataset's accounts can
   read the key, in the project `rd-benchmark-220215`. The dataset's analysis group can add and disable versions, and

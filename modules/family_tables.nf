@@ -14,13 +14,15 @@
 // variants table (no two names, and no name and a column's of variants, sv or repeats, that differ only in case), and
 // the proband the sheet names, if any, is an individual of the PED file and a sample of the VCF, before anything is
 // annotated. The structural-variant and copy-number VCFs must hold exactly the VCF's samples, and the repeat VCFs one
-// of them each and all of them together.
+// of them each and all of them together. It is the first step of a run in the tools image, so it also refuses an
+// image of another release of the pipeline than the workflow's (pipeline_version), before the Annotator runs.
 process FAMILY_CHECK {
     tag "${family}"
     label 'tools'
 
     input:
     tuple val(family), path(vcf, stageAs: 'input/*'), path(ped, stageAs: 'input/*'), val(proband), path(sv, stageAs: 'sv/*'), path(cnv, stageAs: 'cnv/*'), path(repeats, stageAs: 'repeats/*')
+    val pipeline_version
 
     output:
     val family
@@ -28,7 +30,7 @@ process FAMILY_CHECK {
     script:
     """
     case-annotation family-check --family ${family} --ped ${ped} --vcf ${vcf} ${probandOption(proband)} \\
-        ${structuralOptions(sv, cnv, repeats)}
+        ${structuralOptions(sv, cnv, repeats)} --pipeline-version ${pipeline_version}
     """
 
     stub:
