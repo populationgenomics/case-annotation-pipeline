@@ -489,9 +489,11 @@ assert pl[('chrX-100-T-C', 'A3')] == ('0/1', [73, 51, 52]), pl
 assert pl[('chr2-60-C-A', 'A1')] == ('0/1', None), pl
 assert variants.schema.field('hgnc_ids').type == pa.list_(pa.int32()), variants.schema
 assert variants.column('hgnc_ids').to_pylist() == [[90001]] * 10, variants.column('hgnc_ids')
-genes = [[(g['gene_symbol'], g['gene_id'], g['hgnc_id'], g['worst_consequence']) for g in entries]
+genes = [[(g['gene_symbol'], g['gene_id'], g['hgnc_id'], g['worst_consequence'], g['worst_transcript_id'],
+           g['mane_select_transcript_id']) for g in entries]
          for entries in variants.column('genes').to_pylist()]
-assert genes == [[('GENEA', 'ENSG01', 90001, 'intron_variant')]] * 10, genes
+assert genes == [[('GENEA', 'ENSG01', 90001, 'intron_variant', 'ENST01.1', None)]] * 10, genes
+assert not {'gene_symbol', 'gene_id', 'worst_transcript_id'} & set(variants.column_names), variants.column_names
 transcripts = pq.read_table('${transcripts}')
 assert transcripts.schema.field('hgnc_id').type == pa.int32(), transcripts.schema
 assert transcripts.column('hgnc_id').to_pylist() == [90001] * 10, transcripts.column('hgnc_id')

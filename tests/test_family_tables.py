@@ -113,15 +113,23 @@ _HGNC_IDS: tuple[list[int] | None, ...] = ([90001], [90001, 90002], None, [90002
 
 
 def _gene(symbol: str, hgnc_id: int | None) -> dict[str, Any]:
-    """An entry of `genes` (annotation_tables.GENE) as the union's table holds it."""
+    """An entry of `genes` (annotation_tables.GENE) as the union's table holds it.
+
+    A gene with an HGNC id has a MANE Select transcript, and a gene without one has none.
+    """
+    mane = None if hgnc_id is None else f'NM-{symbol}.1'
     return {
         'gene_symbol': symbol,
         'gene_id': None,
         'hgnc_id': hgnc_id,
-        'biotype': 'mRNA',
         'worst_consequence': 'intron_variant',
         'worst_impact': 'modifier',
-        'mane_select_consequence': None,
+        'worst_transcript_id': f'ENST-{symbol}.1',
+        'biotype': 'mRNA',
+        'mane_select_transcript_id': mane,
+        'mane_select_consequence': mane and 'intron_variant',
+        'mane_select_hgvsc': mane and f'{mane}:c.1+5A>G',
+        'mane_select_hgvsp': None,
     }
 
 
@@ -157,7 +165,6 @@ def _write_union(path: pathlib.Path, alleles: Sequence[str], info: annotation_ta
                 'ref': ref,
                 'alt': alt,
                 'variant_id': vid,
-                'gene_symbol': 'GENEA',
                 'hgnc_ids': hgnc_ids,
                 'genes': genes,
                 'rsids': rsids,
@@ -352,7 +359,11 @@ def test_an_alleles_hgnc_ids_are_a_list_of_integers_and_a_lookup_by_one_finds_it
 def test_an_alleles_genes_are_a_list_of_structs_and_unnest_gives_a_row_for_each_gene(tmp_path: pathlib.Path) -> None:
     family_tables.assemble(**_inputs(tmp_path))
     path = tmp_path / 'out' / 'variants.parquet'
-    assert pq.read_schema(path).field('genes').type == pa.list_(annotation_tables.GENE)
+    schema = pq.read_schema(path)
+    assert schema.field('genes').type == pa.list_(annotation_tables.GENE)
+    # What is of one gene or one transcript of an allele is a field of an entry, and no column beside `genes`.
+    of_a_gene = {field.name for field in annotation_tables.GENE} - {'worst_consequence', 'worst_impact', 'hgnc_id'}
+    assert not of_a_gene & set(schema.names)
     # Each allele has its entries in the union's order, and an allele without genes no list rather than an empty one.
     rows = {v['variant_id']: v['genes'] for v in _rows(path)}
     assert rows == dict(zip(_ALLELES, _GENES[: len(_ALLELES)], strict=True))
@@ -438,7 +449,7 @@ def test_the_tables_carry_their_metadata_row_groups_and_bloom_filters(
     query = 'SELECT DISTINCT path_in_schema FROM parquet_metadata(?) WHERE bloom_filter_length > 0 ORDER BY 1'
     blooms = con.execute(query, [str(path)]).fetchall()
     # hgnc_ids is a list, and its Bloom filter is on the list's values.
-    assert [b[0] for b in blooms] == ['gene_id', 'gene_symbol', 'hgnc_ids, list, element', 'variant_id']
+    assert [b[0] for b in blooms] == ['hgnc_ids, list, element', 'variant_id']
     blooms = con.execute(query, [str(tmp_path / 'out' / 'transcripts.parquet')]).fetchall()
     assert [b[0] for b in blooms] == ['gene_id', 'gene_symbol', 'hgnc_id', 'transcript_id', 'variant_id']
 
@@ -490,7 +501,7 @@ def test_each_column_named_for_an_encoding_is_written_with_it_and_every_other_co
         # A column without a dictionary is compressed like the others.
         metadata = pq.read_metadata(out / f'{table}.parquet')
         assert {metadata.row_group(0).column(i).compression for i in range(metadata.num_columns)} == {'ZSTD'}
-    assert 'rsids.list.element' in family_tables._ENCODINGS['variants']
+    assert {'rsids.list.element', 'genes.list.element.mane_select_hgvsc'} <= family_tables._ENCODINGS['variants'].keys()
 
 
 def test_a_column_named_for_an_encoding_that_the_table_lacks_is_refused(
@@ -1116,10 +1127,10 @@ def test_a_structural_variant_that_is_an_allele_of_variants_names_it(tmp_path: p
     # The insertion is the family's allele. The deletion's normalised allele is none of them, and a symbolic allele,
     # a breakend and a copy-number segment have no sequence to compare.
     assert linked == {'inv:INS:1': 'chr10-7-G-GA'}
-    joined = 'SELECT sv_id, gene_symbol FROM t JOIN read_parquet(?) v ON t.small_variant_id = v.variant_id'
+    joined = 'SELECT sv_id, v.rsids FROM t JOIN read_parquet(?) v ON t.small_variant_id = v.variant_id'
     con = duckdb.connect()
     con.read_parquet(str(out / 'sv.parquet')).create_view('t')
-    assert con.execute(joined, [str(out / 'variants.parquet')]).fetchall() == [('inv:INS:1', 'GENEA')]
+    assert con.execute(joined, [str(out / 'variants.parquet')]).fetchall() == [('inv:INS:1', ['rs3'])]
 
 
 def test_an_allele_that_the_familys_variants_lack_links_nothing(tmp_path: pathlib.Path) -> None:

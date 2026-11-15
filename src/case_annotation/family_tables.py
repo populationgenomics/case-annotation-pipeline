@@ -197,8 +197,6 @@ def check_column_names(samples: Sequence[str]) -> None:
 _BLOOM: Mapping[str, Mapping[str, int]] = {
     'variants': {
         'variant_id': ROW_GROUP_ROWS,
-        'gene_symbol': 5_000,
-        'gene_id': 5_000,
         'hgnc_ids.list.element': 5_000,
     },
     'transcripts': {
@@ -237,7 +235,7 @@ _ENCODINGS: Mapping[str, Mapping[str, str]] = {
         'variant_id': 'PLAIN',
         'hgvsg': 'PLAIN',
         'rsids.list.element': 'PLAIN',
-        'mane_select_hgvsc': 'PLAIN',
+        'genes.list.element.mane_select_hgvsc': 'PLAIN',
         **{
             f'gnomad_{source}_{value}': 'PLAIN'
             for source in ('genomes', 'exomes', 'joint')

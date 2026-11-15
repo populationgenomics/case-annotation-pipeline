@@ -61,21 +61,6 @@
           "nullable": true
         },
         {
-          "name": "worst_transcript_id",
-          "type": "string",
-          "nullable": true
-        },
-        {
-          "name": "gene_symbol",
-          "type": "string",
-          "nullable": true
-        },
-        {
-          "name": "gene_id",
-          "type": "string",
-          "nullable": true
-        },
-        {
           "name": "hgnc_ids",
           "type": "list",
           "nullable": true,
@@ -108,11 +93,6 @@
                 "nullable": true
               },
               {
-                "name": "biotype",
-                "type": "string",
-                "nullable": true
-              },
-              {
                 "name": "worst_consequence",
                 "type": "string",
                 "nullable": false
@@ -123,32 +103,37 @@
                 "nullable": true
               },
               {
+                "name": "worst_transcript_id",
+                "type": "string",
+                "nullable": false
+              },
+              {
+                "name": "biotype",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "mane_select_transcript_id",
+                "type": "string",
+                "nullable": true
+              },
+              {
                 "name": "mane_select_consequence",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "mane_select_hgvsc",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "mane_select_hgvsp",
                 "type": "string",
                 "nullable": true
               }
             ]
           }
-        },
-        {
-          "name": "mane_select_transcript_id",
-          "type": "string",
-          "nullable": true
-        },
-        {
-          "name": "mane_select_consequence",
-          "type": "string",
-          "nullable": true
-        },
-        {
-          "name": "mane_select_hgvsc",
-          "type": "string",
-          "nullable": true
-        },
-        {
-          "name": "mane_select_hgvsp",
-          "type": "string",
-          "nullable": true
         },
         {
           "name": "gnomad_genomes_af",
