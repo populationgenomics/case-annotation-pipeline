@@ -479,7 +479,11 @@ assert (pl[('chr2-60-C-A', 'A2')][0], carries[('chr2-60-C-A', 'A2')], zygosity[(
 # She has the other allele of the site at chr1:100, which the split writes as the reference in this allele's record.
 assert (pl[('chr1-100-G-C', 'A2')][0], carries[('chr1-100-G-C', 'A2')], zygosity[('chr1-100-G-C', 'A2')]) == (
     '0/0', False, 'hom_ref'), pl
-assert all((zygosity[key] is None) == (carries[key] is None) for key in carries), zygosity
+# A genotype with an allele missing has no zygosity, also the father's ./1 of chr2-80-C-T, which carries the allele.
+assert all((zygosity[key] is None) == ('.' in gt) for key, (gt, _) in pl.items()), zygosity
+assert (pl[('chr2-80-C-T', 'A1')][0], carries[('chr2-80-C-T', 'A1')], zygosity[('chr2-80-C-T', 'A1')]) == (
+    './1', True, None), pl
+assert all((zygosity[key] == 'hom_ref') == (carries[key] is False) for key in carries), zygosity
 assert pl[('chrX-100-T-A', 'A1')] == ('0', [90, 80]), pl
 assert pl[('chrX-100-T-A', 'A2')] == ('0/1', [70, 0, 60]), pl
 assert pl[('chrX-100-T-A', 'A3')] == ('1/0', [73, 62, 63]), pl
@@ -489,11 +493,11 @@ assert pl[('chrX-100-T-C', 'A3')] == ('0/1', [73, 51, 52]), pl
 assert pl[('chr2-60-C-A', 'A1')] == ('0/1', None), pl
 assert variants.schema.field('hgnc_ids').type == pa.list_(pa.int32()), variants.schema
 assert variants.column('hgnc_ids').to_pylist() == [[90001]] * 10, variants.column('hgnc_ids')
-genes = [[(g['gene_symbol'], g['gene_id'], g['hgnc_id'], g['worst_consequence'], g['worst_transcript_id'],
+genes = [[(g['gene_symbol'], g['ensembl_gene_id'], g['hgnc_id'], g['worst_consequence'], g['worst_transcript_id'],
            g['mane_select_transcript_id']) for g in entries]
          for entries in variants.column('genes').to_pylist()]
 assert genes == [[('GENEA', 'ENSG01', 90001, 'intron_variant', 'ENST01.1', None)]] * 10, genes
-assert not {'gene_symbol', 'gene_id', 'worst_transcript_id'} & set(variants.column_names), variants.column_names
+assert not {'gene_symbol', 'ensembl_gene_id', 'worst_transcript_id'} & set(variants.column_names), variants.column_names
 transcripts = pq.read_table('${transcripts}')
 assert transcripts.schema.field('hgnc_id').type == pa.int32(), transcripts.schema
 assert transcripts.column('hgnc_id').to_pylist() == [90001] * 10, transcripts.column('hgnc_id')

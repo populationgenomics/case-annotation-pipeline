@@ -145,16 +145,17 @@ CLINVAR_RECORD = pa.struct(
 
 # One gene of the allele (_gene_entry): the gene, then what the transcript chosen among the gene's own says of it,
 # then the gene's MANE Select transcript. Whatever is of one gene or one transcript of an allele stands here and in
-# `transcripts`: a column of `variants` beside `genes` describes the allele as a whole.
+# `transcripts`: a column of `variants` beside `genes` describes the allele as a whole. The gene's id is named
+# `ensembl_gene_id` because it is Ensembl's whatever the chosen transcript's source, while `gene_id` in `transcripts`
+# is the id that the transcript's own source gives the gene.
 GENE = pa.struct(
     [
         pa.field('gene_symbol', _STRING),
-        pa.field('gene_id', _STRING),
+        pa.field('ensembl_gene_id', _STRING),
         pa.field('hgnc_id', _HGNC_ID),
         pa.field('worst_consequence', _STRING, nullable=False),
         pa.field('worst_impact', _STRING),
         pa.field('worst_transcript_id', _STRING, nullable=False),
-        pa.field('biotype', _STRING),
         pa.field('mane_select_transcript_id', _STRING),
         pa.field('mane_select_consequence', _STRING),
         pa.field('mane_select_hgvsc', _STRING),
@@ -537,11 +538,11 @@ def _gene_key(row: Mapping[str, Any]) -> tuple[str, int | str] | None:
     return None
 
 
-def _gene_entry(rows: Sequence[Mapping[str, Any]], gene_id: str | None) -> dict[str, Any]:
+def _gene_entry(rows: Sequence[Mapping[str, Any]], ensembl_gene_id: str | None) -> dict[str, Any]:
     """One entry of `genes` (GENE), from the transcript rows of one gene of an allele in their order (_preference).
 
-    The first row is the transcript chosen for the gene: it gives the entry its symbol, HGNC id, consequence, impact
-    and biotype, and `gene_id` is that row's Ensembl gene. The gene's MANE Select transcript gives the four fields
+    The first row is the transcript chosen for the gene: it gives the entry its symbol, HGNC id, consequence and
+    impact, and `ensembl_gene_id` is that row's Ensembl gene. The gene's MANE Select transcript gives the four fields
     named after it, and of several such transcripts the first by id does.
     """
     chosen = rows[0]
@@ -549,12 +550,11 @@ def _gene_entry(rows: Sequence[Mapping[str, Any]], gene_id: str | None) -> dict[
     of_mane: Mapping[str, Any] = {} if mane is None else mane
     return {
         'gene_symbol': chosen['gene_symbol'],
-        'gene_id': gene_id,
+        'ensembl_gene_id': ensembl_gene_id,
         'hgnc_id': chosen['hgnc_id'],
         'worst_consequence': chosen['worst_consequence'],
         'worst_impact': chosen['impact'],
         'worst_transcript_id': chosen['transcript_id'],
-        'biotype': chosen['biotype'],
         'mane_select_transcript_id': of_mane.get('transcript_id'),
         'mane_select_consequence': of_mane.get('worst_consequence'),
         'mane_select_hgvsc': of_mane.get('hgvsc'),
@@ -623,6 +623,7 @@ def position_rows(
         symbol = t.get('hgnc')
         if symbol is not None and symbol not in hgnc:
             raise ValueError(f'{chrom}:{pos}: the genes section lacks {symbol!r}, the gene of the transcript {tid}')
+        consequences = by_severity(t['consequence'])
         am = alphamissense.get(_unversioned(tid))
         p3d = primateai3d.get(_unversioned(tid))
         promoter = promoterai.get(_unversioned(tid))
@@ -637,8 +638,8 @@ def position_rows(
                 'gene_symbol': symbol,
                 'gene_id': t.get('geneId'),
                 'hgnc_id': None if symbol is None else hgnc[symbol],
-                'consequences': t['consequence'],
-                'worst_consequence': worst(t['consequence']),
+                'consequences': consequences,
+                'worst_consequence': consequences[0],
                 'impact': t.get('impact'),
                 'hgvsc': t.get('hgvsc'),
                 'hgvsp': t.get('hgvsp'),

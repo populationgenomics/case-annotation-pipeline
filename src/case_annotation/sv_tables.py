@@ -84,7 +84,7 @@ CALL = pa.struct(
         pa.field('pe_start', _INT),
         pa.field('pe_end', _INT),
         pa.field('qs', _INT),
-        pa.field('ft', _STRING),
+        pa.field('ft', pa.list_(_STRING)),
         pa.field('dn', _STRING),
         pa.field('dq', pa.float64()),
     ]
@@ -118,8 +118,9 @@ def genotype_call(alleles: Sequence[int | None]) -> tuple[bool | None, vcf_value
 
     Both are those of a small variant's call (vcf_values.carries, vcf_values.zygosity). The member carries the variant
     if its genotype holds a copy of the allele, also beside a missing one, and does not if every allele is called and
-    none is the allele; a genotype with an allele missing and no copy of the allele says neither, and has no zygosity.
-    A haploid call of the allele, as on a male's X or Y, is `hom_alt`, and a haploid call of the reference `hom_ref`.
+    none is the allele; a genotype with an allele missing and no copy of the allele says neither. A genotype with an
+    allele missing has no zygosity, also where it holds a copy of the allele. A haploid call of the allele, as on a
+    male's X or Y, is `hom_alt`, and a haploid call of the reference `hom_ref`.
     """
     return vcf_values.carries(alleles), vcf_values.zygosity(alleles)
 
@@ -301,7 +302,7 @@ def _call(
         'pe_start': pe_start,
         'pe_end': pe_end,
         'qs': vcf_values.integer(sample, 'QS', formats, where),
-        'ft': vcf_values.text(sample, 'FT', formats, where),
+        'ft': vcf_values.names(sample, 'FT', formats, where),
         'dn': vcf_values.text(sample, 'DN', formats, where),
         'dq': vcf_values.number(sample, 'DQ', formats, where),
     }

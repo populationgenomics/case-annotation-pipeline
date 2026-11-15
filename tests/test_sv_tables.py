@@ -35,7 +35,8 @@ GENOTYPE_CALLS = {
     '0/1': ((0, 1), (True, 'het')),
     '1/1': ((1, 1), (True, 'hom_alt')),
     '0/0': ((0, 0), (False, 'hom_ref')),
-    './1': ((None, 1), (True, 'het')),
+    # A copy of the allele beside a missing allele is carried, on one copy or on both.
+    './1': ((None, 1), (True, None)),
     # A genotype with an allele missing and no copy of the allele says neither that the member carries it nor that it
     # does not.
     '0/.': ((0, None), (None, None)),
@@ -187,7 +188,7 @@ def test_each_members_call_of_a_structural_variant_holds_its_fields(tmp_path: pa
         'gt': '1/1',
         'carries': True,
         'zygosity': 'hom_alt',
-        'ft': 'LowGQ',
+        'ft': ['LowGQ'],
         'gq': 30,
         'pl': [400, 40, 0],
         'pr_ref': 0,
@@ -256,7 +257,7 @@ def test_a_copy_number_caller_gives_a_row_per_segment_away_from_the_reference(tm
         assert found == expected, sv_id
     daughter = calls['inv:LOSS:1']['S3']
     values = ('gt', 'cn', 'sm', 'bc', 'pe_start', 'pe_end', 'qs', 'ft', 'pl', 'pr_ref')
-    assert [daughter[key] for key in values] == ['1/1', 0, 0.75, 12, 3, 2, 40, 'PASS', None, None]
+    assert [daughter[key] for key in values] == ['1/1', 0, 0.75, 12, 3, 2, 40, ['PASS'], None, None]
     # The genotype alone says nothing of a member at the expected copy number, or of how many copies one gained.
     assert [calls['inv:GAIN:1'][s]['gt'] for s in structural_vcfs.SAMPLES] == ['./1', './.', './1']
     assert [calls['inv:GAIN:1'][s]['cn'] for s in structural_vcfs.SAMPLES] == [3, 2, 4]

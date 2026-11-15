@@ -83,7 +83,7 @@ CALL = pa.struct(
         pa.field('ad_alt', _INT),
         pa.field('allele_balance', pa.float64()),
         pa.field('ps', _INT),
-        pa.field('ft', _STRING),
+        pa.field('ft', pa.list_(_STRING)),
         pa.field('dn', _STRING),
         pa.field('dq', pa.float64()),
         pa.field('msc', _INT),
@@ -320,7 +320,7 @@ class _Call:
     ad_ref: int | None
     ad_alt: int | None
     ps: int | None
-    ft: str | None
+    ft: list[str] | None
     dn: str | None
     dq: float | None
     msc: int | None
@@ -365,7 +365,7 @@ def _call(sample: pysam.VariantRecordSample, formats: frozenset[str], where: str
         ad_ref=ad_ref,
         ad_alt=ad_alt,
         ps=vcf_values.integer(sample, 'PS', formats, where),
-        ft=vcf_values.text(sample, 'FT', formats, where),
+        ft=vcf_values.names(sample, 'FT', formats, where),
         dn=vcf_values.text(sample, 'DN', formats, where),
         dq=vcf_values.number(sample, 'DQ', formats, where),
         msc=vcf_values.integer(sample, 'MSC', formats, where),

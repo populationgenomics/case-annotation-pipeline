@@ -143,7 +143,7 @@ erDiagram
         int ad_alt
         double allele_balance
         int ps
-        string ft
+        list ft "the names of the call's filters"
         string dn "DRAGEN only"
         double dq "DRAGEN only"
         int msc "DRAGEN only"
@@ -325,15 +325,15 @@ Several values in these rows need a word.
 
 The one entry of each allele's `genes` reads:
 
-| field of the entry                  | `T` allele                         | `A` allele                         |
-| ----------------------------------- | ---------------------------------- | ---------------------------------- |
-| `gene_symbol`, `gene_id`, `hgnc_id` | `EXMPL1`, `ENSG00000999901`, 99901 | `EXMPL1`, `ENSG00000999901`, 99901 |
-| `worst_consequence`, `worst_impact` | `missense_variant`, `moderate`     | `stop_gained`, `high`              |
-| `worst_transcript_id`, `biotype`    | `NM_999901.1`, `mRNA`              | `NM_999901.1`, `mRNA`              |
-| `mane_select_transcript_id`         | `NM_999901.1`                      | `NM_999901.1`                      |
-| `mane_select_consequence`           | `missense_variant`                 | `stop_gained`                      |
-| `mane_select_hgvsc`                 | `NM_999901.1:c.401C>T`             | `NM_999901.1:c.401C>A`             |
-| `mane_select_hgvsp`                 | `NP_999901.1:p.(Ser134Leu)`        | `NP_999901.1:p.(Ser134Ter)`        |
+| field of the entry                          | `T` allele                         | `A` allele                         |
+| ------------------------------------------- | ---------------------------------- | ---------------------------------- |
+| `gene_symbol`, `ensembl_gene_id`, `hgnc_id` | `EXMPL1`, `ENSG00000999901`, 99901 | `EXMPL1`, `ENSG00000999901`, 99901 |
+| `worst_consequence`, `worst_impact`         | `missense_variant`, `moderate`     | `stop_gained`, `high`              |
+| `worst_transcript_id`                       | `NM_999901.1`                      | `NM_999901.1`                      |
+| `mane_select_transcript_id`                 | `NM_999901.1`                      | `NM_999901.1`                      |
+| `mane_select_consequence`                   | `missense_variant`                 | `stop_gained`                      |
+| `mane_select_hgvsc`                         | `NM_999901.1:c.401C>T`             | `NM_999901.1:c.401C>A`             |
+| `mane_select_hgvsp`                         | `NP_999901.1:p.(Ser134Leu)`        | `NP_999901.1:p.(Ser134Ter)`        |
 
 ### The rows of `transcripts`
 
@@ -376,7 +376,7 @@ Read into Python, the proband's cell in the row of the `T` allele is a dictionar
     'ad_alt': 15,
     'allele_balance': 0.9375,
     'ps': None,
-    'ft': 'PASS',
+    'ft': ['PASS'],
     'dn': 'Inherited',
     'dq': None,
     'msc': None,
@@ -493,7 +493,7 @@ erDiagram
         int pr_alt "sv caller, with sr and vf"
         int cn "cnv caller"
         double sm "cnv caller"
-        string ft
+        list ft "the names of the call's filters"
         string dn "DRAGEN only"
     }
     repeats {
@@ -547,9 +547,9 @@ and `zygosity` answer the same question for both callers.
 For a row of the structural-variant caller the genotype decides, as in `variants`. `carries` is true where the genotype
 holds a copy of the allele, also beside a missing one, false where every allele is called and none is the allele, and
 empty for any other genotype, such as the `./.` of a member without a call. `zygosity` is classified in the same way:
-`0/1` is `het`, `1/1` is `hom_alt`, `0/0` is `hom_ref`, and a genotype that leaves `carries` empty has none. A haploid
-call, as DRAGEN makes on a male's X and Y outside the [pseudoautosomal regions](glossary.md#pseudoautosomal-regions), is
-`hom_alt` for `1` and `hom_ref` for `0`.
+`0/1` is `het`, `1/1` is `hom_alt` and `0/0` is `hom_ref`. A genotype with a missing allele has none, also `./1`, which
+carries the allele on one copy or on both. A haploid call, as DRAGEN makes on a male's X and Y outside the
+[pseudoautosomal regions](glossary.md#pseudoautosomal-regions), is `hom_alt` for `1` and `hom_ref` for `0`.
 
 For a row of the copy-number caller the copy number decides, read against the copies expected. Those are the alleles in
 the member's genotype: two, or one where the caller calls the member haploid.
@@ -562,12 +562,12 @@ the member's genotype: two, or one where the caller calls the member haploid.
 | more                             | true      | empty      | `./1`                  | `1`     |
 | no copy number, as a female's Y  | empty     | empty      |                        | `.`     |
 
-A gain is the one case in which `carries` and `zygosity` differ from what they say in `variants`, where a member who
-carries an allele is always `het` or `hom_alt`. A member with a gain carries the segment and has no zygosity, because
-its copy number does not say how the copies are split between the two chromosome copies: 4 copies can be two on each or
-three on one. A query for the members who have a record therefore reads `carries`, and a condition such as
-`zygosity IN ('het', 'hom_alt')` finds structural variants and losses and no gain. A male with no copy of a segment of
-his X is `hom_alt`, like his haploid call of a small variant there.
+`zygosity` is empty wherever a call does not determine it, in `sv` as in `variants`. A member with a gain carries the
+segment and has no zygosity, because its copy number does not say how the copies are split between the two chromosome
+copies: 4 copies can be two on each or three on one. A genotype of the structural-variant caller with a missing allele
+beside the allele, `./1`, has none for the same reason. A query for the members who have a record therefore reads
+`carries`, and a condition such as `zygosity IN ('het', 'hom_alt')` finds structural variants and losses and no gain. A
+male with no copy of a segment of his X is `hom_alt`, like his haploid call of a small variant there.
 
 A member without a call of a record has neither value: the structural-variant caller wrote no genotype for the member,
 or the copy-number caller no copy number. `carries` is false only for a member who was called and does not have the
@@ -852,7 +852,7 @@ a_row_per_gene = con.sql(
 
 An entry's `worst_transcript_id` names the transcript that its `worst_consequence` and `worst_impact` are of. With the
 variant id it is the key of that transcript's row of `transcripts`, which has what the entry leaves out, such as the
-exon and the position in the protein:
+biotype, the exon and the position in the protein:
 
 ```python
 with_transcript = con.sql(
@@ -873,6 +873,35 @@ The query gives the region to `transcripts` as well, so that the statistics of `
 too. Left to the join alone, DuckDB narrows the scan of `transcripts` to the alleles' row groups only for a few alleles
 ([A gene without an HGNC id](#a-gene-without-an-hgnc-id)). In the worked example each query returns the two alleles with
 `EXMPL1`, and the last one the row of `NM_999901.1` for each.
+
+A search by a property of a transcript, such as its biotype, starts in `transcripts`, because an entry of `genes` holds
+none. It takes two steps: the alleles of the transcripts with the biotype, and then those alleles' rows of `variants`.
+
+```python
+on_lncrna = con.sql(
+    """
+    SELECT DISTINCT variant_id
+    FROM transcripts
+    WHERE biotype = $biotype AND chrom = $chrom AND pos BETWEEN $start AND $end
+    """,
+    params={'biotype': 'lncRNA', **region},
+).to_arrow_table()
+alleles_on_lncrna = con.sql(
+    """
+    SELECT v.variant_id, v.worst_consequence, v.gnomad_joint_af
+    FROM variants v
+    SEMI JOIN on_lncrna USING (variant_id)
+    WHERE v.chrom = $chrom AND v.pos BETWEEN $start AND $end
+    ORDER BY v.pos
+    """,
+    params=region,
+).to_arrow_table()
+```
+
+`biotype` holds the Annotator's own words, such as `lncRNA`, and `mRNA` where Ensembl VEP writes `protein_coding`, so a
+condition on VEP's word matches no row and raises no error. `SELECT DISTINCT biotype FROM transcripts` lists the words
+of a table. Both steps name the region, so that each table's statistics of `chrom` and `pos` pick out its row groups. In
+the worked example the search returns nothing, because the transcripts of `EXMPL1` are all `mRNA`.
 
 ### Variants in a gene
 
@@ -1184,7 +1213,8 @@ carry on both copies. The VCF filter for the genotypes is `bcftools view -i 'GT[
 Two rare alleles in one gene, each heterozygous in the proband, one inherited from the father and one from the mother.
 The search goes through `transcripts`, so that it counts an allele in every gene it touches, with or without an HGNC id,
 and keeps the genes with at least one allele from each side. An allele that both parents carry, or neither, has no side
-and is left out; a phased call (`ps`) could place some of those.
+and is left out; a phased call (`ps`) could place some of those. So has an allele for which a parent's genotype has a
+missing allele, such as `./1`, which has no zygosity.
 
 ```python
 compound_het = con.sql(
@@ -1702,13 +1732,13 @@ on X or Y, since `GT="RR"` does not match a haploid `0`.
 | a gene through `transcripts` at one locus, both steps | 0.02 s  | mostly `transcripts`, for the gene's alleles; the scan of `variants` then reads the row groups that the gene's span picks out ([A gene without an HGNC id](#a-gene-without-an-hgnc-id)) |
 
 These times include no read of a footer, which the setup's `parquet_metadata_cache` keeps in memory. The footer of
-`variants` describes 103 columns in each of 90 row groups for this trio, and is 1.3 MB; the one of `transcripts` is 3.9
+`variants` describes 102 columns in each of 90 row groups for this trio, and is 1.3 MB; the one of `transcripts` is 3.9
 MB.
 
 ### Where the time goes
 
 Most of the gain over the VCF and the JSON comes from reading typed values instead of parsing text, and from reading
-only the columns a query names: the trio filter reads 5 of the 103 columns of `variants`, about 8% of its bytes, and
+only the columns a query names: the trio filter reads 5 of the 102 columns of `variants`, about 8% of its bytes, and
 skips no row group, since every row group holds heterozygous and homozygous calls. Skipping row groups is what makes a
 lookup by region or variant id take hundredths of a second.
 
@@ -1792,24 +1822,25 @@ some have hundreds. `sv` has `hgnc_ids` as well.
 
 Columns that mean the same thing have the same name and type in every table of a family.
 
-| What                                     | Columns                                                                                                                                                                                                                                                                                             |
-| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| the position                             | `chrom` and `pos`, and `end_pos` in a table whose rows have an end                                                                                                                                                                                                                                  |
-| the allele                               | `variant_id`; `sv` names the row of `variants` that a record is the same allele as in `small_variant_id`                                                                                                                                                                                            |
-| what the VCF record says                 | `ref`, `alt`, `qual` and `filters`, the record's FILTER values                                                                                                                                                                                                                                      |
-| a gene                                   | `gene_symbol` and its HGNC id `hgnc_id`, in `transcripts`, in `sv_transcripts` and in an entry of `genes`, and `hgnc_ids` where a row has several genes; `gene_id`, which is the id of the transcript's own gene model in the two tables of transcripts and the Ensembl gene in an entry of `genes` |
-| a transcript                             | `transcript_id`, `source`, `biotype`, `consequences`, `protein_id`, `is_mane_select`, `is_canonical`, `exon`, `intron`, `cdna_pos` and `protein_pos`, in `transcripts` and `sv_transcripts`                                                                                                         |
-| what a source holds on the allele itself | gnomAD's values in the `gnomad_genomes_` and `gnomad_exomes_` columns, and ClinVar's records in the `clinvar_` columns, in `variants` and for a record of `sv` that is annotated as a small variant                                                                                                 |
-| the members' calls                       | one struct column per sequenced member, named as the sample, after the columns that say what a row is of                                                                                                                                                                                            |
-| the fields of a call                     | `gt`, `gq`, `pl`, `ft`, `dn` and `dq`, and in a table whose rows are variants `carries` and `zygosity`                                                                                                                                                                                              |
+| What                                     | Columns                                                                                                                                                                                                                                                                  |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| the position                             | `chrom` and `pos`, and `end_pos` in a table whose rows have an end                                                                                                                                                                                                       |
+| the allele                               | `variant_id`; `sv` names the row of `variants` that a record is the same allele as in `small_variant_id`                                                                                                                                                                 |
+| what the VCF record says                 | `ref`, `alt`, `qual` and `filters`, the record's FILTER values                                                                                                                                                                                                           |
+| a gene                                   | `gene_symbol` and its HGNC id `hgnc_id`, in `transcripts`, in `sv_transcripts` and in an entry of `genes`, and `hgnc_ids` where a row has several genes; `gene_id`, the id that the transcript's own gene model gives the gene, in `transcripts` and in `sv_transcripts` |
+| a transcript                             | `transcript_id`, `source`, `biotype`, `consequences`, `protein_id`, `is_mane_select`, `is_canonical`, `exon`, `intron`, `cdna_pos` and `protein_pos`, in `transcripts` and `sv_transcripts`                                                                              |
+| what a source holds on the allele itself | gnomAD's values in the `gnomad_genomes_` and `gnomad_exomes_` columns, and ClinVar's records in the `clinvar_` columns, in `variants` and for a record of `sv` that is annotated as a small variant                                                                      |
+| the members' calls                       | one struct column per sequenced member, named as the sample, after the columns that say what a row is of                                                                                                                                                                 |
+| the fields of a call                     | `gt`, `gq`, `pl`, `ft`, `dn` and `dq`, and in a table whose rows are variants `carries` and `zygosity`                                                                                                                                                                   |
 
 `variants` and `sv` are the tables whose rows are variants. In both, `carries` says whether the member carries the row's
-variant and `zygosity` on how many copies, with one difference: a member who gains copies of a segment of `sv` carries
-it and has no zygosity ([Who carries a record](#who-carries-a-record)). A field that only one kind of variant has keeps
-its own name, such as `ad_alt` in `variants` and `cn` in `sv`. A row of `repeats` is a repeat of the catalogue, which
-has a row whatever a member's alleles are, so its structs hold `gt` and the sizes of the alleles and neither `carries`
-nor `zygosity`. Its `gt` is also the one that does not compare between members, because each member's repeat VCF numbers
-its own alleles; the sizes in `repcn` do.
+variant and `zygosity` on how many copies, where the call determines that. A genotype with a missing allele beside the
+allele has no zygosity, in `variants` and in a row of the structural-variant caller, and neither has a member who gains
+copies of a segment of `sv` ([Who carries a record](#who-carries-a-record)). A field that only one kind of variant has
+keeps its own name, such as `ad_alt` in `variants` and `cn` in `sv`. A row of `repeats` is a repeat of the catalogue,
+which has a row whatever a member's alleles are, so its structs hold `gt` and the sizes of the alleles and neither
+`carries` nor `zygosity`. Its `gt` is also the one that does not compare between members, because each member's repeat
+VCF numbers its own alleles; the sizes in `repcn` do.
 
 A structural record of `sv` has the `clinvar_` columns too, for the ClinVar records that overlap it
 ([What the annotation says of a record](#what-the-annotation-says-of-a-record)). Each entry of its `clinvar_records` has
@@ -1883,7 +1914,7 @@ The tables share these properties:
 | key-value metadata | the tables' version (`schema_version`), the table's name, the family, and the annotation's provenance (`annotation` and `gnomad_joint`, as in the manifest); `sv` and `sv_transcripts` carry the provenance of the annotation of the structural variants instead (`annotation`, which is the manifest's `sv_annotation`), and `repeats` none, since nothing annotated it                                                                                                                              |
 | variant id         | `<chrom>-<pos>-<ref>-<alt>` with the VCF's contig name, such as `chr2-1234567-C-T`                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | shared columns     | a column that means the same thing has the same name and type in every table ([Shared column names](#shared-column-names))                                                                                                                                                                                                                                                                                                                                                                            |
-| a missing value    | a null. That holds for the list columns `rsids`, `hgnc_ids`, `genes`, `clinvar_records`, `clinvar_conditions`, `gnomad_sv_matches` and `pl` too, and for `cipos`, `ciend` and the lists of a repeat's genotype: an allele without an rsID has no `rsids`, not an empty list. `filters` differs: in every table it holds the VCF record's FILTER values, and an empty list for a record whose FILTER is `.`                                                                                            |
+| a missing value    | a null. That holds for the list columns `rsids`, `hgnc_ids`, `genes`, `clinvar_records`, `clinvar_conditions`, `gnomad_sv_matches`, `pl` and `ft` too, and for `cipos`, `ciend` and the lists of a repeat's genotype: an allele without an rsID has no `rsids`, not an empty list. `filters` differs: in every table it holds the VCF record's FILTER values, and an empty list for a record whose FILTER is `.`                                                                                      |
 
 The tables hold no gene-level knowledge beyond a gene's identifiers. What OMIM, ClinGen and other gene–disease sources
 say about a gene is knowledge that the reader brings.
@@ -1923,15 +1954,17 @@ allele's genes gives the allele its `worst_consequence` and `worst_impact`.
 
 | Field of an entry                                                                                | Type                                        | Holds                                                                                                                                                                                                                                      |
 | ------------------------------------------------------------------------------------------------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `gene_symbol`, `gene_id`, `hgnc_id`                                                              | strings, and a 32-bit integer for `hgnc_id` | the gene: the chosen transcript's symbol, its Ensembl gene, and the HGNC id of the symbol, where it has one                                                                                                                                |
+| `gene_symbol`, `ensembl_gene_id`, `hgnc_id`                                                      | strings, and a 32-bit integer for `hgnc_id` | the gene: the chosen transcript's symbol, the gene's Ensembl id, and the HGNC id of the symbol, where it has one                                                                                                                           |
 | `worst_consequence`, `worst_impact`                                                              | strings                                     | the most severe consequence among the gene's transcripts, and the impact of the chosen transcript                                                                                                                                          |
-| `worst_transcript_id`, `biotype`                                                                 | strings                                     | the chosen transcript and its biotype; the variant id and this id are the key of the transcript's row of `transcripts`                                                                                                                     |
+| `worst_transcript_id`                                                                            | string                                      | the chosen transcript; the variant id and this id are the key of the transcript's row of `transcripts`                                                                                                                                     |
 | `mane_select_transcript_id`, `mane_select_consequence`, `mane_select_hgvsc`, `mane_select_hgvsp` | strings                                     | the gene's MANE Select transcript, which Illumina flags on RefSeq's copy: its id, the most severe consequence on it and the HGVS names on it and on its protein; all four empty where the allele has no MANE Select transcript of the gene |
 
-`gene_id` is the gene's Ensembl id also where the chosen transcript is RefSeq's: the Ensembl gene of the allele's
-Ensembl transcripts with the same symbol. It has no value where the symbol names none or more than one (as in the
-pseudoautosomal regions). An allele in two genes can have two MANE Select transcripts, and each stands in the entry of
-its own gene. Of several MANE Select transcripts of one gene, the entry has the first by id.
+`ensembl_gene_id` is the gene's Ensembl id also where the chosen transcript is RefSeq's: the Ensembl gene of the
+allele's Ensembl transcripts with the same symbol. It has no value where the symbol names none or more than one (as in
+the pseudoautosomal regions). The field is not called `gene_id`, because `gene_id` in `transcripts` is the id that the
+transcript's own gene model gives the gene, which is NCBI's for a RefSeq transcript. An allele in two genes can have two
+MANE Select transcripts, and each stands in the entry of its own gene. Of several MANE Select transcripts of one gene,
+the entry has the first by id.
 
 Two transcripts are of one gene where they have the same HGNC id, which Ensembl's and RefSeq's transcripts of a gene
 share. A gene without an HGNC id is told by its symbol, and its entry has no `hgnc_id`. A transcript without a symbol is
@@ -1939,10 +1972,10 @@ told by the gene id of its own gene model.
 
 The entries stand in the order of their chosen transcripts under the same rule, so they run from the most to the least
 severe consequence. The first entry is the gene of the allele's `worst_consequence`: its `worst_consequence` and
-`worst_impact` are the allele's. `biotype` is that of one transcript, so a protein-coding gene whose most severe
-consequence lies on a non-coding transcript shows that transcript's biotype. An allele without a transcript has no
-`genes`, and every other allele has at least one entry, also an allele that has no `hgnc_ids` because none of its genes
-has an id.
+`worst_impact` are the allele's. An entry has no biotype, which is a transcript's and stands in `transcripts`. An
+entry's `worst_consequence` tells an exon of a non-coding transcript, which has `non_coding_transcript_exon_variant`,
+from an exon of a coding one. An allele without a transcript has no `genes`, and every other allele has at least one
+entry, also an allele that has no `hgnc_ids` because none of its genes has an id.
 
 A condition on a field of an entry cannot skip a row group, like one on `hgnc_ids`. A query that lists a field of
 `genes` makes DuckDB 2.0 decode every field of the entries, wherever in the table a row passes the conditions that it
@@ -1952,10 +1985,11 @@ the read of the column, and conditions on several columns that `OR` joins cost a
 such a search ([Where the time goes](#where-the-time-goes)). A query that narrows the alleles by their own columns
 first, as the second query of [Recessive: compound heterozygous candidates](#recessive-compound-heterozygous-candidates)
 does, also has fewer entries to turn into rows with `unnest(genes)`. Write a search for a field of an entry over the
-whole table as `len(list_filter(genes, lambda g: g.biotype = $biotype)) > 0` or as
-`list_contains(list_transform(genes, lambda g: g.biotype), $biotype)`, and not as
-`$biotype = ANY(list_transform(genes, lambda g: g.biotype))`, for the reason that the warning of
-[Variants in a gene](#variants-in-a-gene) gives for `hgnc_ids`.
+whole table as `len(list_filter(genes, lambda g: g.worst_consequence = $consequence)) > 0` or as
+`list_contains(list_transform(genes, lambda g: g.worst_consequence), $consequence)`, and not as
+`$consequence = ANY(list_transform(genes, lambda g: g.worst_consequence))`, for the reason that the warning of
+[Variants in a gene](#variants-in-a-gene) gives for `hgnc_ids`. A search by a property of a transcript that an entry
+lacks, such as its biotype, goes through `transcripts` ([An allele's genes](#an-alleles-genes)).
 
 An HGNC id comes from the genes section of the Annotator's output, which lists the gene of every transcript by its
 symbol, with the gene's HGNC id where it has one. A transcript's gene is matched to that list by its symbol, whichever
@@ -2009,17 +2043,17 @@ VCF and in the VCF's order, like the sample columns of a split VCF. The schema n
 column is the proband's. Each member's column is a struct of that member's own call of the allele, and a query reads a
 field as `"<sample>".gt`.
 
-| Field of a call      | Type                                 | Holds                                                                                                                                                                                                                                                                                                                   |
-| -------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `gt`                 | string                               | the genotype as written in the VCF after the split (so a `1/2` becomes `1/0` and `0/1`)                                                                                                                                                                                                                                 |
-| `carries`            | boolean                              | whether the member carries the allele, by the genotype alone: true where it holds a copy of the allele, also beside a missing one, as in `./1`; false where every allele is called and none is the allele; empty where the genotype is missing or has a missing allele and no copy of the allele, as in `./.` and `0/.` |
-| `zygosity`           | string                               | `hom_ref`, `het` or `hom_alt`: `hom_ref` where `carries` is false, `hom_alt` where every allele is the allele, and `het` for any other genotype that holds the allele, `./1` among them; empty where `carries` is empty                                                                                                 |
-| `gq`, `dp`           | 32-bit integers                      | the call's GQ and DP                                                                                                                                                                                                                                                                                                    |
-| `pl`                 | list of 32-bit integers              | the Phred-scaled genotype likelihoods                                                                                                                                                                                                                                                                                   |
-| `ad_ref`, `ad_alt`   | 32-bit integers                      | the reads of the reference and of the allele                                                                                                                                                                                                                                                                            |
-| `allele_balance`     | 64-bit float                         | the allele's share of the reads of the reference and the allele, empty unless both depths are known and not both 0                                                                                                                                                                                                      |
-| `ps`, `ft`           | 32-bit integer, string               | the call's phase set and its sample filter                                                                                                                                                                                                                                                                              |
-| `dn`, `dq` and `msc` | string, 64-bit float, 32-bit integer | DRAGEN's DN, DQ and MSC, which are empty for a VCF from another caller                                                                                                                                                                                                                                                  |
+| Field of a call      | Type                                 | Holds                                                                                                                                                                                                                                                                                                                        |
+| -------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gt`                 | string                               | the genotype as written in the VCF after the split (so a `1/2` becomes `1/0` and `0/1`)                                                                                                                                                                                                                                      |
+| `carries`            | boolean                              | whether the member carries the allele, by the genotype alone: true where it holds a copy of the allele, also beside a missing one, as in `./1`; false where every allele is called and none is the allele; empty where the genotype is missing or has a missing allele and no copy of the allele, as in `./.` and `0/.`      |
+| `zygosity`           | string                               | `hom_ref`, `het` or `hom_alt`, where the genotype determines it: `hom_ref` where `carries` is false, `hom_alt` where every allele is the allele, and `het` where every allele is called and only some are the allele; empty for a genotype with a missing allele, also for `./1`, whose missing allele may be the allele too |
+| `gq`, `dp`           | 32-bit integers                      | the call's GQ and DP                                                                                                                                                                                                                                                                                                         |
+| `pl`                 | list of 32-bit integers              | the Phred-scaled genotype likelihoods                                                                                                                                                                                                                                                                                        |
+| `ad_ref`, `ad_alt`   | 32-bit integers                      | the reads of the reference and of the allele                                                                                                                                                                                                                                                                                 |
+| `allele_balance`     | 64-bit float                         | the allele's share of the reads of the reference and the allele, empty unless both depths are known and not both 0                                                                                                                                                                                                           |
+| `ps`, `ft`           | 32-bit integer, list of strings      | the call's phase set, and the names of its sample filters, the FORMAT `FT` split at `;`: `PASS` alone for a call that passed, and no list for a call without the field                                                                                                                                                       |
+| `dn`, `dq` and `msc` | string, 64-bit float, 32-bit integer | DRAGEN's DN, DQ and MSC, which are empty for a VCF from another caller                                                                                                                                                                                                                                                       |
 
 `pl` holds three likelihoods for a diploid call (`0/0`, `0/1`, `1/1`) and two for a haploid one (`0`, `1`), as DRAGEN
 calls a male's X and Y outside the pseudoautosomal regions. It is empty where the VCF has none. When
@@ -2031,12 +2065,19 @@ two lengths.
 
 `carries` says whether the member has the allele at all, and a query for the members who carry an allele reads it alone.
 `zygosity` says on how many of the member's copies of the chromosome the allele lies, and a haploid call of the allele
-is `hom_alt`. A member who carries the allele is `het` or `hom_alt`. Both fields are read from the genotype alone,
-whatever the member's sex and the chromosome, and both are empty where the genotype does not say whether the member has
-the allele, as for a member without a call. A query for a member who was called and does not carry the allele asks for
-`NOT "<sample>".carries` or for `zygosity = 'hom_ref'`, which match the same calls
-([A de novo search](#a-de-novo-search)). The two fields have the same meaning in the members' columns of `sv`, where a
-gain of copies is carried with no zygosity ([The members' columns of `sv`](#the-members-columns-of-sv)).
+is `hom_alt`. It is empty wherever the genotype does not determine it: a member with `./1` carries the allele, and the
+missing allele may be the allele too. Both fields are read from the genotype alone, whatever the member's sex and the
+chromosome, and both are empty where the genotype does not say whether the member has the allele, as for a member
+without a call. The two fields have the same meaning in the members' columns of `sv`, where the copy number decides for
+a row of the copy-number caller ([The members' columns of `sv`](#the-members-columns-of-sv)).
+
+A query that reads one field in place of the other has to know where the two agree, in each table:
+
+| Conditions on a member                         | In `variants`                                                                                            | In `sv`                                                                                                                  |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `NOT carries` and `zygosity = 'hom_ref'`       | match the same calls: the member was called and lacks the allele ([A de novo search](#a-de-novo-search)) | match the same calls, of both callers                                                                                    |
+| `carries` and `zygosity IN ('het', 'hom_alt')` | the condition on `zygosity` leaves out a carried allele beside a missing one, `./1`                      | the condition on `zygosity` leaves out a `./1` of the structural-variant caller too, and a gain of copies                |
+| `carries IS NULL` and `zygosity IS NULL`       | `zygosity` is empty wherever `carries` is, and for `./1` as well                                         | `zygosity` is empty wherever `carries` is, and for a `./1` of the structural-variant caller and a gain of copies as well |
 
 DuckDB matches column names without regard to case, and a member's column stands beside the columns that say what a row
 is of in `variants`, in `sv` and in `repeats`. `FAMILY_CHECK` therefore refuses a sample named as one of those columns
@@ -2053,7 +2094,7 @@ family that brings no VCF for them, so that a name is refused or accepted whatev
 | `chrom`, `pos`, `variant_id`                                                                                  | string, 32-bit integer, string              | the allele                                                                                                                                                  |
 | `transcript_id`, `source`, `biotype`                                                                          | strings                                     | the transcript, its `source` (Ensembl or RefSeq) and its biotype                                                                                            |
 | `gene_symbol`, `gene_id`, `hgnc_id`                                                                           | strings, and a 32-bit integer for `hgnc_id` | the transcript's gene: its symbol, Ensembl's gene id for an Ensembl transcript and NCBI's for a RefSeq one, and the HGNC id of the symbol, where it has one |
-| `consequences`, `worst_consequence`                                                                           | list of strings, string                     | the transcript's `consequences` and the most severe of them                                                                                                 |
+| `consequences`, `worst_consequence`                                                                           | list of strings, string                     | the Annotator's terms for the transcript, from most to least severe, and the first of them                                                                  |
 | `impact`, `hgvsc`, `hgvsp`, `protein_id`                                                                      | strings                                     | the impact, the HGVS names on the transcript and its protein, and the protein's id                                                                          |
 | `is_mane_select`, `is_canonical`                                                                              | booleans                                    | whether Illumina flags the transcript as MANE Select, and as canonical                                                                                      |
 | `exon`, `intron`, `cdna_pos`, `cds_pos`, `protein_pos`, `codons`, `amino_acids`                               | strings                                     | the exon, intron and positions                                                                                                                              |
@@ -2154,7 +2195,7 @@ callers' own. A field that the caller's VCF does not define is empty, so a row o
 | ---------------------------------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `gt`                                                       | string                       | the genotype as written in the VCF                                                                                                                                                                                                                                                                                                                                      |
 | `carries`                                                  | boolean                      | whether the member carries the record: for the structural-variant caller as in `variants`, by the genotype; for the copy-number caller true where the copy number is not the expected one and false where it is; empty for a member without a call, whose genotype does not say for the structural-variant caller and who has no copy number for the copy-number caller |
-| `zygosity`                                                 | string                       | `hom_ref`, `het` or `hom_alt`: for the structural-variant caller classified as in `variants`, for the copy-number caller by the copy number; empty for a member without a call, and for a gain of copies                                                                                                                                                                |
+| `zygosity`                                                 | string                       | `hom_ref`, `het` or `hom_alt`: for the structural-variant caller classified as in `variants`, for the copy-number caller by the copy number; empty wherever the call does not determine it: for a member without a call, for a genotype of the structural-variant caller with a missing allele, and for a gain of copies                                                |
 | `gq`                                                       | 32-bit integer               | the call's GQ, from the structural-variant caller                                                                                                                                                                                                                                                                                                                       |
 | `pl`                                                       | list of 32-bit integers      | the Phred-scaled genotype likelihoods, from the structural-variant caller: three for a diploid call and two for a haploid one, as in `variants`                                                                                                                                                                                                                         |
 | `pr_ref`, `pr_alt`, `sr_ref`, `sr_alt`, `vf_ref`, `vf_alt` | 32-bit integers              | the structural-variant caller's counts for the reference and for the allele: spanning read pairs (`PR`), split reads (`SR`) and fragments (`VF`)                                                                                                                                                                                                                        |
@@ -2162,14 +2203,15 @@ callers' own. A field that the caller's VCF does not define is empty, so a row o
 | `sm`, `bc`                                                 | 64-bit float, 32-bit integer | the copy-number caller's mean copy ratio of the segment (`SM`) and its number of bins (`BC`)                                                                                                                                                                                                                                                                            |
 | `pe_start`, `pe_end`                                       | 32-bit integers              | improperly paired reads at the segment's start and at its end (`PE`)                                                                                                                                                                                                                                                                                                    |
 | `qs`                                                       | 32-bit integer               | the quality of the copy-number call (`QS`)                                                                                                                                                                                                                                                                                                                              |
-| `ft`                                                       | string                       | the call's sample filter                                                                                                                                                                                                                                                                                                                                                |
+| `ft`                                                       | list of strings              | the names of the call's sample filters, as in `variants`                                                                                                                                                                                                                                                                                                                |
 | `dn`, `dq`                                                 | string, 64-bit float         | DRAGEN's DN and DQ, which are empty for a VCF from another caller                                                                                                                                                                                                                                                                                                       |
 
-[Who carries a record](#who-carries-a-record) defines `carries` and `zygosity` for both callers. They differ from what
-they say in `variants` in one case: a member who gains copies carries the segment and has no zygosity. In a `CNV`
-segment, `cn` and the allele of `alt` that `gt` names say which way a member differs: in DRAGEN's `<DEL>,<DUP>`, `1` is
-the loss and `2` the gain. Only a loss has a zygosity, so `zygosity IN ('het', 'hom_alt')` finds the members who lose
-copies there.
+[Who carries a record](#who-carries-a-record) defines `carries` and `zygosity` for both callers. They mean what they
+mean in `variants`, and a copy number adds one case in which the zygosity is not determined: a member who gains copies
+carries the segment and has no zygosity ([The members' columns](#the-members-columns) compares the two fields in each
+table). In a `CNV` segment, `cn` and the allele of `alt` that `gt` names say which way a member differs: in DRAGEN's
+`<DEL>,<DUP>`, `1` is the loss and `2` the gain. Only a loss has a zygosity, so `zygosity IN ('het', 'hom_alt')` finds
+the members who lose copies there.
 
 ### The `sv_transcripts` table
 
