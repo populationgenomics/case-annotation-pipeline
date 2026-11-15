@@ -5,7 +5,7 @@ annotator: /opt/dragen/share/nirvana/Annotator
 annotator_version: 4.0.0
 license_secret: projects/rd-benchmark-220215/secrets/dragen-api-key/versions/latest
 # The tools image (containers/tools), which cuts a VCF to regions for a small annotation run and runs every step of
-# family_tables.nf but the Annotator's. It is pinned by the digest of the image built at the release tag v0.1.0, which
-# is the commit a01ee26d6d4ddd1ec5fcdf5307d336b2ecf4adbb.
-tools_container: australia-southeast1-docker.pkg.dev/cpg-common/images-dev/case-annotation-tools@sha256:22d3cbc59a4d1865999669347ff2ea43caf51820a3fb992627ed3f7a713a4ec8
+# family_tables.nf but the Annotator's. It is pinned by the digest of the image built at the release tag v0.3.0, which
+# is the commit a664595f3bbf96a2223837e6f001826f9c2b6974.
+tools_container: australia-southeast1-docker.pkg.dev/cpg-common/images-dev/case-annotation-tools@sha256:d7c7dfcde9165c57e7668aca8a1ad9ceb97df5727d56a3bc2a76eb2550ff1944
 output_dir: gs://cpg-rd-benchmark-test
