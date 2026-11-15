@@ -585,34 +585,76 @@ It is careful in these ways:
 ### What a run publishes
 
 The workflow publishes the union and the families' folders apart, and the tables' version and the catalog name the
-folder of each. For the tables' version `0.5.0` and catalog `202610` the folder is `tables-0.5.0-illumina-202610`.
+folder of each. For the tables' version `0.5.0` and catalog `202610` the folder is `tables-0.5.0-illumina-202610`. The
+Annotator's output has a folder of its own, which the catalog names without the tables' version.
 
-| What                                                                             | Folder                                                           |
-| -------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| the union, its Annotator JSON, its tables and its gnomAD joint values            | `annotation-unions/<group>/tables-<version>-illumina-<catalog>/` |
-| the union of the structural variants, its map, its Annotator JSON and its tables | the same folder                                                  |
-| each family's folder                                                             | `annotations/<family>/tables-<version>-illumina-<catalog>/`      |
+| What                                                         | Folder                                                           |
+| ------------------------------------------------------------ | ---------------------------------------------------------------- |
+| the union, its tables and its gnomAD joint values            | `annotation-unions/<group>/tables-<version>-illumina-<catalog>/` |
+| the union of the structural variants, its map and its tables | the same folder                                                  |
+| the Annotator's output for both unions                       | `annotation-unions/<group>/illumina-<catalog>/`                  |
+| each family's folder                                         | `annotations/<family>/tables-<version>-illumina-<catalog>/`      |
 
 > [!IMPORTANT]
 >
-> The two unions hold every family's alleles and records, so publishing either beside a family's tables would show that
-> family what the others carry. Only a family's own folder may reach whoever analyses that family.
+> The two unions and the Annotator's output hold every family's alleles and records, so publishing any of them beside a
+> family's tables would show that family what the others carry. Only a family's own folder may reach whoever analyses
+> that family.
 
 `group` names the run's families together ([Groups](#groups)).
 
 A family's folder also holds `sv.parquet` and `sv_transcripts.parquet`, `repeats.parquet`, or all three, where its row
 names their VCFs. Nothing of the repeats goes into the union's folder.
 
-The two Annotator runs publish into one `annotator/` folder: the JSON of the alleles as `out/<group>.json.gz`, that of
-the structural variants as `out/<group>.sv.json.gz`, a log each, and one `run.json`, since both runs have the same
-catalog and sources. That folder is what `annotated` takes, and a run that reuses it for a group with structural
-variants stops if it holds no `out/<group>.sv.json.gz`.
+The two Annotator runs publish into one folder: the JSON of the alleles as `out/<group>.json.gz`, that of the structural
+variants as `out/<group>.sv.json.gz`, a log each, and one `run.json`, since both runs have the same catalog and sources.
+That folder is what `annotated` takes ([Reusing an annotation](#reusing-an-annotation)).
 
 A run into folders that an earlier run wrote replaces what that run published. The unions' tables and joint values are
 removed whole and written again, so the union's folder holds the tables that the families' newest tables were cut from.
-A run that reuses an annotation publishes no Annotator JSON, and leaves one that an earlier run published there. A
-family's folder keeps an `sv.parquet`, an `sv_transcripts.parquet` or a `repeats.parquet` of an earlier run as well,
-where the family's row no longer names the VCFs: the new manifest's `tables` lists the tables that belong to it.
+A run that annotates replaces the files that an earlier run of the group with the same catalog published for the
+Annotator, whatever version of the tables that run wrote. It replaces only the files that it writes itself
+([Reusing an annotation](#reusing-an-annotation)). A run that reuses an annotation publishes no Annotator JSON, and
+leaves one that an earlier run published there. A family's folder keeps an `sv.parquet`, an `sv_transcripts.parquet` or
+a `repeats.parquet` of an earlier run as well, where the family's row no longer names the VCFs: the new manifest's
+`tables` lists the tables that belong to it.
+
+### Reusing an annotation
+
+The Annotator is licensed and billed, so a run that can read an earlier run's annotation should not annotate again. A
+run given the folder of that annotation as `annotated`, in place of `sources`, starts no Annotator.
+
+The Annotator's output depends on the group's two unions, on the catalog, on the sources that the run named and on the
+Annotator. It does not depend on the tables' version, so a run of another version of the tables can convert the JSON
+that an earlier run published. The folder is named by the group and the catalog for that reason: a launcher fills in
+those two values and finds the annotation, whichever version of the tables the run that made it wrote.
+
+A run that reuses a folder does not go by its name, and checks what it holds:
+
+| What the output depends on | What a reusing run does                                                                                                                                                                      |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the group's unions         | It stops unless the JSON of the alleles holds exactly the union's alleles, and the JSON of the structural variants exactly the sites of their union.                                         |
+| the catalog                | It stops unless `run.json` is of the run's `catalog` and pins each of its sources at the version that the data directory in `annotation_data` holds.                                         |
+| the sources                | It takes the sources from `run.json`, so the run itself gives no `sources`. It stops if a JSON holds data of a dated source that `run.json` does not list ([Dated sources](#dated-sources)). |
+| the Annotator              | It takes the Annotator's name from the JSON's header. Nothing compares that name with `annotator_version`, which a reusing run does not need.                                                |
+
+The run also stops if the folder holds no `out/<group>.json.gz` or no `run.json`, or no `out/<group>.sv.json.gz` for a
+group with structural variants.
+
+A reusing run does not say which sources or which Annotator it expects, so it accepts an annotation that was made with
+other sources or another Annotator. Each family's manifest then records what annotated its tables (`annotation` and
+`sv_annotation`), and the tables leave out the columns of a dated source that `run.json` does not list. Tables with
+other sources need a run with `sources`: the Annotator runs again, and each file that it writes replaces the folder's.
+
+> [!WARNING]
+>
+> The folder has one `run.json` for both JSONs, and an annotating run leaves a file that it does not write. A run with
+> other sources can publish the JSON of the alleles with its `run.json` and no JSON of the structural variants, because
+> its sheet names no such VCF or because it stopped before the second Annotator run ended. The earlier
+> `out/<group>.sv.json.gz` then stays beside the new `run.json`, and a reusing run reads it as made with the new
+> sources. If the union of the structural variants is still the same, the checks above stop that run only where the
+> earlier JSON holds data of a dated source that the new `run.json` does not list. After such a run, remove
+> `out/<group>.sv.json.gz` from the folder before reusing it.
 
 ### Groups
 
@@ -823,12 +865,12 @@ as JSON, for a program that writes a sheet or launches a run.
 | `reference`                                                               | the reference the VCFs are called against, with its `.fai` beside it; the normalisation left-aligns against it                       |
 | `catalog`, `annotation_data`                                              | the catalog's id and the data directory its download published                                                                       |
 | `sources`                                                                 | the sources to annotate with; given together with `annotated`, the run stops                                                         |
-| `annotated`                                                               | an earlier run's annotation of the same unions, used instead of annotating again: its `annotator/` folder                            |
+| `annotated`                                                               | an earlier run's annotation of the same unions, used instead of annotating again: the folder it published the Annotator's output in  |
 | `gnomad_joint`                                                            | the echtvar archive of gnomAD's joint release                                                                                        |
 | `workers`                                                                 | the Annotator's worker processes, 8 by default                                                                                       |
 | `annotator_container`, `annotator`, `annotator_version`, `license_secret` | the Annotator's image, path and version, and the licence's secret, as for `annotator.nf`; needed unless the run reuses an annotation |
 | `tools_container`                                                         | the image `case-annotation-tools`, which runs every other step                                                                       |
-| `output_dir`                                                              | where the two folders below are published                                                                                            |
+| `output_dir`                                                              | where the folders below are published                                                                                                |
 
 ### Params of `annotator.nf`
 
@@ -891,8 +933,11 @@ annotation-unions/g1/tables-0.5.0-illumina-202610/
     g1.sv.vcf.gz, g1.sv.vcf.gz.tbi   the union of the structural variants' sites, in a group that has them
     g1.sv.map.parquet            the site of each allele of each family's records
     sv_annotation/               sv/ and sv_transcripts/, each a folder of parts, and annotation.json
-    annotator/                   out/g1.json.gz and out/g1.sv.json.gz, run.json and the Annotator's logs; what
-                                 `annotated` takes
+annotation-unions/g1/illumina-202610/
+                                 the Annotator's output, which `annotated` takes
+    out/                         g1.json.gz and g1.sv.json.gz, each with the .jsi index that the Annotator writes
+    run.json                     the run config of both Annotator runs
+    g1.annotate.log, g1.sv.annotate.log
 annotations/family-a/tables-0.5.0-illumina-202610/
     variants.parquet
     transcripts.parquet

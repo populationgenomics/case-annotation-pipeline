@@ -1,5 +1,5 @@
 {
-  "pipeline_version": "0.2.0",
+  "pipeline_version": "0.3.0",
   "tables_version": "0.5.0",
   "workflows": {
     "family_tables.nf": {
@@ -167,7 +167,7 @@
           "folder": "annotation-unions/{group}/tables-{tables_version}-illumina-{catalog}"
         },
         "annotator": {
-          "folder": "annotation-unions/{group}/tables-{tables_version}-illumina-{catalog}/annotator"
+          "folder": "annotation-unions/{group}/illumina-{catalog}"
         }
       }
     },

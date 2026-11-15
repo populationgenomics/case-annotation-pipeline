@@ -35,9 +35,13 @@ TABLE_COLUMNS: Mapping[str, tuple[str, ...]] = {
     'repeats': ('repeat_vcfs',),
 }
 
+# The folder of the Annotator's output with one catalog. The output does not change with the tables' version, so the
+# folder does not name it: a run of any version of the tables can reuse what the folder holds.
+_ANNOTATION_FOLDER = 'illumina-{catalog}'
 # The folder of one version of the tables made with one catalog, which a family's folder and its group's both end in.
-_TABLES_FOLDER = 'tables-{tables_version}-illumina-{catalog}'
-_UNION_FOLDER = f'annotation-unions/{{group}}/{_TABLES_FOLDER}'
+_TABLES_FOLDER = f'tables-{{tables_version}}-{_ANNOTATION_FOLDER}'
+# Where everything that holds the alleles of all of a group's families is published.
+_GROUP_FOLDER = 'annotation-unions/{group}'
 _DATA_FOLDER = 'references/dragen-annotation/{annotator_version}/{catalog}'
 
 _TYPE_NAMES: Mapping[pa.DataType, str] = {
@@ -136,7 +140,7 @@ def _family_tables_workflow() -> dict[str, Any]:
             _param('arGuid', 'String'),
         ],
         # A run annotates its group's unions or reuses an earlier run's annotation of them, and says which by the
-        # params it gives.
+        # params it gives. `annotated` takes the folder that the annotating run published as `annotator`.
         'annotation': {
             'annotate': {'needs': ['sources', *annotator], 'refuses': ['annotated']},
             'reuse': {
@@ -161,8 +165,8 @@ def _family_tables_workflow() -> dict[str, Any]:
                     ),
                 ],
             },
-            'union': {'folder': _UNION_FOLDER},
-            'annotator': {'folder': f'{_UNION_FOLDER}/annotator'},
+            'union': {'folder': f'{_GROUP_FOLDER}/{_TABLES_FOLDER}'},
+            'annotator': {'folder': f'{_GROUP_FOLDER}/{_ANNOTATION_FOLDER}'},
         },
     }
 
@@ -204,8 +208,8 @@ def _annotator_workflow() -> dict[str, Any]:
                 'needs': ['catalog', 'annotation_data', 'input', 'name', 'sources'],
                 'needs_with': {'regions': ['tools_container']},
                 'publishes': {
-                    'folder': 'annotations/{name}/illumina-{catalog}',
-                    'folder_with_label': 'annotations/{name}/illumina-{catalog}-{label}',
+                    'folder': f'annotations/{{name}}/{_ANNOTATION_FOLDER}',
+                    'folder_with_label': f'annotations/{{name}}/{_ANNOTATION_FOLDER}-{{label}}',
                 },
             },
         },

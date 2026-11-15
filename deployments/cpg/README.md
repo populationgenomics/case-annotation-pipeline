@@ -165,19 +165,27 @@ With `sv_vcf` or `cnv_vcf` in a sheet, `sources` should name the sources that ho
 `oneKg` and `clinvar`).
 
 A run that failed after the Annotator finished is launched again with `annotated` in place of `sources`, which reads the
-annotation that the first run published and starts no Annotator:
+annotation that the first run published and starts no Annotator. So is a run of the same group and catalog at a commit
+with another version of the tables, because the folder does not name that version
+([Reusing an annotation](../../docs/annotation.md#reusing-an-annotation)):
 
 ```yaml
-annotated: gs://cpg-rd-benchmark-test/annotation-unions/<group>/tables-<tables version>-illumina-<catalog>/annotator
+annotated: gs://cpg-rd-benchmark-test/annotation-unions/<group>/illumina-<catalog>
 ```
 
 That folder can be reused when it holds `out/<group>.json.gz` and `run.json`, and `out/<group>.sv.json.gz` as well when
 a family of the group names an `sv_vcf` or a `cnv_vcf`.
 
-| Output                                          | Where                                                                                              |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| each family's folder                            | `gs://cpg-rd-benchmark-test/annotations/<family>/tables-<tables version>-illumina-<catalog>/`      |
-| the union, its annotation and its gnomAD values | `gs://cpg-rd-benchmark-test/annotation-unions/<group>/tables-<tables version>-illumina-<catalog>/` |
+A release before `0.3.0` published the Annotator's output to
+`gs://cpg-rd-benchmark-test/annotation-unions/<group>/tables-<tables version>-illumina-<catalog>/annotator/`. Such a
+folder is reused by giving it as `annotated`, or by copying its contents to the folder above, where a launcher that
+fills in the contract's folder looks for it.
 
-The union's folder holds every family's alleles and records, so only a family's own folder is given to whoever analyses
-that family ([What a run publishes](../../docs/annotation.md#what-a-run-publishes)).
+| Output                                      | Where                                                                                              |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| each family's folder                        | `gs://cpg-rd-benchmark-test/annotations/<family>/tables-<tables version>-illumina-<catalog>/`      |
+| the union, its tables and its gnomAD values | `gs://cpg-rd-benchmark-test/annotation-unions/<group>/tables-<tables version>-illumina-<catalog>/` |
+| the Annotator's output for the group        | `gs://cpg-rd-benchmark-test/annotation-unions/<group>/illumina-<catalog>/`                         |
+
+Both folders of the group hold every family's alleles and records, so only a family's own folder is given to whoever
+analyses that family ([What a run publishes](../../docs/annotation.md#what-a-run-publishes)).

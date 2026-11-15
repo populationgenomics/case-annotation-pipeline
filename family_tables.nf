@@ -2,11 +2,12 @@
 // normalised, the union of their sites is annotated once with Illumina's Annotator and converted into tables, the
 // union's gnomAD joint values are read from an echtvar archive, and each family's tables are cut from both. The union
 // and what annotates it reveal every family's alleles, so they are published under annotation-unions/<group>/ and never
-// beside a family's tables, which go to annotations/<family>/. A family whose row also names VCFs of its larger
-// variants (its structural variants, its copy-number segments or its members' repeats) gets tables of those too. The
-// structural variants and copy-number segments of the group's families go the same way as their alleles: the union of
-// their sites is annotated once, in a second Annotator run with the same catalog and sources, and each family's tables
-// read its records' annotation from it. Nothing annotates the repeats.
+// beside a family's tables, which go to annotations/<family>/. The Annotator's output has a folder of its own there,
+// which a later run can reuse in place of annotating again. A family whose row also names VCFs of its larger variants
+// (its structural variants, its copy-number segments or its members' repeats) gets tables of those too. The structural
+// variants and copy-number segments of the group's families go the same way as their alleles: the union of their sites
+// is annotated once, in a second Annotator run with the same catalog and sources, and each family's tables read its
+// records' annotation from it. Nothing annotates the repeats.
 
 include { FAMILY_CHECK ; NORMALISE_FAMILY ; NORMALISE_SV ; UNION_SITES ; SV_SITES ; SV_UNION ; GNOMAD_JOINT ; ANNOTATION_TABLES ; SV_ANNOTATION_TABLES ; FAMILY_TABLES ; groupAnnotation ; svName ; svGroup } from './modules/family_tables'
 include { ILLUMINA_ANNOTATE } from './modules/annotator'
@@ -37,10 +38,11 @@ params {
     annotator: String?
     annotator_version: String?
     license_secret: String?
-    // An earlier run's annotation of the same union (its annotator/ folder, holding out/<group>.json.gz and
-    // run.json), used instead of annotating again; the conversion fails unless its alleles are this union's. For a
-    // group with a family that names sv_vcf or cnv_vcf the folder also holds out/<group>.sv.json.gz, the annotation
-    // of the union of the group's structural variants, which is reused in the same way.
+    // An earlier run's annotation of the same union (the folder that run published the Annotator's output in, holding
+    // out/<group>.json.gz and run.json), used instead of annotating again; the conversion fails unless its alleles are
+    // this union's. For a group with a family that names sv_vcf or cnv_vcf the folder also holds
+    // out/<group>.sv.json.gz, the annotation of the union of the group's structural variants, which is reused in the
+    // same way.
     annotated: Path?
     // An echtvar archive of gnomAD's joint release, which holds gnomAD's own joint allele count, frequency, homozygote
     // count and filtering allele frequency (docs/annotation.md); echtvar reads it afresh in every run, also one that
@@ -212,13 +214,15 @@ workflow {
 // size or time differs, and compares a folder by its own, which an object store gives every folder alike: a run
 // into a folder that an earlier run wrote would keep that run's tables beside the families' new ones. The union is
 // therefore always replaced, which removes an earlier folder whole and leaves none of its parts among the new ones.
+// The Annotator's output does not change with the tables' version, so its folder names the catalog alone, as the folder
+// of an annotation of annotator.nf does, and a run of any version of the tables can take it as annotated.
 output {
     union {
         path "annotation-unions/${params.group}/${tablesFolder()}"
         overwrite true
     }
     annotator {
-        path "annotation-unions/${params.group}/${tablesFolder()}/annotator"
+        path "annotation-unions/${params.group}/illumina-${params.catalog}"
     }
     family_tables {
         path { r -> "annotations/${r.family}/${tablesFolder()}" }

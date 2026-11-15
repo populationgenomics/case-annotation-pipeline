@@ -12,6 +12,7 @@ import io
 import json
 import pathlib
 import re
+import string
 import tomllib
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
@@ -31,6 +32,7 @@ FAMILY_TABLES = (REPOSITORY / 'family_tables.nf').read_text('utf-8')
 ANNOTATOR = (REPOSITORY / 'annotator.nf').read_text('utf-8')
 FAMILY_MODULES = (REPOSITORY / 'modules' / 'family_tables.nf').read_text('utf-8')
 ANNOTATOR_MODULES = (REPOSITORY / 'modules' / 'annotator.nf').read_text('utf-8')
+STUB_RUNS = (REPOSITORY / '.github' / 'workflows' / 'nextflow.yml').read_text('utf-8')
 
 SHEET = contract.families_sheet()
 COLUMNS: Mapping[str, Mapping[str, Any]] = {column['name']: column for column in SHEET['columns']}
@@ -369,15 +371,56 @@ def test_the_folders_of_the_family_tables_are_the_ones_the_workflow_publishes_to
     tables_folder = contract._TABLES_FOLDER.format(**values)
     assert f'def tablesFolder() {{\n    return "{tables_folder}"\n}}' in FAMILY_TABLES
     assert 'return file("${projectDir}/src/case_annotation/tables-version.txt").text.trim()' in FAMILY_TABLES
-    family, union, annotator = (
+    family, union = (
         publishes[name]['folder'].format(**values).replace(tables_folder, '${tablesFolder()}')
-        for name in ('family', 'union', 'annotator')
+        for name in ('family', 'union')
     )
-    assert all('${tablesFolder()}' in folder for folder in (family, union, annotator))
+    assert all('${tablesFolder()}' in folder for folder in (family, union))
     assert f'family_tables {{\n        path {{ r -> "{family}" }}' in FAMILY_TABLES
     assert f'union {{\n        path "{union}"' in FAMILY_TABLES
+    annotator = publishes['annotator']['folder'].format(**values)
     assert f'annotator {{\n        path "{annotator}"' in FAMILY_TABLES
-    assert annotator == f'{union}/annotator'
+
+
+def _named(folder: str) -> set[str]:
+    """The run's values that a folder of the contract names in braces."""
+    return {name for _text, name, _spec, _conversion in string.Formatter().parse(folder) if name is not None}
+
+
+def test_the_folder_of_the_annotators_output_does_not_name_the_tables_version() -> None:
+    publishes = WORKFLOWS['family_tables.nf']['publishes']
+    family, union, annotator = (publishes[name]['folder'] for name in ('family', 'union', 'annotator'))
+    # The tables change with their version, and the Annotator's output of a group's unions with a catalog does not. A
+    # folder of it that named the version would hide it from a run of the next version, which looks for an annotation
+    # to reuse where the contract says one is published, and would then annotate again.
+    assert _named(family) == {'family', 'tables_version', 'catalog'}
+    assert _named(union) == {'group', 'tables_version', 'catalog'}
+    assert _named(annotator) == {'group', 'catalog'}
+    # It lies beside the folder of the union's tables, and has the name that annotator.nf gives the folder of an
+    # annotation.
+    group, _, name = annotator.rpartition('/')
+    assert union.rpartition('/')[0] == group
+    assert WORKFLOWS['annotator.nf']['modes']['annotate']['publishes']['folder'].rpartition('/')[2] == name
+
+
+def test_the_stub_runs_look_for_the_folders_that_the_contract_gives() -> None:
+    publishes = WORKFLOWS['family_tables.nf']['publishes']
+    # What every stub run of family_tables.nf is given, and the tables' version.
+    (given,) = re.findall(
+        r'nextflow run family_tables\.nf -stub-run -profile stub \\\n((?: +--\w+ \S+ \\\n)+)', STUB_RUNS
+    )
+    values = dict(re.findall(r'--(\w+) (\S+)', given)) | {'tables_version': family_tables.SCHEMA_VERSION}
+    union, annotator = (publishes[name]['folder'].format(**values) for name in ('union', 'annotator'))
+    assert f'\n          union={union}\n' in STUB_RUNS
+    assert f'\n          annotation={annotator}\n' in STUB_RUNS
+    # The first run's files are looked for in both, and a later run reuses what the first one published.
+    assert '"${union}"/{' in STUB_RUNS
+    assert '"${annotation}"/{run.json,' in STUB_RUNS
+    assert '--annotated "/src/${results}/${annotation}"' in STUB_RUNS
+    # A family's folder is written out wherever a check looks into one.
+    family = publishes['family']['folder'].format(family='fam-a', **values)
+    assert family.startswith('annotations/fam-a/')
+    assert set(re.findall(r'annotations/fam-[^/\s"]+/([^/\s"]+)', STUB_RUNS)) == {family.rpartition('/')[2]}
 
 
 def _folder(named: Sequence[str]) -> set[str]:

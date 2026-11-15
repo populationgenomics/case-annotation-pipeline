@@ -39,7 +39,9 @@ beside `input` in a run with `regions`; [Checks that stop a run](../docs/annotat
 them. A folder is relative to `output_dir`, and the names in braces are the run's values: its params, a family's id from
 the sheet, the tables' version, and the date on which a listing run started. A file with `row_names_any_of` is in a
 family's folder when the family's row names a VCF in one of those columns. A file with `some_row_names_any_of` is read
-when any row of the sheet does.
+when any row of the sheet does. The folder of `annotator` is where a run of `family_tables.nf` that annotates publishes
+the Annotator's output, and what a later run of the group with that catalog takes as `annotated`. It names no version of
+the tables, because the output does not change with it.
 
 In `tables.json`, a `type` is the name of an Arrow type, `list` with its `element`, or `struct` with its `fields`. The
 tables `variants`, `sv` and `repeats` end with one column for each sequenced member, named as the member's sample, and
