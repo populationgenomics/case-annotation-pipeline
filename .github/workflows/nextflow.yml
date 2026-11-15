@@ -159,17 +159,27 @@ jobs:
           sources=(-params-file /src/stub/family-sources.params.yaml)
           family_run "${sources[@]}" "${annotator[@]}" --families /src/stub/families.csv
           # Published files are symlinks into the container's work directory, so their names are checked. The union,
-          # its annotation and its gnomAD joint values go under annotation-unions/, each family's tables under
-          # annotations/<family>/.
+          # its tables and its gnomAD joint values go under annotation-unions/ into a folder that names the tables'
+          # version, the Annotator's output into one beside it that names the catalog alone, and each family's tables
+          # under annotations/<family>/. tests/test_contract.py holds the three folders to the contract's.
           results=results
           union=annotation-unions/stub-group/tables-0.5.0-illumina-202610
-          for f in "${union}"/{stub-group.vcf.gz,stub-group.vcf.gz.tbi,tables,gnomad_joint,annotator/run.json,annotator/out/stub-group.json.gz} \
+          annotation=annotation-unions/stub-group/illumina-202610
+          for f in "${union}"/{stub-group.vcf.gz,stub-group.vcf.gz.tbi,tables,gnomad_joint} \
+            "${annotation}"/{run.json,stub-group.annotate.log,out/stub-group.json.gz} \
             annotations/fam-{a,b}/tables-0.5.0-illumina-202610/{variants,transcripts}.parquet \
             annotations/fam-{a,b}/tables-0.5.0-illumina-202610/manifest.json; do
             test -L "${results}/${f}" || { echo "not published: ${f}" >&2; exit 1; }
           done
           if find "${results}/annotations" -name 'stub-group*' | grep -q .; then
             echo 'the union is published beside a family' >&2
+            exit 1
+          fi
+          # Nothing of the Annotator's lies in a folder that names the tables' version, where a run of another
+          # version would not look for it.
+          if find "${results}" -path '*/tables-*' \( -name run.json -o -name '*.json.gz*' -o -name '*.annotate.log' \) |
+            grep -q .; then
+            echo "the Annotator's output is published under the tables' version" >&2
             exit 1
           fi
           # A second run into the same folder replaces the union's tables and joint values, which are folders: each
@@ -183,11 +193,11 @@ jobs:
             echo "a second run left the first run's tables or joint values published" >&2
             exit 1
           fi
-          # Reusing an earlier run's annotation runs no Annotator, and reads the gnomAD joint values afresh. Its outputs
-          # go to a folder of their own: the first run's belong to the container's user, which the runner cannot
-          # remove.
-          family_run --families /src/stub/families.csv --annotated /src/stub/annotated --output_dir /src/stub/reuse \
-            > reuse.log
+          # Reusing an earlier run's annotation, from the folder that the run published it in, runs no Annotator, and
+          # reads the gnomAD joint values afresh. Its outputs go to a folder of their own: the first run's belong to
+          # the container's user, which the runner cannot remove.
+          family_run --families /src/stub/families.csv --annotated "/src/${results}/${annotation}" \
+            --output_dir /src/stub/reuse > reuse.log
           if grep -q ILLUMINA_ANNOTATE reuse.log || ! grep -q GNOMAD_JOINT reuse.log; then
             cat reuse.log
             exit 1
@@ -199,7 +209,7 @@ jobs:
           fi
           test -L stub/reuse/annotations/fam-a/tables-0.5.0-illumina-202610/manifest.json
           test -L "stub/reuse/${union}/gnomad_joint"
-          test ! -e "stub/reuse/${union}/annotator"
+          test ! -e "stub/reuse/${annotation}"
           # A family whose row names the VCFs of its larger variants gets their tables beside the others, in the same
           # folder, and its structural variants are normalised; a family whose row names none gets no such table. The
           # sites of its structural variants and copy-number segments go into a union of their own, whose reused
@@ -241,7 +251,7 @@ jobs:
           done
           for f in run.json out/stub-group.json.gz out/stub-group.sv.json.gz stub-group.annotate.log \
             stub-group.sv.annotate.log; do
-            test -L "stub/larger-annotated/${union}/annotator/${f}" || { echo "not published: ${f}" >&2; exit 1; }
+            test -L "stub/larger-annotated/${annotation}/${f}" || { echo "not published: ${f}" >&2; exit 1; }
           done
           test -L stub/larger-annotated/annotations/fam-a/tables-0.5.0-illumina-202610/sv_transcripts.parquet
           # Refused, each with its own message: sources and a reused annotation together; neither; annotating without
