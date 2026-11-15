@@ -1894,19 +1894,20 @@ Several string columns hold one of a small set of values, the column's vocabular
 as this section gives it. DuckDB compares strings with regard to case, so a condition on another spelling, such as
 `biotype = 'protein_coding'` or `worst_impact = 'HIGH'`, matches no row and raises no error.
 
-The vocabularies of the first group are closed. The pipeline writes these values itself, or fails a run whose input
-holds another value, so a folder has no value outside the lists.
+The vocabularies of the first group are closed. The pipeline writes these values itself, or checks the values that it
+takes from its input: a run fails on another type or consequence term, and a record on another contig is left out. A
+folder therefore has no value outside the lists.
 
-| Column                                                                                                              | Values                                                                                  |
-| ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `chrom`, in every table                                                                                             | `chr1` to `chr22`, `chrX`, `chrY` and `chrM`                                            |
-| `zygosity`, in a member's call of `variants` and of `sv`                                                            | `hom_ref`, `het`, `hom_alt`                                                             |
-| `caller`                                                                                                            | `sv`, `cnv`                                                                             |
-| `sv_type`                                                                                                           | `DEL`, `INS`, `DUP`, `INV`, `BND`, `CNV`                                                |
-| `annotated_as`                                                                                                      | `structural`, `small_variant`                                                           |
-| `bnd_extends`, `mate_extends`                                                                                       | `left`, `right`                                                                         |
-| `variant_type` of `sv_transcripts`                                                                                  | the Annotator's ten types that [the table's reference](#the-sv_transcripts-table) lists |
-| `consequences`, `worst_consequence` and `mane_select_consequence`, wherever a table or an entry of `genes` has them | the 50 terms of the severity order below                                                |
+| Column                                                                                                              | Values                                                                                                                                         |
+| ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chrom`, in every table                                                                                             | `chr1` to `chr22`, `chrX`, `chrY` and `chrM`; `mate_chrom` is not held to them, because a breakend's mate can lie on another contig of the VCF |
+| `zygosity`, in a member's call of `variants` and of `sv`                                                            | `hom_ref`, `het`, `hom_alt`                                                                                                                    |
+| `caller`                                                                                                            | `sv`, `cnv`                                                                                                                                    |
+| `sv_type`                                                                                                           | `DEL`, `INS`, `DUP`, `INV`, `BND`, `CNV`                                                                                                       |
+| `annotated_as`                                                                                                      | `structural`, `small_variant`                                                                                                                  |
+| `bnd_extends`, `mate_extends`                                                                                       | `left`, `right`                                                                                                                                |
+| `variant_type` of `sv_transcripts`                                                                                  | the Annotator's ten types that [the table's reference](#the-sv_transcripts-table) lists                                                        |
+| `consequences`, `worst_consequence` and `mane_select_consequence`, wherever a table or an entry of `genes` has them | the 50 terms of the severity order below                                                                                                       |
 
 A consequence is a Sequence Ontology term as the Annotator writes it. The conversion ranks the terms by this list, from
 most to least severe, and fails on a term outside it: `transcript_ablation`, `splice_acceptor_variant`,
@@ -1937,7 +1938,8 @@ biotypes = con.sql('SELECT DISTINCT biotype FROM transcripts ORDER BY biotype').
 
 The values of a list come from `SELECT DISTINCT unnest(filters)`. Those of a field of a list's entries come from
 `SELECT DISTINCT unnest(list_transform(clinvar_records, lambda r: r.classification))`, and those of a field of a
-member's call come from `SELECT DISTINCT "<sample>".ft`.
+member's call come from `SELECT DISTINCT "<sample>".ft`, or from `SELECT DISTINCT unnest("<sample>".so)` where the field
+is a list.
 
 | Column                                                                                 | Whose values           | Values                                                                                                                                                          |
 | -------------------------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1978,8 +1980,8 @@ ClinVar's terms, or several joined by `; `, as in `Pathogenic; risk factor`. The
 record of `sv` also has `conflicting data from submitters`. A query therefore matches a classification by a pattern
 ([ClinVar pathogenic variants in anyone in the family](#clinvar-pathogenic-variants-in-anyone-in-the-family)).
 
-The conversion gives a record its `stars` from its review status, by ClinVar's own rule. A status outside this list
-keeps its text and has no stars.
+The conversion gives a record its `stars` from its review status, by ClinVar's own rule. This list is the conversion's,
+and the trio's tables hold eight of its twelve statuses. A status outside the list keeps its text and has no stars.
 
 | Review status                                                                                                                                                                        | Stars |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----- |
