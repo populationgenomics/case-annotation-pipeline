@@ -433,7 +433,7 @@ flowchart LR
         FAMILY["FAMILY_TABLES<br/>both unions cut to<br/>the family, with<br/>its members' calls;<br/>the repeats"]
     end
 
-    OUT[("annotations/family-a/<br/>tables-0.4.0-<br/>illumina-202610/<br/>2 to 5 Parquet tables,<br/>manifest.json")]
+    OUT[("annotations/family-a/<br/>tables-0.5.0-<br/>illumina-202610/<br/>2 to 5 Parquet tables,<br/>manifest.json")]
 
     IN --> EACH --> UNION --> CUT --> OUT
     EACH --> SVUNION --> CUT
@@ -585,7 +585,7 @@ It is careful in these ways:
 ### What a run publishes
 
 The workflow publishes the union and the families' folders apart, and the tables' version and the catalog name the
-folder of each. For the tables' version `0.4.0` and catalog `202610` the folder is `tables-0.4.0-illumina-202610`.
+folder of each. For the tables' version `0.5.0` and catalog `202610` the folder is `tables-0.5.0-illumina-202610`.
 
 | What                                                                             | Folder                                                           |
 | -------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
@@ -881,10 +881,10 @@ sources in `runConfigs/bundle.json`, and the download's log beside it as `<assem
 
 ### Published folders
 
-For the group `g1`, the family `family-a`, the tables' version `0.4.0` and catalog `202610`:
+For the group `g1`, the family `family-a`, the tables' version `0.5.0` and catalog `202610`:
 
 ```text
-annotation-unions/g1/tables-0.4.0-illumina-202610/
+annotation-unions/g1/tables-0.5.0-illumina-202610/
     g1.vcf.gz, g1.vcf.gz.tbi     the union's sites
     tables/                      variants/ and transcripts/, each a folder of parts, and annotation.json
     gnomad_joint/                gnomad_joint.parquet and gnomad_joint.json
@@ -893,7 +893,7 @@ annotation-unions/g1/tables-0.4.0-illumina-202610/
     sv_annotation/               sv/ and sv_transcripts/, each a folder of parts, and annotation.json
     annotator/                   out/g1.json.gz and out/g1.sv.json.gz, run.json and the Annotator's logs; what
                                  `annotated` takes
-annotations/family-a/tables-0.4.0-illumina-202610/
+annotations/family-a/tables-0.5.0-illumina-202610/
     variants.parquet
     transcripts.parquet
     sv.parquet, sv_transcripts.parquet

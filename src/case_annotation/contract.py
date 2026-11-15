@@ -64,8 +64,7 @@ def manifest_schema() -> dict[str, Any]:
 
     The model refuses a key that it does not know, so that a misspelt key fails where the manifest is written. A key
     that is added keeps the tables' version, so a reader that holds this schema must accept a manifest with one: the
-    schema allows unknown keys in every object. A key with a default is not required, because a manifest of the same
-    version that was written before the key existed lacks it.
+    schema allows unknown keys in every object. Every key that the schema describes is required.
     """
     schema = _without_refusal(family_tables.FamilyManifest.model_json_schema())
     return {'$schema': pydantic.json_schema.GenerateJsonSchema.schema_dialect, **schema}

@@ -17,7 +17,7 @@ from typing import Literal
 type Sex = Literal['male', 'female', 'unknown']
 
 _SEXES: dict[str, Sex] = {'1': 'male', '2': 'female', '0': 'unknown'}
-_AFFECTED = {'2': True, '1': False, '0': False, '-9': False}
+_AFFECTED = {'2': True, '1': False, '0': None, '-9': None}
 # A name that each of the family's files, and a folder of its outputs, takes as it is.
 NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]*')
 
@@ -28,7 +28,7 @@ class Member:
     father: str | None
     mother: str | None
     sex: Sex
-    affected: bool  # an unknown phenotype counts as unaffected
+    affected: bool | None  # None for an unknown phenotype
 
 
 @dataclasses.dataclass(frozen=True)

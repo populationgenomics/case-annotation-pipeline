@@ -68,7 +68,7 @@ RECORD_COLUMNS = tuple(name for name in SV.names if name != 'small_variant_id')
 CALL = pa.struct(
     [
         pa.field('gt', _STRING, nullable=False),
-        pa.field('carries', pa.bool_(), nullable=False),
+        pa.field('carries', pa.bool_()),
         pa.field('zygosity', _STRING),
         pa.field('gq', _INT),
         pa.field('pl', pa.list_(_INT)),
@@ -113,19 +113,20 @@ def transcripts_schema(columns: pa.Schema) -> pa.Schema:
     return pa.schema([*(SV.field(name) for name in RECORD_KEY), *columns])
 
 
-def genotype_call(alleles: Sequence[int | None]) -> tuple[bool, vcf_values.Zygosity | None]:
+def genotype_call(alleles: Sequence[int | None]) -> tuple[bool | None, vcf_values.Zygosity | None]:
     """Whether a member carries a structural variant, and its zygosity, by its genotype.
 
-    The member carries the variant if its genotype holds a copy of the allele, also beside a missing one. The zygosity
-    is that of a small variant's call (vcf_values.zygosity): a haploid call of the allele, as on a male's X or Y, is
-    `hom_alt`, a haploid call of the reference `hom_ref`, and a genotype with every allele missing has none.
+    Both are those of a small variant's call (vcf_values.carries, vcf_values.zygosity). The member carries the variant
+    if its genotype holds a copy of the allele, also beside a missing one, and does not if every allele is called and
+    none is the allele; a genotype with an allele missing and no copy of the allele says neither, and has no zygosity.
+    A haploid call of the allele, as on a male's X or Y, is `hom_alt`, and a haploid call of the reference `hom_ref`.
     """
-    return 1 in alleles, vcf_values.zygosity(alleles)
+    return vcf_values.carries(alleles), vcf_values.zygosity(alleles)
 
 
 def copy_number_call(
     alleles: Sequence[int | None], cn: int | None, alts: Sequence[str], where: str
-) -> tuple[bool, vcf_values.Zygosity | None]:
+) -> tuple[bool | None, vcf_values.Zygosity | None]:
     """Whether a member carries a copy-number segment, and its zygosity, by its copy number.
 
     The copies expected are the alleles of the member's genotype: two, or one where the caller calls the member
@@ -135,7 +136,8 @@ def copy_number_call(
 
     The zygosity is `hom_ref` at the expected copy number, `hom_alt` at a copy number of 0 and `het` at any other below
     the expected one. Above it there is none, because the copy number does not say how the copies are split between the
-    two chromosomes. A member without a copy number, such as a female on Y, carries nothing and has no zygosity.
+    two chromosomes. A member without a copy number, such as a female on Y, has no call of the segment: the record
+    says neither that the member carries it nor that it does not, and there is no zygosity.
 
     The genotype must say the same as the copy number, so that a caller with another convention fails here: an
     alternate allele exactly where the copy number is not the expected one, `<DEL>` below it and `<DUP>` above, and as
@@ -149,7 +151,7 @@ def copy_number_call(
             raise ValueError(
                 f'{where}: the genotype {gt} has no copy number, which says whether the segment is carried'
             )
-        return False, None
+        return None, None
     if cn < 0:
         raise ValueError(f'{where}: a copy number of {cn}')
     if cn == expected:
@@ -273,7 +275,7 @@ def _call(
     sample: pysam.VariantRecordSample, caller: Caller, alts: Sequence[str], formats: frozenset[str], where: str
 ) -> dict[str, Any]:
     """One member's call of a record, as a value of its column (CALL)."""
-    alleles, gt = vcf_values.genotype(sample)
+    alleles, gt = vcf_values.genotype(sample, where)
     cn = vcf_values.integer(sample, 'CN', formats, where)
     carries, zygosity = genotype_call(alleles) if caller == 'sv' else copy_number_call(alleles, cn, alts, where)
     counts = 'a count for the reference and one for the allele'

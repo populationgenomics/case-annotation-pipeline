@@ -36,11 +36,14 @@ GENOTYPE_CALLS = {
     '1/1': ((1, 1), (True, 'hom_alt')),
     '0/0': ((0, 0), (False, 'hom_ref')),
     './1': ((None, 1), (True, 'het')),
-    './.': ((None, None), (False, None)),
+    # A genotype with an allele missing and no copy of the allele says neither that the member carries it nor that it
+    # does not.
+    '0/.': ((0, None), (None, None)),
+    './.': ((None, None), (None, None)),
     # A haploid call, as on a male's X or Y.
     '1': ((1,), (True, 'hom_alt')),
     '0': ((0,), (False, 'hom_ref')),
-    '.': ((None,), (False, None)),
+    '.': ((None,), (None, None)),
 }
 
 
@@ -65,8 +68,9 @@ COPY_NUMBER_CALLS = {
     "no copy of a male's X": ((1,), 0, _LOSS, (True, 'hom_alt')),
     "two copies of a male's X": ((1,), 2, _GAIN, (True, None)),
     "one copy of a male's Y in a gained segment": ((0,), 1, _GAIN, (False, 'hom_ref')),
-    "no copy number, as a female's on Y": ((None,), None, _LOSS, (False, None)),
-    'no copy number of a diploid member': ((None, None), None, _GAIN, (False, None)),
+    # Without a copy number the record says neither, which a member at the expected copy number does not look like.
+    "no copy number, as a female's on Y": ((None,), None, _LOSS, (None, None)),
+    'no copy number of a diploid member': ((None, None), None, _GAIN, (None, None)),
 }
 
 
@@ -203,10 +207,11 @@ def test_each_members_call_of_a_structural_variant_holds_its_fields(tmp_path: pa
     }
     carried = {sv_id: [row[s]['carries'] for s in structural_vcfs.SAMPLES] for sv_id, row in calls.items()}
     assert carried['inv:DEL:1'] == [True, False, True]
-    # A record without read counts or likelihoods, and a member without a genotype.
+    # A record without read counts or likelihoods, and a member without a genotype, who is not said to lack the allele.
     assert [calls['inv:DEL:2'][s]['zygosity'] for s in structural_vcfs.SAMPLES] == ['het', 'hom_ref', None]
     assert (calls['inv:DEL:2']['S1']['pl'], calls['inv:DEL:2']['S1']['pr_alt']) == (None, None)
-    assert (calls['inv:DEL:2']['S3']['gt'], calls['inv:DEL:2']['S3']['carries']) == ('./.', False)
+    assert carried['inv:DEL:2'] == [True, False, None]
+    assert calls['inv:DEL:2']['S3']['gt'] == './.'
 
 
 def test_haploid_calls_of_a_structural_variant_on_a_males_x_and_y(tmp_path: pathlib.Path) -> None:
@@ -216,8 +221,8 @@ def test_haploid_calls_of_a_structural_variant_on_a_males_x_and_y(tmp_path: path
     on_y = calls['inv:DUP:TANDEM:1']
     assert [(on_y[s]['gt'], on_y[s]['carries'], on_y[s]['zygosity']) for s in structural_vcfs.SAMPLES] == [
         ('0', False, 'hom_ref'),
-        ('.', False, None),
-        ('.', False, None),
+        ('.', None, None),
+        ('.', None, None),
     ]
     assert on_y['S1']['pl'] == [0, 70]
 
@@ -256,7 +261,7 @@ def test_a_copy_number_caller_gives_a_row_per_segment_away_from_the_reference(tm
     assert [calls['inv:GAIN:1'][s]['gt'] for s in structural_vcfs.SAMPLES] == ['./1', './.', './1']
     assert [calls['inv:GAIN:1'][s]['cn'] for s in structural_vcfs.SAMPLES] == [3, 2, 4]
     on_y = calls['inv:LOSS:3']['S2']
-    assert (on_y['gt'], on_y['cn'], on_y['sm']) == ('.', None, None)
+    assert (on_y['gt'], on_y['cn'], on_y['sm'], on_y['carries']) == ('.', None, None, None)
 
 
 def test_the_call_columns_follow_the_samples_given_whatever_the_vcfs_order(tmp_path: pathlib.Path) -> None:

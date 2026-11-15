@@ -107,13 +107,21 @@ def test_the_published_schema_is_the_models_without_its_refusal_of_unknown_keys(
     assert published == family_tables.FamilyManifest.model_json_schema()
 
 
-def test_a_manifest_key_with_a_default_is_not_required() -> None:
+def test_every_key_that_the_schema_describes_is_required() -> None:
     schema = contract.manifest_schema()
-    fields = family_tables.FamilyManifest.model_fields
-    defaulted = {name for name, field in fields.items() if not field.is_required()}
-    assert defaulted
-    assert set(schema['properties']) - set(schema['required']) == defaulted
-    assert set(schema['properties']) == set(fields)
+    assert set(schema['properties']) == set(family_tables.FamilyManifest.model_fields)
+    # In the manifest and in every object within it: no key is left out for a value that stands for nothing.
+    described = [node for node in _objects(schema) if 'properties' in node]
+    assert len(described) > 1
+    for node in described:
+        assert set(node['required']) == set(node['properties']), node.get('title')
+        assert not any('default' in key for key in node['properties'].values()), node.get('title')
+
+
+def test_a_members_phenotype_is_required_and_may_be_null() -> None:
+    member = contract.manifest_schema()['$defs']['FamilyMember']
+    assert 'affected' in member['required']
+    assert {option['type'] for option in member['properties']['affected']['anyOf']} == {'boolean', 'null'}
 
 
 def test_the_example_manifest_is_one_that_the_model_reads_and_writes() -> None:

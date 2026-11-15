@@ -22,9 +22,9 @@ Both examples are invented: the families, the samples, the paths, the sizes and 
 ## Reading the files
 
 The manifest's schema accepts a key that it does not describe. The code that writes a manifest refuses unknown keys, but
-a key that is added later keeps the tables' version, so a reader must take a manifest with such a key. The three keys
-that have a default (`sv_callers`, `sv_annotation` and `sv_omitted_columns`) are not required, because a manifest of the
-same version that was written before they existed lacks them.
+a key that is added later keeps the tables' version, so a reader must take a manifest with such a key. Every key that
+the schema describes is required: a manifest holds each of them, with an empty list or a null where a family has nothing
+for it.
 
 In `families-sheet.json`, `column_required` says whether a sheet's header must hold the column and `value_required`
 whether a row must hold a value in it. A `pattern` is matched against the whole value. A column with an `index_suffix`

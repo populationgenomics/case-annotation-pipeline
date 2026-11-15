@@ -154,7 +154,7 @@ erDiagram
         string father
         string mother
         string sex
-        bool affected
+        bool affected "empty where unknown"
         bool sequenced
         string role "proband, father, mother or empty"
     }
@@ -535,10 +535,11 @@ genotype of that caller therefore says neither that a parent is unaffected nor h
 and `zygosity` answer the same question for both callers.
 
 For a row of the structural-variant caller the genotype decides, as in `variants`. `carries` is true where the genotype
-holds a copy of the allele, also beside a missing one, and `zygosity` is classified in the same way: `0/1` is `het`,
-`1/1` is `hom_alt`, `0/0` is `hom_ref`, and a genotype with every allele missing has none. A haploid call, as DRAGEN
-makes on a male's X and Y outside the [pseudoautosomal regions](glossary.md#pseudoautosomal-regions), is `hom_alt` for
-`1` and `hom_ref` for `0`.
+holds a copy of the allele, also beside a missing one, false where every allele is called and none is the allele, and
+empty for any other genotype, such as the `./.` of a member without a call. `zygosity` is classified in the same way:
+`0/1` is `het`, `1/1` is `hom_alt`, `0/0` is `hom_ref`, and a genotype that leaves `carries` empty has none. A haploid
+call, as DRAGEN makes on a male's X and Y outside the [pseudoautosomal regions](glossary.md#pseudoautosomal-regions), is
+`hom_alt` for `1` and `hom_ref` for `0`.
 
 For a row of the copy-number caller the copy number decides, read against the copies expected. Those are the alleles in
 the member's genotype: two, or one where the caller calls the member haploid.
@@ -549,7 +550,7 @@ the member's genotype: two, or one where the caller calls the member haploid.
 | fewer, and more than 0           | true      | `het`      | `0/1`                  |         |
 | 0                                | true      | `hom_alt`  | `1/1`                  | `1`     |
 | more                             | true      | empty      | `./1`                  | `1`     |
-| no copy number, as a female's Y  | false     | empty      |                        | `.`     |
+| no copy number, as a female's Y  | empty     | empty      |                        | `.`     |
 
 A gain is the one case in which `carries` and `zygosity` differ from what they say in `variants`, where a member who
 carries an allele is always `het` or `hom_alt`. A member with a gain carries the segment and has no zygosity, because
@@ -558,8 +559,9 @@ three on one. A query for the members who have a record therefore reads `carries
 `zygosity IN ('het', 'hom_alt')` finds structural variants and losses and no gain. A male with no copy of a segment of
 his X is `hom_alt`, like his haploid call of a small variant there.
 
-`carries` is false for a member without a call too, so a query for a parent who was called and does not carry the record
-asks for `zygosity = 'hom_ref'`.
+A member without a call of a record has neither value: the structural-variant caller wrote no genotype for the member,
+or the copy-number caller no copy number. `carries` is false only for a member who was called and does not have the
+record, and that member's `zygosity` is `hom_ref`.
 
 > [!IMPORTANT]
 >
@@ -989,6 +991,13 @@ called homozygous reference with enough depth and at most one read of the allele
 least 20 and an allele balance of at least 0.2, the allele is very rare, and it touches a protein or a splice site. It
 returns the three calls whole, each as a struct with every field.
 
+A member's `carries` has three values: true where the genotype holds a copy of the allele, false where every allele of
+the genotype is called and none is the allele, and empty (null) where the genotype is missing or has a missing allele
+and no copy of the allele, as in `./.` and `0/.`. `zygosity` is `hom_ref` exactly where `carries` is false, so the
+conditions on the parents below say that each parent was called and lacks the allele, and
+`NOT father.carries AND NOT mother.carries` says the same. Neither form matches a parent without a call. A search for
+the alleles that a parent is not shown to carry, uncalled sites included, asks for `father.carries IS NOT TRUE`.
+
 ```python
 de_novo = con.sql(
     """
@@ -1192,27 +1201,32 @@ the affected members share.
 
 ```python
 affected = [m['sample_id'] for m in members if m['sequenced'] and m['affected']]
-unaffected = [m['sample_id'] for m in members if m['sequenced'] and not m['affected']]
-conditions = [f'"{sample}".carries' for sample in affected]
-conditions += [f""""{sample}".zygosity = 'hom_ref'""" for sample in unaffected]
-in_every_affected_member = con.sql(
-    f"""
-    SELECT variant_id, gene_symbol, worst_consequence, gnomad_joint_af
-    FROM variants
-    WHERE {' AND '.join(conditions)}
-      AND coalesce(gnomad_joint_af, 0) < $max_af
-    """,
-    params={'max_af': 0.001},
-).to_arrow_table()
+unaffected = [m['sample_id'] for m in members if m['sequenced'] and m['affected'] is False]
+if affected:
+    conditions = [f'"{sample}".carries' for sample in affected]
+    conditions += [f""""{sample}".zygosity = 'hom_ref'""" for sample in unaffected]
+    in_every_affected_member = con.sql(
+        f"""
+        SELECT variant_id, gene_symbol, worst_consequence, gnomad_joint_af
+        FROM variants
+        WHERE {' AND '.join(conditions)}
+          AND coalesce(gnomad_joint_af, 0) < $max_af
+        """,
+        params={'max_af': 0.001},
+    ).to_arrow_table()
 ```
 
 In the worked example this returns nothing: the daughter is the only affected member, and an unaffected parent carries
 each of her two alleles. Where the affected members may have different causes, the same query runs once for each of
-them, with that member alone in `affected` and the other affected members in neither list. `carries` is false for a
-member without a call too, so the query asks an unaffected member for `zygosity = 'hom_ref'`, which a member without a
-call does not have, and an allele for which an unaffected member has no call is left out; a family with nobody affected
-among its sequenced members gets no rows. A member whose phenotype the PED file gives as unknown reads
-`"affected": false` in the manifest and so counts as unaffected here; such a member belongs in neither list.
+them, with that member alone in `affected` and the other affected members in neither list. The query asks an unaffected
+member for `zygosity = 'hom_ref'`, which a member without a call does not have, so an allele for which an unaffected
+member has no call is left out.
+
+A member whose phenotype the PED file gives as unknown has `"affected": null` in the manifest and belongs in neither
+list, so the query asks nothing of that member's call. The condition `m['affected'] is False` keeps such a member out of
+`unaffected`, where `not m['affected']` would put the member in. The query runs only for a family with an affected
+sequenced member (`if affected`). Without one it would ask only that the unaffected members lack the allele, and return
+the alleles that members of unknown phenotype carry.
 
 ### ClinVar pathogenic variants in anyone in the family
 
@@ -1306,9 +1320,9 @@ deletions_in_region = con.sql(
 
 In the example of [One deletion in both callers' records](#one-deletion-in-both-callers-records) this returns both rows,
 with the proband's call of each as a struct: her `gq`, `pl` and read counts in the `sv` row, and her `cn`, `sm` and `qs`
-in the `cnv` row. `NOT father.carries` in place of the `hom_ref` condition also admits a parent without a call. The
-breakpoints of an `imprecise` record are uncertain by the bounds in `cipos` and `ciend`. A segment that one member loses
-and another gains has the type `CNV` and is not returned here. With
+in the `cnv` row. `father.carries IS NOT TRUE` in place of the `hom_ref` condition also admits a parent without a call.
+The breakpoints of an `imprecise` record are uncertain by the bounds in `cipos` and `ciend`. A segment that one member
+loses and another gains has the type `CNV` and is not returned here. With
 `(sv_type = 'DEL' OR (sv_type = 'CNV' AND proband.zygosity IN ('het', 'hom_alt')))` in place of `sv_type = 'DEL'`, the
 query also finds the proband's losses among those, since only a loss has a zygosity. On the VCFs the same question takes
 one command per caller, such as
@@ -1740,13 +1754,13 @@ A family's folder holds `variants.parquet`, `transcripts.parquet` and `manifest.
 variants were given to the workflow also has `sv.parquet` and `sv_transcripts.parquet`, `repeats.parquet`, or all three,
 and the manifest's `tables` lists the tables that are there. `family_tables.nf` publishes the folder as
 `annotations/<family>/tables-<version>-illumina-<catalog>/`, such as
-`annotations/family-a/tables-0.4.0-illumina-202610/` ([What a run publishes](annotation.md#what-a-run-publishes)).
+`annotations/family-a/tables-0.5.0-illumina-202610/` ([What a run publishes](annotation.md#what-a-run-publishes)).
 
-The tables' version, `0.4.0` here, changes when a column of a table is renamed, retyped or removed, or when its meaning
+The tables' version, `0.5.0` here, changes when a column of a table is renamed, retyped or removed, or when its meaning
 changes. A table, a column or a manifest key that is added leaves it as it is, because a reader of the Parquet tables by
 column name, or of the manifest as plain JSON, finds what it knew as before: `variants` and `transcripts` are the same
 in a folder with and without the others. A reader that checks the manifest against a fixed set of keys has to allow for
-`sv_callers`, `sv_annotation` and `sv_omitted_columns`, which a manifest written before the keys existed lacks.
+a key that is added under the same version.
 
 The tables share these properties:
 
@@ -1884,17 +1898,17 @@ VCF and in the VCF's order, like the sample columns of a split VCF. The schema n
 column is the proband's. Each member's column is a struct of that member's own call of the allele, and a query reads a
 field as `"<sample>".gt`.
 
-| Field of a call      | Type                                 | Holds                                                                                                                                                                              |
-| -------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `gt`                 | string                               | the genotype as written in the VCF after the split (so a `1/2` becomes `1/0` and `0/1`)                                                                                            |
-| `carries`            | boolean                              | whether the member carries the allele: true where the genotype holds a copy of the allele, also beside a missing one, as in `./1`; false for a member without a call too           |
-| `zygosity`           | string                               | `hom_ref`, `het` or `hom_alt`, classified as cyvcf2 classifies genotypes: only a genotype with every allele missing has none, `0/.` is homozygous reference and `./1` heterozygous |
-| `gq`, `dp`           | 32-bit integers                      | the call's GQ and DP                                                                                                                                                               |
-| `pl`                 | list of 32-bit integers              | the Phred-scaled genotype likelihoods                                                                                                                                              |
-| `ad_ref`, `ad_alt`   | 32-bit integers                      | the reads of the reference and of the allele                                                                                                                                       |
-| `allele_balance`     | 64-bit float                         | the allele's share of the reads of the reference and the allele, empty unless both depths are known and not both 0                                                                 |
-| `ps`, `ft`           | 32-bit integer, string               | the call's phase set and its sample filter                                                                                                                                         |
-| `dn`, `dq` and `msc` | string, 64-bit float, 32-bit integer | DRAGEN's DN, DQ and MSC, which are empty for a VCF from another caller                                                                                                             |
+| Field of a call      | Type                                 | Holds                                                                                                                                                                                                                                                                                                                   |
+| -------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gt`                 | string                               | the genotype as written in the VCF after the split (so a `1/2` becomes `1/0` and `0/1`)                                                                                                                                                                                                                                 |
+| `carries`            | boolean                              | whether the member carries the allele, by the genotype alone: true where it holds a copy of the allele, also beside a missing one, as in `./1`; false where every allele is called and none is the allele; empty where the genotype is missing or has a missing allele and no copy of the allele, as in `./.` and `0/.` |
+| `zygosity`           | string                               | `hom_ref`, `het` or `hom_alt`: `hom_ref` where `carries` is false, `hom_alt` where every allele is the allele, and `het` for any other genotype that holds the allele, `./1` among them; empty where `carries` is empty                                                                                                 |
+| `gq`, `dp`           | 32-bit integers                      | the call's GQ and DP                                                                                                                                                                                                                                                                                                    |
+| `pl`                 | list of 32-bit integers              | the Phred-scaled genotype likelihoods                                                                                                                                                                                                                                                                                   |
+| `ad_ref`, `ad_alt`   | 32-bit integers                      | the reads of the reference and of the allele                                                                                                                                                                                                                                                                            |
+| `allele_balance`     | 64-bit float                         | the allele's share of the reads of the reference and the allele, empty unless both depths are known and not both 0                                                                                                                                                                                                      |
+| `ps`, `ft`           | 32-bit integer, string               | the call's phase set and its sample filter                                                                                                                                                                                                                                                                              |
+| `dn`, `dq` and `msc` | string, 64-bit float, 32-bit integer | DRAGEN's DN, DQ and MSC, which are empty for a VCF from another caller                                                                                                                                                                                                                                                  |
 
 `pl` holds three likelihoods for a diploid call (`0/0`, `0/1`, `1/1`) and two for a haploid one (`0`, `1`), as DRAGEN
 calls a male's X and Y outside the pseudoautosomal regions. It is empty where the VCF has none. When
@@ -1906,10 +1920,12 @@ two lengths.
 
 `carries` says whether the member has the allele at all, and a query for the members who carry an allele reads it alone.
 `zygosity` says on how many of the member's copies of the chromosome the allele lies, and a haploid call of the allele
-is `hom_alt`. A member who carries the allele is `het` or `hom_alt`. A query for a member who was called and does not
-carry the allele asks for `zygosity = 'hom_ref'`, since `carries` is false for a member without a call too. The two
-fields have the same meaning in the members' columns of `sv`, where a gain of copies is carried with no zygosity
-([The members' columns of `sv`](#the-members-columns-of-sv)).
+is `hom_alt`. A member who carries the allele is `het` or `hom_alt`. Both fields are read from the genotype alone,
+whatever the member's sex and the chromosome, and both are empty where the genotype does not say whether the member has
+the allele, as for a member without a call. A query for a member who was called and does not carry the allele asks for
+`NOT "<sample>".carries` or for `zygosity = 'hom_ref'`, which match the same calls
+([A de novo search](#a-de-novo-search)). The two fields have the same meaning in the members' columns of `sv`, where a
+gain of copies is carried with no zygosity ([The members' columns of `sv`](#the-members-columns-of-sv)).
 
 DuckDB matches column names without regard to case, and a member's column stands beside the columns that say what a row
 is of in `variants`, in `sv` and in `repeats`. `FAMILY_CHECK` therefore refuses a sample named as one of those columns
@@ -2023,20 +2039,20 @@ in the same order: `gt`, `carries`, `zygosity`, `gq`, `pl`, `ft`, `dn` and `dq`.
 callers' own. A field that the caller's VCF does not define is empty, so a row of the structural-variant caller has no
 `cn` and a row of DRAGEN's copy-number caller no `gq` or `pl`.
 
-| Field of a call                                            | Type                         | Holds                                                                                                                                                                                                                                                                                          |
-| ---------------------------------------------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `gt`                                                       | string                       | the genotype as written in the VCF                                                                                                                                                                                                                                                             |
-| `carries`                                                  | boolean                      | whether the member carries the record: for the structural-variant caller as in `variants`, true where the genotype holds a copy of the allele, also beside a missing one; for the copy-number caller true where the copy number is not the expected one; false for a member without a call too |
-| `zygosity`                                                 | string                       | `hom_ref`, `het` or `hom_alt`: for the structural-variant caller classified as in `variants`, for the copy-number caller by the copy number; empty for a member without a call, and for a gain of copies                                                                                       |
-| `gq`                                                       | 32-bit integer               | the call's GQ, from the structural-variant caller                                                                                                                                                                                                                                              |
-| `pl`                                                       | list of 32-bit integers      | the Phred-scaled genotype likelihoods, from the structural-variant caller: three for a diploid call and two for a haploid one, as in `variants`                                                                                                                                                |
-| `pr_ref`, `pr_alt`, `sr_ref`, `sr_alt`, `vf_ref`, `vf_alt` | 32-bit integers              | the structural-variant caller's counts for the reference and for the allele: spanning read pairs (`PR`), split reads (`SR`) and fragments (`VF`)                                                                                                                                               |
-| `cn`                                                       | 32-bit integer               | the copy number, from the copy-number caller                                                                                                                                                                                                                                                   |
-| `sm`, `bc`                                                 | 64-bit float, 32-bit integer | the copy-number caller's mean copy ratio of the segment (`SM`) and its number of bins (`BC`)                                                                                                                                                                                                   |
-| `pe_start`, `pe_end`                                       | 32-bit integers              | improperly paired reads at the segment's start and at its end (`PE`)                                                                                                                                                                                                                           |
-| `qs`                                                       | 32-bit integer               | the quality of the copy-number call (`QS`)                                                                                                                                                                                                                                                     |
-| `ft`                                                       | string                       | the call's sample filter                                                                                                                                                                                                                                                                       |
-| `dn`, `dq`                                                 | string, 64-bit float         | DRAGEN's DN and DQ, which are empty for a VCF from another caller                                                                                                                                                                                                                              |
+| Field of a call                                            | Type                         | Holds                                                                                                                                                                                                                                                                                                                                                                   |
+| ---------------------------------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gt`                                                       | string                       | the genotype as written in the VCF                                                                                                                                                                                                                                                                                                                                      |
+| `carries`                                                  | boolean                      | whether the member carries the record: for the structural-variant caller as in `variants`, by the genotype; for the copy-number caller true where the copy number is not the expected one and false where it is; empty for a member without a call, whose genotype does not say for the structural-variant caller and who has no copy number for the copy-number caller |
+| `zygosity`                                                 | string                       | `hom_ref`, `het` or `hom_alt`: for the structural-variant caller classified as in `variants`, for the copy-number caller by the copy number; empty for a member without a call, and for a gain of copies                                                                                                                                                                |
+| `gq`                                                       | 32-bit integer               | the call's GQ, from the structural-variant caller                                                                                                                                                                                                                                                                                                                       |
+| `pl`                                                       | list of 32-bit integers      | the Phred-scaled genotype likelihoods, from the structural-variant caller: three for a diploid call and two for a haploid one, as in `variants`                                                                                                                                                                                                                         |
+| `pr_ref`, `pr_alt`, `sr_ref`, `sr_alt`, `vf_ref`, `vf_alt` | 32-bit integers              | the structural-variant caller's counts for the reference and for the allele: spanning read pairs (`PR`), split reads (`SR`) and fragments (`VF`)                                                                                                                                                                                                                        |
+| `cn`                                                       | 32-bit integer               | the copy number, from the copy-number caller                                                                                                                                                                                                                                                                                                                            |
+| `sm`, `bc`                                                 | 64-bit float, 32-bit integer | the copy-number caller's mean copy ratio of the segment (`SM`) and its number of bins (`BC`)                                                                                                                                                                                                                                                                            |
+| `pe_start`, `pe_end`                                       | 32-bit integers              | improperly paired reads at the segment's start and at its end (`PE`)                                                                                                                                                                                                                                                                                                    |
+| `qs`                                                       | 32-bit integer               | the quality of the copy-number call (`QS`)                                                                                                                                                                                                                                                                                                                              |
+| `ft`                                                       | string                       | the call's sample filter                                                                                                                                                                                                                                                                                                                                                |
+| `dn`, `dq`                                                 | string, 64-bit float         | DRAGEN's DN and DQ, which are empty for a VCF from another caller                                                                                                                                                                                                                                                                                                       |
 
 [Who carries a record](#who-carries-a-record) defines `carries` and `zygosity` for both callers. They differ from what
 they say in `variants` in one case: a member who gains copies carries the segment and has no zygosity. In a `CNV`
@@ -2102,20 +2118,21 @@ counts are left out; the VCF has them.
 ### The manifest
 
 `manifest.json` describes the folder: its tables, the family and what annotated the alleles and the structural variants.
+Every manifest holds every key below, also the manifest of a family without the optional tables.
 
 | Key                  | Holds                                                                                                                                                                                                                                                                                               |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema_version`     | the tables' version, such as `0.4.0`                                                                                                                                                                                                                                                                |
+| `schema_version`     | the tables' version, such as `0.5.0`                                                                                                                                                                                                                                                                |
 | `family`             | the family's id                                                                                                                                                                                                                                                                                     |
-| `members`            | the pedigree: each member with its `sample_id`, `father`, `mother`, `sex`, `affected`, `sequenced` (whether `variants` has its column, and `sv` and `repeats` where the family has them) and `role`                                                                                                 |
+| `members`            | the pedigree: each member with its `sample_id`, `father`, `mother`, `sex`, `affected` (empty where the PED file gives the phenotype as unknown), `sequenced` (whether `variants` has its column, and `sv` and `repeats` where the family has them) and `role`                                       |
 | `tables`             | each table the folder holds, with its rows, size and SHA-256: `variants` and `transcripts`, then `sv`, `sv_transcripts` and `repeats` where the family has them                                                                                                                                     |
-| `sv_callers`         | the callers whose records `sv` holds: `sv`, `cnv`, both, or none in a family without the table. A named caller with no row of `sv` reported nothing. A manifest without the key was written before the key existed, and its family has none of the optional tables                                  |
+| `sv_callers`         | the callers whose records `sv` holds: `sv`, `cnv` or both, and an empty list in a family without the table. A named caller with no row of `sv` reported nothing                                                                                                                                     |
 | `alleles`            | the number of alleles, which is the number of rows of `variants`                                                                                                                                                                                                                                    |
 | `annotation`         | what annotated the alleles: the Annotator, the catalog, the sources named and the versions they pinned, the data sources the JSON header records, and the bundle's sources the run left out, each with its reason: `dated`, `not_applicable`, `current` or `unplaced`                               |
 | `gnomad_joint`       | the archive of gnomAD's joint values: its file name, its size and SHA-256 as the run read it, echtvar's version, and each field the archive's embedded configuration declares, with gnomAD's name for it, the archive's alias, its type, its multiplier and the value that stands for a missing one |
 | `omitted_columns`    | the columns of `variants` that the run left out because it did not name their dated source                                                                                                                                                                                                          |
-| `sv_annotation`      | what annotated the structural variants and copy number segments, in the form of `annotation`: the second Annotator run, which has the catalog and the sources of the first; empty in a family without `sv`, and absent from a manifest written before the key existed                               |
-| `sv_omitted_columns` | the columns of `sv` that the run left out because it did not name their dated source                                                                                                                                                                                                                |
+| `sv_annotation`      | what annotated the structural variants and copy number segments, in the form of `annotation`: the second Annotator run, which has the catalog and the sources of the first; null in a family without `sv`                                                                                           |
+| `sv_omitted_columns` | the columns of `sv` that the run left out because it did not name their dated source; an empty list in a family without `sv`                                                                                                                                                                        |
 
 The reasons, under `annotation.omitted`, follow the groups of sources in [Dated sources](annotation.md#dated-sources):
 `dated` for a dated source, `not_applicable` for one that does not apply to germline small variants, `current` for a
@@ -2129,7 +2146,8 @@ A member's `role` is `proband` for the member the run's sheet names as the famil
 file. A parent has its role only where sequenced, so that every role names a column of `variants`, and nobody else has a
 role. In a family whose sheet names no proband, no member has one. The roles are never derived from who is affected:
 with two affected siblings the sheet decides which is the proband, and with an empty field neither is. A member whose
-phenotype the PED file gives as unknown reads `"affected": false`.
+phenotype the PED file gives as unknown (`0` or `-9`) has `"affected": null`, which says neither affected nor
+unaffected.
 
 ### gnomAD's joint columns
 
