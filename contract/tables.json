@@ -83,7 +83,7 @@
                 "nullable": true
               },
               {
-                "name": "gene_id",
+                "name": "ensembl_gene_id",
                 "type": "string",
                 "nullable": true
               },
@@ -106,11 +106,6 @@
                 "name": "worst_transcript_id",
                 "type": "string",
                 "nullable": false
-              },
-              {
-                "name": "biotype",
-                "type": "string",
-                "nullable": true
               },
               {
                 "name": "mane_select_transcript_id",
@@ -421,8 +416,12 @@
           },
           {
             "name": "ft",
-            "type": "string",
-            "nullable": true
+            "type": "list",
+            "nullable": true,
+            "element": {
+              "type": "string",
+              "nullable": true
+            }
           },
           {
             "name": "dn",
@@ -1176,8 +1175,12 @@
           },
           {
             "name": "ft",
-            "type": "string",
-            "nullable": true
+            "type": "list",
+            "nullable": true,
+            "element": {
+              "type": "string",
+              "nullable": true
+            }
           },
           {
             "name": "dn",

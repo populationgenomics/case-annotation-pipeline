@@ -120,12 +120,11 @@ def _gene(symbol: str, hgnc_id: int | None) -> dict[str, Any]:
     mane = None if hgnc_id is None else f'NM-{symbol}.1'
     return {
         'gene_symbol': symbol,
-        'gene_id': None,
+        'ensembl_gene_id': None,
         'hgnc_id': hgnc_id,
         'worst_consequence': 'intron_variant',
         'worst_impact': 'modifier',
         'worst_transcript_id': f'ENST-{symbol}.1',
-        'biotype': 'mRNA',
         'mane_select_transcript_id': mane,
         'mane_select_consequence': mane and 'intron_variant',
         'mane_select_hgvsc': mane and f'{mane}:c.1+5A>G',
@@ -778,16 +777,38 @@ def test_a_call_outside_the_contract_is_refused(tmp_path: pathlib.Path, case: st
 
 def test_a_call_with_an_allele_missing_says_only_what_its_called_alleles_decide(tmp_path: pathlib.Path) -> None:
     # ./1 holds a copy of the allele whatever the missing allele is. 0/. and ./. say neither that the member carries the
-    # allele nor that it does not, since a missing allele may be the allele, and so they have no zygosity.
+    # allele nor that it does not, since a missing allele may be the allele. None of the three says on how many copies
+    # the allele lies, so none has a zygosity.
     inputs = _inputs(tmp_path)
     vcf = _text_vcf(tmp_path / 'call.vcf', _GT_AD, ('./1:10,10', '0/.:20,0', './.:0,0'), 'GT:AD')
     family_tables.assemble(**{**inputs, 'vcf_path': vcf})
     (row,) = _rows(tmp_path / 'out' / 'variants.parquet')
     assert [(row[s]['gt'], row[s]['carries'], row[s]['zygosity']) for s in ('S1', 'S2', 'S3')] == [
-        ('./1', True, 'het'),
+        ('./1', True, None),
         ('0/.', None, None),
         ('./.', None, None),
     ]
+
+
+def test_a_calls_filters_are_a_list_of_names_as_the_records_are(tmp_path: pathlib.Path) -> None:
+    inputs = _inputs(tmp_path)
+    formats = _GT_AD + '\n##FORMAT=<ID=FT,Number=1,Type=String,Description="x">'
+    vcf = _text_vcf(
+        tmp_path / 'call.vcf', formats, ('0/1:10,10:PASS', '0/0:20,0:.', '0/1:5,5:LowDepth;LowGQ'), 'GT:AD:FT'
+    )
+    family_tables.assemble(**{**inputs, 'vcf_path': vcf})
+    path = tmp_path / 'out' / 'variants.parquet'
+    schema = pq.read_schema(path)
+    assert schema.field('S1').type.field('ft').type == schema.field('filters').type == pa.list_(pa.string())
+    (row,) = _rows(path)
+    # A call that passed holds the one name PASS, as the record does, and a call without filters has no list.
+    assert row['filters'] == ['PASS']
+    assert [row[s]['ft'] for s in ('S1', 'S2', 'S3')] == [['PASS'], None, ['LowDepth', 'LowGQ']]
+    # One condition finds a filter among several.
+    found = _rows(
+        path, "SELECT variant_id FROM t WHERE list_contains(S3.ft, 'LowGQ') AND NOT list_contains(S1.ft, 'LowGQ')"
+    )
+    assert len(found) == 1
 
 
 _UNCALLED: Call = ((None, None), (0, 0), 0, 0, (0, 0, 0))

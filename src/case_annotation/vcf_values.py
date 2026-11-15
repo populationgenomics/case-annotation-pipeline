@@ -51,6 +51,22 @@ def text(sample: pysam.VariantRecordSample, key: str, formats: frozenset[str], w
     return held
 
 
+def names(sample: pysam.VariantRecordSample, key: str, formats: frozenset[str], where: str) -> list[str] | None:
+    """A field that holds names separated by `;`, such as a call's filters (FT), as a list; None where it is missing.
+
+    A call that passed its filters holds the one name PASS, as a record's FILTER does. A call without the field reads
+    as missing, since htslib writes the field of such a call as `.` in a record whose other calls have it. An empty
+    name fails.
+    """
+    held = text(sample, key, formats, where)
+    if held is None:
+        return None
+    parts = held.split(';')
+    if not all(parts):
+        raise ValueError(f'{where}: {key} {held!r} holds an empty name')
+    return parts
+
+
 def pair(
     sample: pysam.VariantRecordSample, key: str, formats: frozenset[str], where: str, of: str
 ) -> tuple[int | None, int | None]:
@@ -117,14 +133,15 @@ def carries(alleles: Sequence[int | None]) -> bool | None:
 
 
 def zygosity(alleles: Sequence[int | None]) -> Zygosity | None:
-    """The zygosity of a genotype of a record with one alternate allele; None where carries is None.
+    """The zygosity of a genotype of a record with one alternate allele; None where the genotype does not determine it.
 
     `hom_ref` for a genotype that does not hold the alternate allele, `hom_alt` where every allele is the alternate
-    one, also in a haploid call, and `het` for any other genotype that holds it, also beside a missing allele (./1).
+    one, also in a haploid call, and `het` for any other genotype that holds it. A genotype with a missing allele has
+    none, also where it holds a copy of the alternate allele (./1): the missing allele may be the alternate one or
+    another, so the genotype says that the allele is carried and not on how many copies.
     """
-    held = carries(alleles)
-    if held is None:
+    if None in alleles:
         return None
-    if not held:
+    if 1 not in alleles:
         return 'hom_ref'
     return 'hom_alt' if all(a == 1 for a in alleles) else 'het'
