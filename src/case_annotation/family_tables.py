@@ -12,7 +12,7 @@ the tables:
 - `transcripts.parquet`: the union's `transcripts` rows of the family's alleles;
 - `manifest.json`: the tables, the pedigree with the roles of the named proband and its parents, and what annotated the
   alleles: the Annotator's run and the archive of gnomAD's joint values;
-- `tables.md`: a copy of the notes on the tables in this package (REFERENCE), which the manifest names.
+- `tables.md`: a copy of the notes on the tables in this package (NOTES), which the manifest names.
 
 A family whose sheet row also names VCFs of its structural variants, its copy-number segments or its members' repeats
 (Structural) gets up to three more tables, which the manifest lists with the others:
@@ -68,10 +68,10 @@ SCHEMA_VERSION = importlib.resources.files('case_annotation').joinpath('tables-v
 # The notes on the tables (tables.md in this package): what a reader of the tables cannot see in them and gets wrong
 # without an error. They list no columns: a table's schema and the contract's tables.json do. A family's folder gets a
 # copy under the same name, so that a reader of the folder has the notes on the tables it reads.
-REFERENCE = 'tables.md'
-# The release of the pipeline's tools that writes a folder: the version of this package as installed, which the tests
-# hold to pyproject.toml, to nextflow.config and to the contract's workflow.json within one commit. A run takes its
-# tools from an image, so this is the release that the image was built from, whatever commit the workflow is of.
+NOTES = 'tables.md'
+# The release of the pipeline that writes a folder: the version of this package as installed, which the tests hold to
+# pyproject.toml, to nextflow.config and to the contract's workflow.json. A run takes its tools from an image, and the
+# family-tables command refuses to write for a workflow of another version, so the value is the workflow's as well.
 PIPELINE_VERSION = importlib.metadata.version('case-annotation-tools')
 ROW_GROUP_ROWS = 100_000
 PRIMARY = tuple(f'chr{c}' for c in (*range(1, 23), 'X', 'Y', 'M'))
@@ -285,7 +285,7 @@ class TableFile(pydantic.BaseModel, frozen=True, extra='forbid'):
     sha256: str
 
 
-class ReferenceFile(pydantic.BaseModel, frozen=True, extra='forbid'):
+class NotesFile(pydantic.BaseModel, frozen=True, extra='forbid'):
     """The notes on the tables in a family's folder, named as a table's file is (TableFile)."""
 
     path: str  # relative to the manifest
@@ -309,14 +309,14 @@ class FamilyMember(pydantic.BaseModel, frozen=True, extra='forbid'):
 
 class FamilyManifest(pydantic.BaseModel, frozen=True, extra='forbid'):
     schema_version: str
-    # The release of the tools that wrote the folder (PIPELINE_VERSION), the same in every run with one tools image.
+    # The release of the pipeline that wrote the folder (PIPELINE_VERSION), the same in every run of one release.
     pipeline_version: str
     family: str
     members: tuple[FamilyMember, ...]
     # variants and transcripts, then sv, sv_transcripts and repeats where the family has them
     tables: tuple[TableFile, ...]
-    # The notes on the tables (REFERENCE), which every folder holds beside its manifest.
-    reference: ReferenceFile
+    # The notes on the tables (NOTES), which every folder holds beside its manifest.
+    notes: NotesFile
     # The callers whose records sv holds; none in a family without the table. The tables and their rows do not say
     # it: a caller that reports nothing leaves no row.
     sv_callers: tuple[sv_tables.Caller, ...]
@@ -519,11 +519,11 @@ def _sha256(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
-def write_reference(output: pathlib.Path) -> ReferenceFile:
+def write_notes(output: pathlib.Path) -> NotesFile:
     """Copies the notes on the tables into a family's folder, byte for byte, and returns what names them there."""
-    path = output / REFERENCE
-    path.write_bytes(importlib.resources.files('case_annotation').joinpath(REFERENCE).read_bytes())
-    return ReferenceFile(path=path.name, bytes=path.stat().st_size, sha256=_sha256(path))
+    path = output / NOTES
+    path.write_bytes(importlib.resources.files('case_annotation').joinpath(NOTES).read_bytes())
+    return NotesFile(path=path.name, bytes=path.stat().st_size, sha256=_sha256(path))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -857,7 +857,7 @@ def assemble(
             for m in ped.members
         ),
         tables=tuple(files),
-        reference=write_reference(output),
+        notes=write_notes(output),
         sv_callers=tuple(caller for caller, _vcf in structural.callers),
         alleles=next(f.rows for f in files if f.table == 'variants'),
         annotation=info,

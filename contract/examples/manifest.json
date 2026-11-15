@@ -68,7 +68,7 @@
       "sha256": "5555555555555555555555555555555555555555555555555555555555555555"
     }
   ],
-  "reference": {
+  "notes": {
     "path": "tables.md",
     "bytes": 6000,
     "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"

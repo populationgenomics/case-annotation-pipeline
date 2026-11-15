@@ -222,6 +222,14 @@ def _family_tables_arguments(parser: argparse.ArgumentParser) -> None:
         help="the tables' layout version the caller expects, which names its output folder; another fails",
     )
     parser.add_argument(
+        '--pipeline-version',
+        required=True,
+        help=(
+            'the version of the pipeline whose workflow runs this command, which the manifest records as the release '
+            "that wrote the folder; another than this package's fails"
+        ),
+    )
+    parser.add_argument(
         '--output', type=path, required=True, help='the folder to write the tables into; it must not exist'
     )
     parser.add_argument('--scratch', type=path, help='a local folder for temporary files, rather than the default')
@@ -230,6 +238,11 @@ def _family_tables_arguments(parser: argparse.ArgumentParser) -> None:
 def _family_tables(args: argparse.Namespace) -> None:
     if args.schema_version != family_tables.SCHEMA_VERSION:
         raise SystemExit(f'the tables are of version {family_tables.SCHEMA_VERSION}, not {args.schema_version}')
+    if args.pipeline_version != family_tables.PIPELINE_VERSION:
+        raise SystemExit(
+            f'these tools are of version {family_tables.PIPELINE_VERSION} of the pipeline, and the workflow of '
+            f"{args.pipeline_version}: a run takes the tools image of the workflow's release"
+        )
     if (args.sv_annotation is None) != (args.sv_map is None):
         raise SystemExit('--sv-annotation and --sv-map are given together')
     sv_annotated = None

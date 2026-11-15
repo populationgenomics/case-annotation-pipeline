@@ -252,6 +252,30 @@
       "title": "GnomadJointInfo",
       "type": "object"
     },
+    "NotesFile": {
+      "description": "The notes on the tables in a family's folder, named as a table's file is (TableFile).",
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "bytes",
+        "sha256"
+      ],
+      "title": "NotesFile",
+      "type": "object"
+    },
     "OmissionReason": {
       "enum": [
         "dated",
@@ -277,30 +301,6 @@
         "reason"
       ],
       "title": "OmittedSource",
-      "type": "object"
-    },
-    "ReferenceFile": {
-      "description": "The notes on the tables in a family's folder, named as a table's file is (TableFile).",
-      "properties": {
-        "path": {
-          "title": "Path",
-          "type": "string"
-        },
-        "bytes": {
-          "title": "Bytes",
-          "type": "integer"
-        },
-        "sha256": {
-          "title": "Sha256",
-          "type": "string"
-        }
-      },
-      "required": [
-        "path",
-        "bytes",
-        "sha256"
-      ],
-      "title": "ReferenceFile",
       "type": "object"
     },
     "Role": {
@@ -404,8 +404,8 @@
       "title": "Tables",
       "type": "array"
     },
-    "reference": {
-      "$ref": "#/$defs/ReferenceFile"
+    "notes": {
+      "$ref": "#/$defs/NotesFile"
     },
     "sv_callers": {
       "items": {
@@ -455,7 +455,7 @@
     "family",
     "members",
     "tables",
-    "reference",
+    "notes",
     "sv_callers",
     "alleles",
     "annotation",

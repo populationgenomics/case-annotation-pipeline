@@ -343,6 +343,7 @@ process FAMILY_TABLES {
     path sv_annotation, stageAs: 'sv-union/*'
     path sv_map, stageAs: 'sv-union/*'
     val schema_version
+    val pipeline_version
 
     output:
     tuple val(family), path('variants.parquet'), path('transcripts.parquet'), path('manifest.json'), path('tables.md'), path('{sv,sv_transcripts,repeats}.parquet', arity: '0..3')
@@ -355,7 +356,7 @@ process FAMILY_TABLES {
         ${structuralOptions(sv, cnv, repeats)} ${vcfs(sv_alleles).collect { f -> "--sv-alleles ${f}" }.join(' ')} \\
         ${annotated} \\
         --annotation ${tables} --gnomad-joint ${gnomad_joint} --schema-version ${schema_version} \\
-        --output out --scratch /tmp
+        --pipeline-version ${pipeline_version} --output out --scratch /tmp
     mv out/* .
     """
 

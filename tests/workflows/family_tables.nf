@@ -125,6 +125,7 @@ workflow {
         sv_tables,
         sv_union.map,
         '0.5.0',
+        '0.3.0',
     )
     CHECK_TABLES(written.filter { w -> w[0] == 'family-a' }.map { w -> w[0..4] }, archive)
     CHECK_NO_ROLES(written.filter { w -> w[0] == 'family-b' }.map { w -> w[3] })
@@ -435,7 +436,7 @@ process INVENTED_ARCHIVE {
 // the pipeline's version as the installed package has it.
 process CHECK_TABLES {
     input:
-    tuple val(family), path(variants), path(transcripts), path(manifest), path(reference)
+    tuple val(family), path(variants), path(transcripts), path(manifest), path(notes)
     path archive
 
     script:
@@ -456,10 +457,10 @@ def float32(value):
 
 
 manifest = json.load(open('${manifest}'))
-reference = open('${reference}', 'rb').read()
-assert reference == importlib.resources.files('case_annotation').joinpath('tables.md').read_bytes()
-assert manifest['reference'] == {
-    'path': 'tables.md', 'bytes': len(reference), 'sha256': hashlib.sha256(reference).hexdigest()}, manifest
+notes = open('${notes}', 'rb').read()
+assert notes == importlib.resources.files('case_annotation').joinpath('tables.md').read_bytes()
+assert manifest['notes'] == {
+    'path': 'tables.md', 'bytes': len(notes), 'sha256': hashlib.sha256(notes).hexdigest()}, manifest
 assert manifest['pipeline_version'] == importlib.metadata.version('case-annotation-tools'), manifest
 rows = {t['table']: t['rows'] for t in manifest['tables']}
 assert {t: rows[t] for t in ('variants', 'transcripts')} == {'variants': 10, 'transcripts': 10}, rows

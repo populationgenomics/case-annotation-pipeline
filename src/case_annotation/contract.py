@@ -158,7 +158,7 @@ def _family_tables_workflow() -> dict[str, Any]:
                 'files': [
                     *({'name': f'{table}.parquet'} for table in family_tables.TABLES if table not in TABLE_COLUMNS),
                     {'name': 'manifest.json'},
-                    {'name': family_tables.REFERENCE},
+                    {'name': family_tables.NOTES},
                     *(
                         {'name': f'{table}.parquet', 'row_names_any_of': list(columns)}
                         for table, columns in TABLE_COLUMNS.items()
@@ -376,7 +376,7 @@ def example_manifest() -> family_tables.FamilyManifest:
             )
             for number, (table, rows) in enumerate(sizes.items(), start=1)
         ),
-        reference=family_tables.ReferenceFile(path=family_tables.REFERENCE, bytes=6_000, sha256='f' * 64),
+        notes=family_tables.NotesFile(path=family_tables.NOTES, bytes=6_000, sha256='f' * 64),
         sv_callers=('sv', 'cnv'),
         alleles=sizes['variants'],
         annotation=annotation,

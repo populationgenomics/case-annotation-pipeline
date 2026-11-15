@@ -198,14 +198,15 @@ workflow {
         sv_tables,
         sv_map,
         tablesVersion(),
+        workflow.manifest.version,
     )
     sv_published = annotates_sv ? sv_union.union.map { _group, vcf, index -> [vcf, index] }.flatten().mix(sv_tables, sv_map) : channel.empty()
 
     publish:
     union = union.map { _group, vcf, index -> [vcf, index] }.flatten().mix(tables, joint, sv_published)
     annotator = annotator
-    family_tables = written.map { family, variants, transcripts, manifest, tables_reference, larger ->
-        [family: family, files: [variants, transcripts, manifest, tables_reference] + larger]
+    family_tables = written.map { family, variants, transcripts, manifest, notes, larger ->
+        [family: family, files: [variants, transcripts, manifest, notes] + larger]
     }
 }
 

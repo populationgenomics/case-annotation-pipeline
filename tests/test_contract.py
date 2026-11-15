@@ -199,7 +199,8 @@ def test_an_empty_proband_reaches_the_tools_as_no_proband() -> None:
         assert f'case-annotation {stated}' in FAMILY_MODULES
         options = ['--family', 'f', '--ped', 'p', '--vcf', 'v', '--no-proband']
         if command == 'family-tables':
-            options += ['--annotation', 'a', '--gnomad-joint', 'g', '--schema-version', 's', '--output', 'o']
+            options += ['--annotation', 'a', '--gnomad-joint', 'g', '--schema-version', 's', '--pipeline-version', 'p']
+            options += ['--output', 'o']
         assert cli.parser().parse_args([command, *options]).proband is None
 
 
@@ -245,7 +246,7 @@ def test_the_example_sheet_meets_the_sheets_rules() -> None:
     )
     assert manifest.family == rows[0]['family']
     assert [member.sample_id for member in manifest.members if member.role == 'proband'] == [rows[0]['proband']]
-    assert {table.path for table in manifest.tables} | {'manifest.json', manifest.reference.path} == _folder(
+    assert {table.path for table in manifest.tables} | {'manifest.json', manifest.notes.path} == _folder(
         [name for name in COLUMNS if rows[0][name]]
     )
     assert len(rows[0]['repeat_vcfs'].split(COLUMNS['repeat_vcfs']['separator'])) == len(manifest.members)
@@ -441,7 +442,7 @@ def test_the_files_of_a_familys_folder_are_the_ones_the_workflow_publishes() -> 
         f'{", ".join(f"path({name!r})" for name in always)}, '
         f"path('{{{','.join(stems)}}}.parquet', arity: '0..{len(larger)}')"
     ) in FAMILY_MODULES
-    assert '[family: family, files: [variants, transcripts, manifest, tables_reference] + larger]' in FAMILY_TABLES
+    assert '[family: family, files: [variants, transcripts, manifest, notes] + larger]' in FAMILY_TABLES
     # The task's inputs by the sheet's columns, and the tables that the stub gives for them.
     inputs = {'sv_vcf': 'sv', 'cnv_vcf': 'cnv', 'repeat_vcfs': 'repeats'}
     by_columns: dict[tuple[str, ...], list[str]] = {}

@@ -27,14 +27,18 @@ manifest says who the proband is, and it lists the columns that the run left out
 - `<member>.zygosity` is null wherever the call does not determine it: where `<member>.carries` is null, for `./1`,
   which carries, and in `sv` for a gain of copies. A search for who carries a variant reads `<member>.carries`. A
   haploid call of the allele, as on a male's X, is `hom_alt`.
-- In a row of the copy-number caller, DRAGEN writes `sv.<member>.gt` as `./.` at the expected copy number and as `./1`
-  for a gain. Carrying and zygosity come from `sv.<member>.cn` there.
+- In a row of the copy-number caller, `sv.<member>.gt` is `./.` at the expected copy number and `./1` for a gain;
+  carrying and zygosity come from `sv.<member>.cn` there.
 - In `sv`, each caller leaves the other's fields null in all its rows: `sv.<member>.gq` and `sv.<member>.pl` in a
   copy-number row, `sv.<member>.cn` in the others. A floor on `sv.<member>.gq` removes every copy-number row, whose
   quality is `sv.<member>.qs`.
 - `repeats.<member>.gt` numbers the alleles of the member's own file. Compare `repeats.<member>.repcn` between members.
-- DRAGEN's GQ includes a prior against an allele that the population does not support, so a GQ floor tuned on GATK's
-  calls cuts true de novo calls.
+- `variants.filters`, `sv.filters`, `repeats.<member>.filters` and `<member>.ft` hold `['PASS']` for a pass. The first
+  three are never null, and empty for a FILTER of `.`. `<member>.ft` is never empty, and null for a call without FT.
+- The caller's own words and scales are passed through, and nothing in the folder names the caller: the names in those
+  filter lists, the values of `<member>.dn` and `repeats.<member>.so`, and the scales of `variants.qual`, `sv.qual`,
+  `<member>.gq`, `<member>.pl`, `<member>.dq`, `variants.<member>.msc`, `sv.<member>.qs` and `sv.<member>.sm`. A literal
+  or a threshold from another caller's habits is wrong without an error.
 
 ## Genes and consequences
 
@@ -44,8 +48,7 @@ manifest says who the proband is, and it lists the columns that the run left out
 - `variants.genes.ensembl_gene_id` is Ensembl's id, also where the entry's transcript is RefSeq's. `transcripts.gene_id`
   is NCBI's on a RefSeq row, so a join of the two loses the RefSeq rows.
 - `variants.hgnc_ids` and `sv.hgnc_ids` are null for a row without a transcript, and also where no gene of the row has
-  an HGNC id, which is one row in six. Such a gene is found by `transcripts.gene_symbol` or
-  `sv_transcripts.gene_symbol`.
+  an HGNC id, which is common. Such a gene is found by `transcripts.gene_symbol` or `sv_transcripts.gene_symbol`.
 - In `sv_transcripts.consequences`, every transcript that a deletion, an insertion or a duplication touches has
   `feature_truncation` or `feature_elongation`, also within an intron. What is hit is in
   `sv_transcripts.complete_overlap`, `sv_transcripts.protein_pos`, `sv_transcripts.exon` and `sv_transcripts.intron`.
@@ -56,10 +59,6 @@ manifest says who the proband is, and it lists the columns that the run left out
 - `sv.sv_type` has `DEL` where `sv_transcripts.variant_type` has the Annotator's `deletion` or `copy_number_loss`. A
   `CNV` there is a segment that one member loses and another gains: it has rows of both types in `sv_transcripts`, and
   its best-match and frequency columns in `sv` are null.
-- `sv.svlen` is the caller's: negative for a deletion, and null for a `CNV` segment. The length is `sv.end_pos` minus
-  `sv.pos`.
-- In DuckDB, `list_contains(variants.hgnc_ids, x)` reads one small column. `x = ANY(variants.hgnc_ids)`, and the same on
-  `variants.rsids`, took gigabytes of memory.
 
 ## Frequencies and ClinVar
 
@@ -74,8 +73,7 @@ manifest says who the proband is, and it lists the columns that the run left out
 - For an insertion, both are of entries within about 500 bases of `sv.pos`, of any length, at `sv.gnomad_sv_distance`:
   they say that an insertion is known nearby, not that this one is common.
 - A record with `sv.annotated_as = 'small_variant'` has neither, and has `sv.gnomad_genomes_af` and
-  `sv.gnomad_exomes_af` instead. `sv.gnomad_cnv_sf` is the fraction of samples that carry a variant, not an allele
-  frequency.
+  `sv.gnomad_exomes_af` instead.
 - `variants.clinvar_classification` is the best-reviewed record's, and records that disagree are only in
   `variants.clinvar_records`. `sv.clinvar_classification` is the best-overlapping record's, of another variant that
   overlaps the record at 0.5 or more (`sv.clinvar_overlap`). A null there does not say that nothing pathogenic lies

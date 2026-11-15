@@ -34,3 +34,10 @@ def test_the_pipelines_version_is_the_packages() -> None:
     assert version == tomllib.loads((repository / 'pyproject.toml').read_text('utf-8'))['project']['version']
     # A manifest gives the installed package's version, which is the same one where the environment is in step.
     assert version == family_tables.PIPELINE_VERSION
+    # The workflow gives its own version to the command that writes a family's folder, which refuses another, and the
+    # workflow's test gives the versions that this commit has.
+    workflow = (repository / 'family_tables.nf').read_text('utf-8')
+    assert '        tablesVersion(),\n        workflow.manifest.version,\n    )' in workflow
+    assert '--pipeline-version ${pipeline_version} ' in (repository / 'modules' / 'family_tables.nf').read_text('utf-8')
+    test = (repository / 'tests' / 'workflows' / 'family_tables.nf').read_text('utf-8')
+    assert f"        '{family_tables.SCHEMA_VERSION}',\n        '{version}',\n    )" in test

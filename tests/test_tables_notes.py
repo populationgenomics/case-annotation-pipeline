@@ -12,7 +12,7 @@ import pytest
 import case_annotation
 from case_annotation import contract, family_tables
 
-NOTES = importlib.resources.files(case_annotation).joinpath(family_tables.REFERENCE).read_text('utf-8')
+NOTES = importlib.resources.files(case_annotation).joinpath(family_tables.NOTES).read_text('utf-8')
 
 # The most that the file holds, in characters: a reader takes it whole at the start of its work on a family, so it
 # holds what a query gets wrong without an error and no list of columns.

@@ -571,14 +571,28 @@ def test_the_command_refuses_another_schema_version(tmp_path: pathlib.Path) -> N
     assert (inputs['output'] / 'manifest.json').exists()
 
 
+def test_the_command_refuses_a_workflow_of_another_release_of_the_pipeline(tmp_path: pathlib.Path) -> None:
+    inputs = _inputs(tmp_path)
+    with pytest.raises(SystemExit, match=r'and the workflow of 0\.0\.0'):
+        cli.main([*_tables_command(inputs, pipeline='0.0.0'), '--proband', 'S3'])
+    # Nothing is written for it, and the workflow's own release writes a manifest that gives it.
+    assert not inputs['output'].exists()
+    cli.main([*_tables_command(inputs), '--proband', 'S3'])
+    written = json.loads((inputs['output'] / 'manifest.json').read_text())
+    assert written['pipeline_version'] == family_tables.PIPELINE_VERSION
+
+
 def _tables_command(
-    inputs: Mapping[str, Any], output: pathlib.Path | None = None, version: str = family_tables.SCHEMA_VERSION
+    inputs: Mapping[str, Any],
+    output: pathlib.Path | None = None,
+    version: str = family_tables.SCHEMA_VERSION,
+    pipeline: str = family_tables.PIPELINE_VERSION,
 ) -> list[str]:
     """The family-tables command of the inputs, without its proband."""
     args = ['family-tables', '--family', 'fam-1', '--ped', str(inputs['ped_path']), '--vcf', str(inputs['vcf_path'])]
     args += ['--annotation', str(inputs['annotation']), '--gnomad-joint', str(inputs['joint'])]
     args += ['--output', str(output or inputs['output'])]
-    return [*args, '--schema-version', version]
+    return [*args, '--schema-version', version, '--pipeline-version', pipeline]
 
 
 def _check_command(inputs: Mapping[str, Any], family: str = 'fam-1') -> list[str]:
@@ -1114,14 +1128,14 @@ def test_a_familys_folder_holds_the_packages_notes_on_the_tables_as_its_manifest
     tmp_path: pathlib.Path, larger: bool
 ) -> None:
     manifest = family_tables.assemble(**{**_inputs(tmp_path), **(_larger(tmp_path) if larger else {})})
-    packaged = importlib.resources.files(case_annotation).joinpath(family_tables.REFERENCE).read_bytes()
-    written = (tmp_path / 'out' / manifest.reference.path).read_bytes()
+    packaged = importlib.resources.files(case_annotation).joinpath(family_tables.NOTES).read_bytes()
+    written = (tmp_path / 'out' / manifest.notes.path).read_bytes()
     # Byte for byte the file of the package that wrote the tables, so it describes the tables beside it.
     assert written == packaged
-    assert manifest.reference == family_tables.ReferenceFile(
+    assert manifest.notes == family_tables.NotesFile(
         path='tables.md', bytes=len(packaged), sha256=hashlib.sha256(packaged).hexdigest()
     )
-    recorded = json.loads((tmp_path / 'out' / 'manifest.json').read_text())['reference']
+    recorded = json.loads((tmp_path / 'out' / 'manifest.json').read_text())['notes']
     assert recorded == {'path': 'tables.md', 'bytes': len(written), 'sha256': hashlib.sha256(written).hexdigest()}
 
 
