@@ -6,10 +6,10 @@ manifest says who the proband is, and it lists the columns that the run left out
 
 ## Rows
 
-- `variants` holds the family's joint calls and is the place to search, with a row only for an allele that a member
-  carries. A member's genome VCF adds about one call in 8,000 to it, nearly all with GQ below 20 or in conflict with
-  inheritance, so reading it through or comparing it with the tables finds nothing that a search needs. Open it at one
-  position only, to ask why a specific allele that was expected has no row.
+- `variants` holds the calls of the family's VCF and is the place to search, with a row only for an allele that a member
+  carries. A member's own genome VCF can hold a few calls more: about one in 8,000 in the one trio compared, nine in ten
+  of them with GQ below 20. Reading it through or comparing it with the tables finds nothing that a search needs. Open
+  it at one position only, to ask why an allele that was expected has no row.
 - `variants` has one row per alternate allele, after `bcftools norm` split a site of several alleles and left-aligned
   its indels. `variants.pos`, `variants.ref`, `variants.alt` and `variants.variant_id` are of that form, so another
   file's spelling of an indel finds nothing.
@@ -62,7 +62,7 @@ manifest says who the proband is, and it lists the columns that the run left out
   `sv_transcripts.complete_overlap`, `sv_transcripts.protein_pos`, `sv_transcripts.exon` and `sv_transcripts.intron`.
 - The words are the Annotator's, and a wrong one matches nothing. `transcripts.impact` is lowercase: `high`, `moderate`,
   `low`, `modifier`. `transcripts.biotype` has `mRNA` where VEP has `protein_coding`. The consequence terms are VEP's
-  and some of the Annotator's own, such as `inframe_indel`. A protein's HGVS name has parentheses: `p.(Ser134Leu)`.
+  and some of the Annotator's own, such as `inframe_indel`.
 - `sv.sv_type` has `DEL` where `sv_transcripts.variant_type` has the Annotator's `deletion` or `copy_number_loss`. A
   `CNV` there is a segment that one member loses and another gains: it has rows of both types in `sv_transcripts`, its
   best-match and frequency columns in `sv` are null, its matches are in `sv.gnomad_sv_matches` and `sv.clinvar_records`,
