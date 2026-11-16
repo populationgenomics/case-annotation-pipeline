@@ -6,6 +6,10 @@ manifest says who the proband is, and it lists the columns that the run left out
 
 ## Rows
 
+- `variants` holds the calls of the family's VCF and is the place to search, with a row only for an allele that a member
+  carries. A member's own genome VCF can hold a few calls more: about one in 8,000 in the one trio compared, nine in ten
+  of them with GQ below 20. Reading it through or comparing it with the tables finds nothing that a search needs. Open
+  it at one position only, to ask why an allele that was expected has no row.
 - `variants` has one row per alternate allele, after `bcftools norm` split a site of several alleles and left-aligned
   its indels. `variants.pos`, `variants.ref`, `variants.alt` and `variants.variant_id` are of that form, so another
   file's spelling of an indel finds nothing.
@@ -32,6 +36,11 @@ manifest says who the proband is, and it lists the columns that the run left out
 - `repeats.<member>.gt` numbers the alleles of the member's own file. Compare `repeats.<member>.repcn` between members.
 - `variants.filters`, `sv.filters`, `repeats.<member>.filters` and `<member>.ft` hold `['PASS']` for a pass. The first
   three are never null, and empty for a FILTER of `.`. `<member>.ft` is never empty, and null for a call without FT.
+- `<member>.dn` and `<member>.dq` are null in every row of a member that the caller did not call as a child with its
+  parents: a comparison on them matches no row.
+- Some callers fold a population prior into `<member>.gq`, which lowers it for a true call that the population does not
+  support, as a newly arisen allele is, so a floor on it can drop those calls. Such a caller's `<member>.pl` can hold
+  the likelihoods without that prior.
 - The caller's own words and scales are passed through, and no column or manifest key names the caller: the names in
   those filter lists, the values of `<member>.dn` and `repeats.<member>.so`, and the scales of `variants.qual`,
   `sv.qual`, `<member>.gq`, `<member>.pl`, `<member>.dq`, `variants.<member>.msc`, `sv.<member>.qs` and
@@ -42,6 +51,8 @@ manifest says who the proband is, and it lists the columns that the run left out
 - `variants.worst_consequence` and `variants.worst_impact` are over the transcripts of all the allele's genes.
   `variants.genes` has one entry per gene, the most severe first, so `variants.genes[1]` alone files an allele under one
   of its genes. Group by gene through `unnest(variants.genes)`, `variants.hgnc_ids` or `transcripts`.
+- An allele in an exon of a non-coding RNA gene can have the impact `modifier` alone, so a threshold on
+  `variants.worst_impact` drops it. Find it by `non_coding_transcript_exon_variant` in `transcripts.consequences`.
 - `variants.genes.ensembl_gene_id` is Ensembl's id, also where the entry's transcript is RefSeq's. `transcripts.gene_id`
   is NCBI's on a RefSeq row, so a join of the two loses the RefSeq rows.
 - `variants.hgnc_ids` and `sv.hgnc_ids` are null for a row without a transcript, and also where no gene of the row has
@@ -51,10 +62,11 @@ manifest says who the proband is, and it lists the columns that the run left out
   `sv_transcripts.complete_overlap`, `sv_transcripts.protein_pos`, `sv_transcripts.exon` and `sv_transcripts.intron`.
 - The words are the Annotator's, and a wrong one matches nothing. `transcripts.impact` is lowercase: `high`, `moderate`,
   `low`, `modifier`. `transcripts.biotype` has `mRNA` where VEP has `protein_coding`. The consequence terms are VEP's
-  and some of the Annotator's own, such as `inframe_indel`. A protein's HGVS name has parentheses: `p.(Ser134Leu)`.
+  and some of the Annotator's own, such as `inframe_indel`.
 - `sv.sv_type` has `DEL` where `sv_transcripts.variant_type` has the Annotator's `deletion` or `copy_number_loss`. A
   `CNV` there is a segment that one member loses and another gains: it has rows of both types in `sv_transcripts`, its
-  best-match and frequency columns in `sv` are null, and `sv.<member>.carries` is true for a loss and for a gain.
+  best-match and frequency columns in `sv` are null, its matches are in `sv.gnomad_sv_matches` and `sv.clinvar_records`,
+  and `sv.<member>.carries` is true for a loss and for a gain.
 
 ## Frequencies and ClinVar
 
@@ -70,6 +82,8 @@ manifest says who the proband is, and it lists the columns that the run left out
   the nearest (`sv.gnomad_sv_distance`): an insertion is known nearby, which does not say that this one is common.
 - A record with `sv.annotated_as = 'small_variant'` has neither. It has `sv.gnomad_genomes_af`, `sv.gnomad_exomes_af`
   and the ClinVar records of its own allele instead.
+- A breakend and an insertion not annotated as a small variant never hold a ClinVar record: a null
+  `sv.clinvar_classification` there does not say that ClinVar lacks them.
 - `variants.clinvar_classification` is the best-reviewed record's, and records that disagree are only in
   `variants.clinvar_records`. For any other record of `sv`, `sv.clinvar_classification` is the best-overlapping
   record's, of another variant that overlaps it at 0.5 or more (`sv.clinvar_overlap`). A null there does not say that
