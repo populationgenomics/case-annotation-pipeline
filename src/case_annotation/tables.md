@@ -51,9 +51,8 @@ manifest says who the proband is, and it lists the columns that the run left out
 - `variants.worst_consequence` and `variants.worst_impact` are over the transcripts of all the allele's genes.
   `variants.genes` has one entry per gene, the most severe first, so `variants.genes[1]` alone files an allele under one
   of its genes. Group by gene through `unnest(variants.genes)`, `variants.hgnc_ids` or `transcripts`.
-- An allele whose only hit is an exon of a non-coding RNA gene has the impact `modifier`, so no filter on
-  `variants.worst_impact` finds it. Its consequence does: `non_coding_transcript_exon_variant` in
-  `variants.genes.worst_consequence`.
+- An allele in an exon of a non-coding RNA gene can have the impact `modifier` alone, so a threshold on
+  `variants.worst_impact` drops it. Find it by `non_coding_transcript_exon_variant` in `transcripts.consequences`.
 - `variants.genes.ensembl_gene_id` is Ensembl's id, also where the entry's transcript is RefSeq's. `transcripts.gene_id`
   is NCBI's on a RefSeq row, so a join of the two loses the RefSeq rows.
 - `variants.hgnc_ids` and `sv.hgnc_ids` are null for a row without a transcript, and also where no gene of the row has
@@ -66,8 +65,8 @@ manifest says who the proband is, and it lists the columns that the run left out
   and some of the Annotator's own, such as `inframe_indel`. A protein's HGVS name has parentheses: `p.(Ser134Leu)`.
 - `sv.sv_type` has `DEL` where `sv_transcripts.variant_type` has the Annotator's `deletion` or `copy_number_loss`. A
   `CNV` there is a segment that one member loses and another gains: it has rows of both types in `sv_transcripts`, its
-  best-match and frequency columns in `sv` are null, its matches are in `sv.gnomad_sv_matches`, and
-  `sv.<member>.carries` is true for a loss and for a gain.
+  best-match and frequency columns in `sv` are null, its matches are in `sv.gnomad_sv_matches` and `sv.clinvar_records`,
+  and `sv.<member>.carries` is true for a loss and for a gain.
 
 ## Frequencies and ClinVar
 
@@ -83,7 +82,7 @@ manifest says who the proband is, and it lists the columns that the run left out
   the nearest (`sv.gnomad_sv_distance`): an insertion is known nearby, which does not say that this one is common.
 - A record with `sv.annotated_as = 'small_variant'` has neither. It has `sv.gnomad_genomes_af`, `sv.gnomad_exomes_af`
   and the ClinVar records of its own allele instead.
-- A breakend and an insertion not annotated as a small variant are compared with no ClinVar record: a null
+- A breakend and an insertion not annotated as a small variant never hold a ClinVar record: a null
   `sv.clinvar_classification` there does not say that ClinVar lacks them.
 - `variants.clinvar_classification` is the best-reviewed record's, and records that disagree are only in
   `variants.clinvar_records`. For any other record of `sv`, `sv.clinvar_classification` is the best-overlapping
