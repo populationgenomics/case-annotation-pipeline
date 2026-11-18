@@ -716,9 +716,9 @@ at all, so the including pipeline has to know at its launch whether a family wil
 
 The proband's sample id is an empty string for a family in which none is designated, as in the sheet, and a family
 without the value stops the run. The workflow checks a family's id and its proband's sample id when the family arrives.
-It stops the run for a family with a structural-variant or a copy-number VCF where `annotates_sv` is `false`, and where
-it is `true` and no family has one. The sheet's other checks are the entry workflow's, so an including pipeline gives
-each family once, and each VCF of the larger variants with its index.
+It stops the run for a family with a structural-variant or a copy-number VCF where `annotates_sv` is `false`. Where it
+is `true` and no family has one, `SV_UNION` fails for want of sites. The sheet's other checks are the entry workflow's,
+so an including pipeline gives each family once, and each VCF of the larger variants with its index.
 
 The workflow emits the three values that `family_tables.nf` publishes, and a function gives the folder of each under the
 output directory ([What a run publishes](#what-a-run-publishes)).

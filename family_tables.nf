@@ -185,7 +185,9 @@ workflow ANNOTATE_FAMILIES {
         sv_sites = SV_SITES(
             passed.filter { _family, _vcf, _ped, _proband, sv, cnv, _repeats -> sv || cnv }.map { family, _vcf, _ped, _proband, sv, cnv, _repeats -> tuple(family, sv, cnv) }
         )
-        sv_group = sv_sites.toList().map { cut -> svGroup(checkSvSites(cut)) }
+        // Nothing is checked of the list: it is also what is left of the sites when another error ends the run, and
+        // an error raised for it would be reported in place of that one. SV_UNION's command fails without sites.
+        sv_group = sv_sites.toList().map { cut -> svGroup(cut) }
         sv_union = SV_UNION(settings.group, sv_group.map { g -> g.families }, sv_group.map { g -> g.sites })
     }
 
@@ -374,8 +376,7 @@ def checkIds(family, proband) {
 
 // A family as ANNOTATE_FAMILIES takes it, checked when it arrives: the entry workflow has checked its sheet before the
 // run starts, and an including pipeline's families come during the run. A structural-variant or copy-number VCF in a
-// run that was built without the steps of their union would reach FAMILY_TABLES with no annotation to read
-// (checkSvSites has the opposite case).
+// run that was built without the steps of their union would reach FAMILY_TABLES with no annotation to read.
 def checkRecord(record, annotates_sv) {
     def (family, _vcf, _ped, proband, sv, cnv, _repeats) = record
     // As for a sheet's row: read as empty, an absent proband would pass for a family in which none is designated.
@@ -387,15 +388,6 @@ def checkRecord(record, annotates_sv) {
         error("${family}: a structural-variant or copy-number VCF in a run with annotates_sv false, which has no step that annotates it")
     }
     return record
-}
-
-// The sites of the families with a structural-variant or a copy-number VCF, in a run that was built with the steps of
-// their union. Without such a family the union would be empty, and the Annotator would still run over it.
-def checkSvSites(sites) {
-    if (!sites) {
-        error('annotates_sv is true, and no family has a structural-variant or a copy-number VCF')
-    }
-    return sites
 }
 
 // The repeat VCFs a row names, one of each sequenced member of the family, separated by semicolons; none where the

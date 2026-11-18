@@ -350,8 +350,8 @@ jobs:
           done
           # Refused, each with its own message: a family id that is not a folder name; a family without a proband,
           # which is empty where none is designated; a structural-variant VCF in a run built without the steps of the
-          # structural variants; such a run without a family that has one; a setting that is none of the workflow's;
-          # a setting that every run needs, given as null.
+          # structural variants; a setting that is none of the workflow's; a setting that every run needs, given as
+          # null.
           refused() {
             local message=$1
             shift
@@ -365,7 +365,6 @@ jobs:
           refused 'fam-c: no proband' --family fam-c
           refused 'fam-c: a structural-variant or copy-number VCF in a run with annotates_sv false' \
             "${family[@]}" --with_sv
-          refused 'annotates_sv is true, and no family has' "${family[@]}" --annotates_sv
           refused 'ANNOTATE_FAMILIES takes the settings' "${family[@]}" --unknown_setting annotate
           refused 'the setting workers is null' "${family[@]}" --null_setting workers
 

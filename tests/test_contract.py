@@ -431,9 +431,10 @@ def test_a_family_of_an_including_pipeline_is_checked_as_it_arrives() -> None:
     assert 'if (!annotates_sv && (sv || cnv)) {\n        error(' in check
     assert check.rstrip().endswith('return record')
     assert 'FAMILY_CHECK(families.map { record -> checkRecord(record, annotates_sv) }, ' in FAMILY_TABLES
-    # A run with those steps stops as well when no family has such a VCF, before their union is written.
-    assert "if (!sites) {\n        error('annotates_sv is true, " in _function(FAMILY_TABLES, 'checkSvSites')
-    assert 'sv_group = sv_sites.toList().map { cut -> svGroup(checkSvSites(cut)) }' in FAMILY_TABLES
+    # Nothing is checked of the families together. A collected channel also ends when another error stops the run,
+    # and a check of what it then holds would report an error of its own in place of that one.
+    assert 'sv_group = sv_sites.toList().map { cut -> svGroup(cut) }' in FAMILY_TABLES
+    assert FAMILY_TABLES.count('.toList()') == 1
 
 
 def test_the_including_pipeline_of_the_stub_runs_publishes_as_the_entry_does() -> None:
