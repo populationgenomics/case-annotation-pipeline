@@ -183,7 +183,7 @@ process ILLUMINA_ANNOTATE {
 // The records of a VCF in the regions of a BED file, for a small annotation run.
 process SUBSET_VCF {
     tag "${name}"
-    label 'tools'
+    label 'annotation_tools'
 
     input:
     tuple val(name), path(vcf, stageAs: 'input/*'), path(index, stageAs: 'input/*')

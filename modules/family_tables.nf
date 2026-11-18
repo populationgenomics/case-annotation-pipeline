@@ -5,7 +5,7 @@
 // which SV_SITES cuts from each family's VCFs, SV_UNION joins and SV_ANNOTATION_TABLES converts the annotation of.
 // NORMALISE_FAMILY, NORMALISE_SV, UNION_SITES and SV_SITES run bcftools alone, GNOMAD_JOINT echtvar and
 // case-annotation, SV_UNION case-annotation and bcftools, and the others case-annotation, all in the tools image (label
-// 'tools').
+// 'annotation_tools').
 //
 // A family's structural-variant VCF, its copy-number VCF and its members' repeat VCFs are optional. A process takes
 // each as the files the sheet names with their indexes, staged in a folder of their own, or as an empty list.
@@ -18,7 +18,7 @@
 // image of another release of the pipeline than the workflow's (pipeline_version), before the Annotator runs.
 process FAMILY_CHECK {
     tag "${family}"
-    label 'tools'
+    label 'annotation_tools'
 
     input:
     tuple val(family), path(vcf, stageAs: 'input/*'), path(ped, stageAs: 'input/*'), val(proband), path(sv, stageAs: 'sv/*'), path(cnv, stageAs: 'cnv/*'), path(repeats, stageAs: 'repeats/*')
@@ -46,7 +46,7 @@ process FAMILY_CHECK {
 // fails: each would give its members two calls, and keeping one record would drop the other's calls.
 process NORMALISE_FAMILY {
     tag "${family}"
-    label 'tools'
+    label 'annotation_tools'
 
     input:
     tuple val(family), path(vcf, stageAs: 'input/*')
@@ -92,7 +92,7 @@ process NORMALISE_FAMILY {
 // alleles and breakends, which have no sequence to compare, are left out.
 process NORMALISE_SV {
     tag "${family}"
-    label 'tools'
+    label 'annotation_tools'
 
     input:
     tuple val(family), path(sv, stageAs: 'sv/*')
@@ -124,7 +124,7 @@ process NORMALISE_SV {
 // as a single base. tests/workflows/family_tables.nf compares the END of each record of the union with its caller's.
 process SV_SITES {
     tag "${family}"
-    label 'tools'
+    label 'annotation_tools'
 
     input:
     tuple val(family), path(sv, stageAs: 'sv/*'), path(cnv, stageAs: 'cnv/*')
@@ -162,7 +162,7 @@ process SV_SITES {
 // content. Like the union of the alleles, it reveals every family's records and stays internal.
 process SV_UNION {
     tag "${group}"
-    label 'tools'
+    label 'annotation_tools'
 
     input:
     val group
@@ -191,7 +191,7 @@ process SV_UNION {
 // The union of the families' sites, each allele once. It reveals every family's alleles, so it stays internal.
 process UNION_SITES {
     tag "${group}"
-    label 'tools'
+    label 'annotation_tools'
 
     input:
     val group
@@ -223,7 +223,7 @@ process UNION_SITES {
 // looks to Nextflow like the one the first run published, which is what a run into a bucket meets.
 process GNOMAD_JOINT {
     tag "${group}"
-    label 'tools'
+    label 'annotation_tools'
     machineType 'n2d-standard-4'
     cpus 4
     memory 16.GB
@@ -259,7 +259,7 @@ process GNOMAD_JOINT {
 // The stub gives its folder a fixed time, as the stub of GNOMAD_JOINT does.
 process ANNOTATION_TABLES {
     tag "${group}"
-    label 'tools'
+    label 'annotation_tools'
     machineType 'n2d-standard-16'
     cpus 16
     memory 64.GB
@@ -292,7 +292,7 @@ process ANNOTATION_TABLES {
 // The stub gives its folder a fixed time, as the stub of GNOMAD_JOINT does.
 process SV_ANNOTATION_TABLES {
     tag "${group}"
-    label 'tools'
+    label 'annotation_tools'
     machineType 'n2d-standard-4'
     cpus 4
     memory 16.GB
@@ -332,7 +332,7 @@ process SV_ANNOTATION_TABLES {
 // such a family.
 process FAMILY_TABLES {
     tag "${family}"
-    label 'tools'
+    label 'annotation_tools'
     machineType 'n2d-highmem-8'
     cpus 8
     memory 64.GB
