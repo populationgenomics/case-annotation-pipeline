@@ -143,8 +143,10 @@ jobs:
           printf '%s\n%s,\n' "${larger/sv_vcf/sv_vcfs}" "${a}" > stub/misspelt-column.csv
           printf "sources: [\"clin'var\"]\n" > stub/quoted-source.params.yaml
           printf "sources: [clinvar]\n" > stub/family-sources.params.yaml
+          # NXF_ANSI_LOG=false gives the log that has one line for each task, with the whole name of its process. The
+          # checks below look for those names, and the progress table of the other log cuts a long name short.
           family_run() {
-            docker run --rm -v "${PWD}:/src" -w /src \
+            docker run --rm -e NXF_ANSI_LOG=false -v "${PWD}:/src" -w /src \
               nextflow/nextflow:26.04.7@sha256:08a3a53e8fd317b22711b6fbabb268678b91b023b39099da2b902261515f438e \
               nextflow run family_tables.nf -stub-run -profile stub \
                 --group stub-group \
@@ -223,10 +225,10 @@ jobs:
           # union of the alleles, never beside a family.
           family_run --families /src/stub/larger.csv --annotated /src/stub/annotated --output_dir /src/stub/larger \
             > larger.log
-          # Nextflow's log has one line for each process, which names one of the process's tasks, and it lists a
-          # process without a task too. Each process below has one task, so its line names that task. What each
-          # family got is checked by what is published for it.
-          for task in 'NORMALISE_SV (fam-a)' 'SV_SITES (fam-a)' 'SV_UNION (stub-group)'; do
+          # The log has one line for each task, which names the task's process with the workflow before it. What
+          # each family got is checked by what is published for it.
+          for task in 'ANNOTATE_FAMILIES:NORMALISE_SV (fam-a)' 'ANNOTATE_FAMILIES:SV_SITES (fam-a)' \
+            'ANNOTATE_FAMILIES:SV_UNION (stub-group)'; do
             grep -qF "${task}" larger.log || { echo "did not run: ${task}" >&2; cat larger.log; exit 1; }
           done
           if grep -q ILLUMINA_ANNOTATE larger.log; then
@@ -252,7 +254,8 @@ jobs:
           # publishes both annotations and both logs with the one run config.
           family_run "${sources[@]}" "${annotator[@]}" --families /src/stub/larger.csv \
             --output_dir /src/stub/larger-annotated > larger-annotated.log
-          for task in 'ILLUMINA_ANNOTATE (stub-group)' 'ILLUMINA_ANNOTATE_SV'; do
+          for task in 'ANNOTATE_FAMILIES:ILLUMINA_ANNOTATE (stub-group)' \
+            'ANNOTATE_FAMILIES:ILLUMINA_ANNOTATE_SV (stub-group.sv)'; do
             grep -qF "${task}" larger-annotated.log || { echo "did not run: ${task}" >&2; cat larger-annotated.log; exit 1; }
           done
           for f in run.json out/stub-group.json.gz out/stub-group.sv.json.gz stub-group.annotate.log \
@@ -313,8 +316,9 @@ jobs:
             stub/annotated/out/stub-group.sv.json.gz stub/annotated/run.json stub/gnomad-joint.zip
           # tests/workflows/include/main.nf makes one family's files in the run and gives the family to the workflow.
           # -C gives the run that pipeline's config alone, as the run of a project that includes the workflow has.
+          # NXF_ANSI_LOG=false gives the log with one line for each task, as in the step above.
           included_run() {
-            docker run --rm -v "${PWD}:/src" -w /src \
+            docker run --rm -e NXF_ANSI_LOG=false -v "${PWD}:/src" -w /src \
               nextflow/nextflow:26.04.7@sha256:08a3a53e8fd317b22711b6fbabb268678b91b023b39099da2b902261515f438e \
               nextflow -C tests/workflows/include/nextflow.config run tests/workflows/include/main.nf -stub-run \
                 --group stub-group \

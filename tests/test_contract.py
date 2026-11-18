@@ -474,6 +474,15 @@ def test_the_folders_of_the_family_tables_are_the_ones_the_workflow_publishes_to
     assert 'annotator {\n        path annotatorFolder(params.group, params.catalog)' in FAMILY_TABLES
 
 
+def test_the_stub_runs_whose_logs_are_read_for_tasks_write_one_line_for_each_task() -> None:
+    # Nextflow's other log is a progress table, which cuts the name of a process short where it is long, as it is
+    # under the workflow's name. A check that looks for a task's whole name then fails, and one that looks for the
+    # absence of a name passes whatever ran.
+    for run in ('family_run', 'included_run'):
+        (body,) = re.findall(rf'\n          {run}\(\) \{{\n(.*?)\n          \}}\n', STUB_RUNS, flags=re.DOTALL)
+        assert 'docker run --rm -e NXF_ANSI_LOG=false ' in body
+
+
 def _named(folder: str) -> set[str]:
     """The run's values that a folder of the contract names in braces."""
     return {name for _text, name, _spec, _conversion in string.Formatter().parse(folder) if name is not None}
