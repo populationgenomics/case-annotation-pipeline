@@ -61,8 +61,9 @@ params {
 workflow {
 
     main:
-    // The config reads the Annotator's image (nextflow.config), so ANNOTATE_FAMILIES does not take it.
-    if (params.annotated == null && params.annotator_container == null) {
+    // The config reads the Annotator's image (nextflow.config), so ANNOTATE_FAMILIES does not take it. A run that
+    // names no sources is left to ANNOTATE_FAMILIES, which asks for them.
+    if (params.annotated == null && params.sources && params.annotator_container == null) {
         error('give annotator_container, which annotating needs')
     }
     def rows = params.families.splitCsv(header: true)
@@ -125,6 +126,12 @@ workflow ANNOTATE_FAMILIES {
     // annotate again.
     if (settings.keySet() != settingNames().toSet()) {
         error("ANNOTATE_FAMILIES takes the settings ${settingNames().join(', ')}, and was given ${settings.keySet().join(', ')}")
+    }
+    // The settings that the entry workflow's params require of every run or give a default.
+    ['group', 'reference', 'catalog', 'annotation_data', 'sources', 'workers', 'gnomad_joint'].each { name ->
+        if (settings[name] == null) {
+            error("ANNOTATE_FAMILIES: the setting ${name} is null, and every run needs a value of it")
+        }
     }
     // The names become file and folder names and go into command lines.
     [settings.group, settings.catalog].each { v ->
@@ -371,6 +378,10 @@ def checkIds(family, proband) {
 // (checkSvSites has the opposite case).
 def checkRecord(record, annotates_sv) {
     def (family, _vcf, _ped, proband, sv, cnv, _repeats) = record
+    // As for a sheet's row: read as empty, an absent proband would pass for a family in which none is designated.
+    if (proband == null) {
+        error("${family}: no proband, which is an empty string where none is designated")
+    }
     checkIds(family, proband)
     if (!annotates_sv && (sv || cnv)) {
         error("${family}: a structural-variant or copy-number VCF in a run with annotates_sv false, which has no step that annotates it")

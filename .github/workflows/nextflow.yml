@@ -323,10 +323,10 @@ jobs:
                 --annotation_data /src/stub/illumina-bundle \
                 --gnomad_joint /src/stub/gnomad-joint.zip \
                 --annotated /src/stub/annotated \
-                --proband A3 \
                 "$@"
           }
-          included_run --family fam-c --with_sv --annotates_sv --output_dir /src/stub/included > included.log
+          family=(--family fam-c --proband A3)
+          included_run "${family[@]}" --with_sv --annotates_sv --output_dir /src/stub/included > included.log
           # Each of the workflow's processes runs under the workflow's name, and the including pipeline's under its own.
           for task in 'Submitted process > MADE_FAMILY' 'ANNOTATE_FAMILIES:FAMILY_CHECK (fam-c)' \
             'ANNOTATE_FAMILIES:SV_UNION (stub-group)' 'ANNOTATE_FAMILIES:FAMILY_TABLES (fam-c)'; do
@@ -344,9 +344,10 @@ jobs:
             annotations/fam-c/tables-0.5.0-illumina-202610/{manifest.json,tables.md}; do
             test -L "stub/included/${f}" || { echo "not published: ${f}" >&2; exit 1; }
           done
-          # Refused, each with its own message: a family id that is not a folder name; a structural-variant VCF in a
-          # run built without the steps of the structural variants; such a run without a family that has one; a
-          # setting that is none of the workflow's.
+          # Refused, each with its own message: a family id that is not a folder name; a family without a proband,
+          # which is empty where none is designated; a structural-variant VCF in a run built without the steps of the
+          # structural variants; such a run without a family that has one; a setting that is none of the workflow's;
+          # a setting that every run needs, given as null.
           refused() {
             local message=$1
             shift
@@ -356,11 +357,13 @@ jobs:
             fi
             grep -qF "${message}" refused.log || { echo "expected: ${message}" >&2; cat refused.log; exit 1; }
           }
-          refused 'a family id may hold' --family 'fam c'
+          refused 'a family id may hold' --family 'fam c' --proband A3
+          refused 'fam-c: no proband' --family fam-c
           refused 'fam-c: a structural-variant or copy-number VCF in a run with annotates_sv false' \
-            --family fam-c --with_sv
-          refused 'annotates_sv is true, and no family has' --family fam-c --annotates_sv
-          refused 'ANNOTATE_FAMILIES takes the settings' --family fam-c --unknown_setting annotate
+            "${family[@]}" --with_sv
+          refused 'annotates_sv is true, and no family has' "${family[@]}" --annotates_sv
+          refused 'ANNOTATE_FAMILIES takes the settings' "${family[@]}" --unknown_setting annotate
+          refused 'the setting workers is null' "${family[@]}" --null_setting workers
 
   annotator:
     # Runs the Annotator's processes for real on an invented stand-in for the Annotator, in a stand-in for its image, and

@@ -342,7 +342,8 @@ def test_a_run_of_the_family_tables_annotates_or_reuses_as_the_workflow_asks() -
     assert found is not None
     # The entry workflow asks for the Annotator's image, which the config reads and ANNOTATE_FAMILIES does not take.
     (image,) = re.findall(
-        r"if \(params\.annotated == null && params\.(\w+) == null\) \{\s+error\('give \1, which", FAMILY_TABLES
+        r"if \(params\.annotated == null && params\.sources && params\.(\w+) == null\) \{\s+error\('give \1, which",
+        FAMILY_TABLES,
     )
     assert ways['annotate'] == {'needs': ['sources', image, *_names(found[1])], 'refuses': ['annotated']}
     assert {key: ways['reuse'][key] for key in ('needs', 'refuses')} == {'needs': ['annotated'], 'refuses': ['sources']}
@@ -392,6 +393,7 @@ def test_the_included_workflow_reads_nothing_of_the_launched_pipeline() -> None:
         assert part in included
         included = included.replace(part, '')
     assert '\nworkflow ANNOTATE_FAMILIES {\n' in included
+    assert 'checkFamily(' not in included
     for text in (included, FAMILY_MODULES, ANNOTATOR_MODULES):
         assert not re.search(r'\bparams\b|\bprojectDir\b|\bworkflow\.', _code(text))
     # Nothing in the script reads the project's folder or the manifest, the entry workflow included.
@@ -407,9 +409,14 @@ def test_the_settings_of_the_included_workflow_are_the_entrys_params() -> None:
     # The workflow refuses any other set of names, and reads each setting.
     included = _code(_block(FAMILY_TABLES, 'workflow ANNOTATE_FAMILIES'))
     assert 'if (settings.keySet() != settingNames().toSet()) {\n        error(' in included
-    (by_name,) = re.findall(r'\[([^\]]+)\]\.each \{ name ->\s+if \(settings\[name\] == null\)', included)
+    every_run, annotating = re.findall(r'\[([^\]]+)\]\.each \{ name ->\s+if \(settings\[name\] == null\)', included)
     read = set(re.findall(r'\bsettings\.(\w+)', included)) - {'keySet'}
-    assert read | set(_names(by_name)) == set(settings)
+    assert read | set(_names(every_run)) | set(_names(annotating)) == set(settings)
+    # A params block refuses a launch without a required param and fills in a default. A map does neither, so the
+    # workflow refuses a null for each setting whose param is required or has a default.
+    declared = {param['name']: param for param in _params('family_tables.nf')}
+    needed = [name for name in settings if declared[name]['required'] or 'default' in declared[name]]
+    assert _names(every_run) == needed
     # The pipeline of the stub runs gives exactly these.
     (given,) = re.findall(r'\n    def settings = \[\n(.*?)\n    \]\n', INCLUDING, flags=re.DOTALL)
     assert re.findall(r'^        (\w+): ', given, flags=re.MULTILINE) == settings
@@ -419,6 +426,7 @@ def test_a_family_of_an_including_pipeline_is_checked_as_it_arrives() -> None:
     # The entry workflow checks its sheet before the run starts. The workflow holds each family that it is given to
     # the sheet's patterns, and to the run's steps for the structural variants.
     check = _function(FAMILY_TABLES, 'checkRecord')
+    assert 'if (proband == null) {\n        error(' in check
     assert 'checkIds(family, proband)' in check
     assert 'if (!annotates_sv && (sv || cnv)) {\n        error(' in check
     assert check.rstrip().endswith('return record')

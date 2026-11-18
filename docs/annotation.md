@@ -707,17 +707,18 @@ The workflow takes three values.
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `families`     | a channel with one value for each family, `tuple(family, vcf, ped, proband, sv, cnv, repeats)`. The first four are the family's id, its VCF, its PED file and its proband's sample id, as in [the sheet's columns](#the-input-contract) of those names. The last three are the VCFs of its structural-variant caller, of its copy-number caller and of its members' repeats, each as a list of the VCFs and their `.tbi` indexes, which is empty for what the family does not have. |
 | `annotates_sv` | `true` where any family has a structural-variant or a copy-number VCF                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `settings`     | a map with the keys `group`, `reference`, `catalog`, `annotation_data`, `sources`, `workers`, `annotator`, `annotator_version`, `license_secret`, `annotated` and `gnomad_joint`. Each holds the value of [the param of that name](#params-of-family_tablesnf), with the param's type, and `null` where the run does not need it.                                                                                                                                                   |
+| `settings`     | a map with the keys `group`, `reference`, `catalog`, `annotation_data`, `sources`, `workers`, `annotator`, `annotator_version`, `license_secret`, `annotated` and `gnomad_joint`. Each holds the value of [the param of that name](#params-of-family_tablesnf), with the param's type. Only `annotated`, `annotator`, `annotator_version` and `license_secret` can be `null`, each in a run that does not need it.                                                                  |
 
 A family's files can be written during the run. `annotates_sv` and the settings are read while Nextflow builds the
 workflow, before any task runs. `annotates_sv` decides whether the run has the steps of the structural variants' union
 at all, so the including pipeline has to know at its launch whether a family will have such a VCF. The reference's
 `.fai` and the files of a reused annotation are looked for at the same point, so they exist when the run starts.
 
-The workflow checks a family's id and its proband's sample id when the family arrives. It stops the run for a family
-with a structural-variant or a copy-number VCF where `annotates_sv` is `false`, and where it is `true` and no family has
-one. The sheet's other checks are the entry workflow's, so an including pipeline gives each family once, and each VCF of
-the larger variants with its index.
+The proband's sample id is an empty string for a family in which none is designated, as in the sheet, and a family
+without the value stops the run. The workflow checks a family's id and its proband's sample id when the family arrives.
+It stops the run for a family with a structural-variant or a copy-number VCF where `annotates_sv` is `false`, and where
+it is `true` and no family has one. The sheet's other checks are the entry workflow's, so an including pipeline gives
+each family once, and each VCF of the larger variants with its index.
 
 The workflow emits the three values that `family_tables.nf` publishes, and a function gives the folder of each under the
 output directory ([What a run publishes](#what-a-run-publishes)).

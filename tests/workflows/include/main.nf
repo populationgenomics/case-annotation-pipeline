@@ -9,9 +9,10 @@
 include { ANNOTATE_FAMILIES ; unionFolder ; annotatorFolder ; familyFolder } from '../../../family_tables.nf'
 
 params {
-    // The family's id and its proband's sample id, and whether its files hold a structural-variant VCF.
+    // The family's id and its proband's sample id, and whether its files hold a structural-variant VCF. A run without
+    // proband gives the workflow a family without one, which it refuses.
     family: String
-    proband: String
+    proband: String?
     with_sv: Boolean = false
     // What ANNOTATE_FAMILIES takes beside the family: whether the run has the steps of the structural variants, and
     // its settings. The run reuses an annotation, so it names no source and nothing of the Annotator's.
@@ -22,8 +23,10 @@ params {
     annotation_data: Path
     annotated: Path
     gnomad_joint: Path
-    // A name to add to the settings, for the run that ANNOTATE_FAMILIES refuses for it.
+    // A name to add to the settings, and the name of a setting to give as null, for the runs that ANNOTATE_FAMILIES
+    // refuses for them.
     unknown_setting: String?
+    null_setting: String?
     output_dir: String
 }
 
@@ -47,7 +50,7 @@ workflow {
     annotated = ANNOTATE_FAMILIES(
         families,
         params.annotates_sv,
-        params.unknown_setting ? settings + [(params.unknown_setting): true] : settings,
+        settings + (params.unknown_setting ? [(params.unknown_setting): true] : [:]) + (params.null_setting ? [(params.null_setting): null] : [:]),
     )
 
     publish:
