@@ -19,6 +19,10 @@ Both are Nextflow workflows at the root of the repository.
 A run of `family_tables.nf` reads the data that a `download` published, so an operator who wants family tables runs
 `list`, `download` and then `family_tables.nf`.
 
+A pipeline that makes the families' files itself can include the steps of `family_tables.nf` as the workflow
+`ANNOTATE_FAMILIES` and annotate them in the same run
+([Including the workflow in another pipeline](docs/annotation.md#including-the-workflow-in-another-pipeline)).
+
 The pipeline's own steps are the Python package `case-annotation-tools` in `src/case_annotation/`, which installs the
 `case-annotation` command with one subcommand for each step. They run in the image `case-annotation-tools`, which
 [containers/tools/Dockerfile](containers/tools/Dockerfile) builds. The Annotator is Illumina's licensed software and
@@ -59,9 +63,9 @@ A change to the interface changes [the contract](contract/README.md) too.
 `uv run case-annotation contract --out contract` writes it again, and `pytest` fails while the committed folder differs
 from what the command writes.
 
-The `nextflow` workflow runs on a pull request too. It runs both workflows in stub mode, and it runs their processes in
-Docker on invented inputs, which are the tests in `tests/workflows/`. The comment that opens each test gives its
-command.
+The `nextflow` workflow runs on a pull request too. It runs both workflows in stub mode, and a pipeline that includes
+`ANNOTATE_FAMILIES`, and it runs the workflows' processes in Docker on invented inputs. These are the tests in
+`tests/workflows/`, and the comment that opens each test gives its command.
 
 [CLAUDE.md](CLAUDE.md) holds the rules of the repository, and [REVIEW.md](REVIEW.md) says what a review of a change
 reports.

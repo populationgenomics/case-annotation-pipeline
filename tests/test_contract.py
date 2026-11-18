@@ -32,6 +32,7 @@ FAMILY_TABLES = (REPOSITORY / 'family_tables.nf').read_text('utf-8')
 ANNOTATOR = (REPOSITORY / 'annotator.nf').read_text('utf-8')
 FAMILY_MODULES = (REPOSITORY / 'modules' / 'family_tables.nf').read_text('utf-8')
 ANNOTATOR_MODULES = (REPOSITORY / 'modules' / 'annotator.nf').read_text('utf-8')
+INCLUDING = (REPOSITORY / 'tests' / 'workflows' / 'include' / 'main.nf').read_text('utf-8')
 STUB_RUNS = (REPOSITORY / '.github' / 'workflows' / 'nextflow.yml').read_text('utf-8')
 
 SHEET = contract.families_sheet()
@@ -56,6 +57,18 @@ def _function(text: str, name: str) -> str:
     assert text.count(opening) == 1
     start = text.index(opening)
     return text[start : text.index('\n}\n', start)]
+
+
+def _block(text: str, opening: str) -> str:
+    """A block at the top level of a workflow's source, from the line that opens it to the one that closes it."""
+    assert text.count(f'\n{opening} {{\n') == 1
+    start = text.index(f'\n{opening} {{\n')
+    return text[start : text.index('\n}\n', start)]
+
+
+def _code(text: str) -> str:
+    """A workflow's source without its comment lines."""
+    return '\n'.join(line for line in text.splitlines() if not line.lstrip().startswith('//'))
 
 
 # ---- the folder ----
@@ -181,10 +194,11 @@ def test_the_sheets_required_columns_and_values_are_the_ones_the_workflow_asks_f
 
 
 def test_the_sheets_patterns_are_the_ones_the_workflow_matches() -> None:
-    check = _function(FAMILY_TABLES, 'checkFamily')
-    (family,) = re.findall(r'if \(!\(row\.family ==~ /(.+?)/\)\)', check)
+    assert 'checkIds(row.family, row.proband)' in _function(FAMILY_TABLES, 'checkFamily')
+    check = _function(FAMILY_TABLES, 'checkIds')
+    (family,) = re.findall(r'if \(!\(family ==~ /(.+?)/\)\)', check)
     # A proband is matched only where the row names one.
-    (proband,) = re.findall(r'if \(row\.proband && !\(row\.proband ==~ /(.+?)/\)\)', check)
+    (proband,) = re.findall(r'if \(proband && !\(proband ==~ /(.+?)/\)\)', check)
     patterns = {name: column['pattern'] for name, column in COLUMNS.items() if 'pattern' in column}
     assert patterns == {'family': family, 'proband': proband}
 
@@ -205,7 +219,8 @@ def test_an_empty_proband_reaches_the_tools_as_no_proband() -> None:
 
 def test_the_workflow_reads_the_vcfs_of_the_larger_variants_as_the_sheet_names_them() -> None:
     # One VCF in each of sv_vcf and cnv_vcf, and several in repeat_vcfs, between separators.
-    assert 'tuple(row.family, indexed([row.sv_vcf]), indexed([row.cnv_vcf]), indexed(repeatVcfs(row)))' in FAMILY_TABLES
+    larger = 'indexed([row.sv_vcf]), indexed([row.cnv_vcf]), indexed(repeatVcfs(row))'
+    assert f'tuple(row.family, file(row.vcf), file(row.ped), row.proband, {larger})' in FAMILY_TABLES
     separated = {name: column['separator'] for name, column in COLUMNS.items() if 'separator' in column}
     assert separated == {'repeat_vcfs': contract.SEPARATOR}
     assert f"row.repeat_vcfs.split('{contract.SEPARATOR}', -1)" in _function(FAMILY_TABLES, 'repeatVcfs')
@@ -220,7 +235,6 @@ def test_the_workflow_reads_the_vcfs_of_the_larger_variants_as_the_sheet_names_t
     assert f'return vcfs.findAll {{ vcf -> vcf }}.collectMany {{ vcf -> {beside} }}' in _function(
         FAMILY_TABLES, 'indexed'
     )
-    assert 'tuple(row.family, file(row.vcf), file(row.ped), row.proband)' in FAMILY_TABLES
 
 
 def test_the_example_sheet_meets_the_sheets_rules() -> None:
@@ -293,15 +307,15 @@ def test_the_reference_has_the_index_the_workflow_looks_for_beside_it() -> None:
     indexed = {param['name']: param['index_suffix'] for param in _params('family_tables.nf') if 'index_suffix' in param}
     (name, suffix), *others = indexed.items()
     assert not others
-    beside = f'params.{name}.resolveSibling("${{params.{name}.name}}{suffix}")'
+    beside = f'settings.{name}.resolveSibling("${{settings.{name}.name}}{suffix}")'
     assert re.search(rf'def (\w+) = {re.escape(beside)}\n\s+if \(!\1\.exists\(\)\) \{{\n\s+error\(', FAMILY_TABLES)
     assert FAMILY_TABLES.count('.resolveSibling(') == 1
 
 
 def test_the_patterns_of_the_family_tables_params_are_the_ones_the_workflow_matches() -> None:
     ((names, name),) = re.findall(r'\[([^\]]+)\]\.each \{ v ->\s+if \(!\(v ==~ /(.+?)/\)\)', FAMILY_TABLES)
-    (source,) = re.findall(r'params\.sources\.each \{ v ->\s+if \(!\(v ==~ /(.+?)/\)\)', FAMILY_TABLES)
-    matched = dict.fromkeys(re.findall(r'params\.(\w+)', names), name) | {'sources': source}
+    (source,) = re.findall(r'settings\.sources\.each \{ v ->\s+if \(!\(v ==~ /(.+?)/\)\)', FAMILY_TABLES)
+    matched = dict.fromkeys(re.findall(r'settings\.(\w+)', names), name) | {'sources': source}
     assert {param['name']: param['pattern'] for param in _params('family_tables.nf') if 'pattern' in param} == matched
     assert set(matched) == {'group', 'catalog', 'sources'}
 
@@ -320,13 +334,17 @@ def test_the_patterns_of_the_annotator_params_are_the_ones_the_workflow_matches(
 def test_a_run_of_the_family_tables_annotates_or_reuses_as_the_workflow_asks() -> None:
     ways = WORKFLOWS['family_tables.nf']['annotation']
     found = re.search(
-        r'if \(params\.annotated != null\) \{\s+if \(params\.sources\) \{\s+error\([^\n]+\)\s+\}\s+\}\s+'
-        r'else \{\s+if \(!params\.sources\) \{\s+error\([^\n]+\)\s+\}\s+'
-        r'\[([^\]]+)\]\.each \{ name ->\s+if \(params\[name\] == null\) \{\s+error\(',
+        r'if \(settings\.annotated != null\) \{\s+if \(settings\.sources\) \{\s+error\([^\n]+\)\s+\}\s+\}\s+'
+        r'else \{\s+if \(!settings\.sources\) \{\s+error\([^\n]+\)\s+\}\s+'
+        r'\[([^\]]+)\]\.each \{ name ->\s+if \(settings\[name\] == null\) \{\s+error\(',
         FAMILY_TABLES,
     )
     assert found is not None
-    assert ways['annotate'] == {'needs': ['sources', *_names(found[1])], 'refuses': ['annotated']}
+    # The entry workflow asks for the Annotator's image, which the config reads and ANNOTATE_FAMILIES does not take.
+    (image,) = re.findall(
+        r"if \(params\.annotated == null && params\.(\w+) == null\) \{\s+error\('give \1, which", FAMILY_TABLES
+    )
+    assert ways['annotate'] == {'needs': ['sources', image, *_names(found[1])], 'refuses': ['annotated']}
     assert {key: ways['reuse'][key] for key in ('needs', 'refuses')} == {'needs': ['annotated'], 'refuses': ['sources']}
     assert list(ways) == ['annotate', 'reuse']
     # Each param that a way names is declared, and none of them is required of every run.
@@ -338,22 +356,83 @@ def test_a_run_of_the_family_tables_annotates_or_reuses_as_the_workflow_asks() -
 
 def test_a_reuse_reads_the_files_the_workflow_resolves() -> None:
     reads = WORKFLOWS['family_tables.nf']['annotation']['reuse']['reads']
-    group = {'group': '${params.group}'}
+    group = {'group': '${settings.group}'}
     union, config, structural = (read['path'].format(**group) for read in reads)
-    assert f'params.annotated.resolve("{union}")' in FAMILY_TABLES
-    assert f"params.annotated.resolve('{config}')" in FAMILY_TABLES
+    assert f'settings.annotated.resolve("{union}")' in FAMILY_TABLES
+    assert f"settings.annotated.resolve('{config}')" in FAMILY_TABLES
     # The annotation of the structural variants is named after the group too, and read where a row names a VCF of them.
     assert 'def svName(group) {\n    return "${group}.sv"\n}' in FAMILY_MODULES
-    named = 'out/${svName(params.group)}.json.gz'
-    assert named.replace('${svName(params.group)}', '${params.group}.sv') == structural
-    assert f'params.annotated.resolve("{named}")' in FAMILY_TABLES
-    assert FAMILY_TABLES.count('params.annotated.resolve(') == len(reads)
+    named = 'out/${svName(settings.group)}.json.gz'
+    assert named.replace('${svName(settings.group)}', '${settings.group}.sv') == structural
+    assert f'settings.annotated.resolve("{named}")' in FAMILY_TABLES
+    assert FAMILY_TABLES.count('settings.annotated.resolve(') == len(reads)
     conditions = [read.get('some_row_names_any_of') for read in reads]
     assert conditions[:2] == [None, None]
-    assert f'def annotates_sv = rows.any {{ row -> {" || ".join(f"row.{name}" for name in conditions[2])} }}' in (
-        FAMILY_TABLES
+    # The entry workflow gives the condition as annotates_sv, the second of the three values that the workflow takes.
+    some_row = f'rows.any {{ row -> {" || ".join(f"row.{name}" for name in conditions[2])} }}'
+    assert f'ANNOTATE_FAMILIES(\n        families,\n        {some_row},\n' in FAMILY_TABLES
+    assert re.search(r'take:\n    families\n    annotates_sv\n    settings\n', FAMILY_TABLES)
+    assert re.search(r'if \(annotates_sv\) \{\s+def reused_sv = settings\.annotated\.resolve\(', FAMILY_TABLES)
+
+
+# ---- the workflow in another pipeline ----
+
+
+def test_the_included_workflow_reads_nothing_of_the_launched_pipeline() -> None:
+    # Params, the project's folder and the manifest are those of the pipeline that was launched, which is another one
+    # where a pipeline includes the workflow. Only the entry workflow's own parts read params: its declaration, the
+    # entry workflow, the output block and the check of a sheet's row.
+    included = FAMILY_TABLES
+    for part in (
+        _block(FAMILY_TABLES, 'params'),
+        _block(FAMILY_TABLES, 'workflow'),
+        _block(FAMILY_TABLES, 'output'),
+        _function(FAMILY_TABLES, 'checkFamily'),
+    ):
+        assert part in included
+        included = included.replace(part, '')
+    assert '\nworkflow ANNOTATE_FAMILIES {\n' in included
+    for text in (included, FAMILY_MODULES, ANNOTATOR_MODULES):
+        assert not re.search(r'\bparams\b|\bprojectDir\b|\bworkflow\.', _code(text))
+    # Nothing in the script reads the project's folder or the manifest, the entry workflow included.
+    assert not re.search(r'\bprojectDir\b|\bworkflow\.', _code(FAMILY_TABLES))
+
+
+def test_the_settings_of_the_included_workflow_are_the_entrys_params() -> None:
+    (listed,) = re.findall(r'\ndef settingNames\(\) \{\n\s*return \[([^\]]+)\]\n\}', FAMILY_TABLES)
+    settings = _names(listed)
+    assert len(set(settings)) == len(settings)
+    assert set(settings) < {param['name'] for param in _params('family_tables.nf')}
+    assert 'settingNames().collectEntries { name -> [name, params[name]] }' in FAMILY_TABLES
+    # The workflow refuses any other set of names, and reads each setting.
+    included = _code(_block(FAMILY_TABLES, 'workflow ANNOTATE_FAMILIES'))
+    assert 'if (settings.keySet() != settingNames().toSet()) {\n        error(' in included
+    (by_name,) = re.findall(r'\[([^\]]+)\]\.each \{ name ->\s+if \(settings\[name\] == null\)', included)
+    read = set(re.findall(r'\bsettings\.(\w+)', included)) - {'keySet'}
+    assert read | set(_names(by_name)) == set(settings)
+    # The pipeline of the stub runs gives exactly these.
+    (given,) = re.findall(r'\n    def settings = \[\n(.*?)\n    \]\n', INCLUDING, flags=re.DOTALL)
+    assert re.findall(r'^        (\w+): ', given, flags=re.MULTILINE) == settings
+
+
+def test_a_family_of_an_including_pipeline_is_checked_as_it_arrives() -> None:
+    # The entry workflow checks its sheet before the run starts. The workflow holds each family that it is given to
+    # the sheet's patterns, and to the run's steps for the structural variants.
+    check = _function(FAMILY_TABLES, 'checkRecord')
+    assert 'checkIds(family, proband)' in check
+    assert 'if (!annotates_sv && (sv || cnv)) {\n        error(' in check
+    assert check.rstrip().endswith('return record')
+    assert 'FAMILY_CHECK(families.map { record -> checkRecord(record, annotates_sv) }, ' in FAMILY_TABLES
+    # A run with those steps stops as well when no family has such a VCF, before their union is written.
+    assert "if (!sites) {\n        error('annotates_sv is true, " in _function(FAMILY_TABLES, 'checkSvSites')
+    assert 'sv_group = sv_sites.toList().map { cut -> svGroup(checkSvSites(cut)) }' in FAMILY_TABLES
+
+
+def test_the_including_pipeline_of_the_stub_runs_publishes_as_the_entry_does() -> None:
+    assert _code(_block(INCLUDING, 'output')) == _code(_block(FAMILY_TABLES, 'output'))
+    assert 'nextflow -C tests/workflows/include/nextflow.config run tests/workflows/include/main.nf -stub-run' in (
+        STUB_RUNS
     )
-    assert re.search(r'if \(annotates_sv\) \{\s+def reused_sv = params\.annotated\.resolve\(', FAMILY_TABLES)
 
 
 # ---- the published folders ----
@@ -362,24 +441,29 @@ def test_a_reuse_reads_the_files_the_workflow_resolves() -> None:
 def test_the_folders_of_the_family_tables_are_the_ones_the_workflow_publishes_to() -> None:
     publishes = WORKFLOWS['family_tables.nf']['publishes']
     values = {
-        'family': '${r.family}',
-        'group': '${params.group}',
+        'family': '${family}',
+        'group': '${group}',
         'tables_version': '${tablesVersion()}',
-        'catalog': '${params.catalog}',
+        'catalog': '${catalog}',
     }
-    # The workflow's own templates, with its expressions in place of the values.
+    # The workflow's own templates, with its expressions in place of the values. Each folder is a function, which the
+    # output block of a pipeline that includes the workflow calls too.
     tables_folder = contract._TABLES_FOLDER.format(**values)
-    assert f'def tablesFolder() {{\n    return "{tables_folder}"\n}}' in FAMILY_TABLES
-    assert 'return file("${projectDir}/src/case_annotation/tables-version.txt").text.trim()' in FAMILY_TABLES
+    assert f'def tablesFolder(catalog) {{\n    return "{tables_folder}"\n}}' in FAMILY_TABLES
+    assert 'return file("${moduleDir}/src/case_annotation/tables-version.txt").text.trim()' in FAMILY_TABLES
     family, union = (
-        publishes[name]['folder'].format(**values).replace(tables_folder, '${tablesFolder()}')
+        publishes[name]['folder'].format(**values).replace(tables_folder, '${tablesFolder(catalog)}')
         for name in ('family', 'union')
     )
-    assert all('${tablesFolder()}' in folder for folder in (family, union))
-    assert f'family_tables {{\n        path {{ r -> "{family}" }}' in FAMILY_TABLES
-    assert f'union {{\n        path "{union}"' in FAMILY_TABLES
+    assert all('${tablesFolder(catalog)}' in folder for folder in (family, union))
+    assert f'def familyFolder(family, catalog) {{\n    return "{family}"\n}}' in FAMILY_TABLES
+    assert f'def unionFolder(group, catalog) {{\n    return "{union}"\n}}' in FAMILY_TABLES
     annotator = publishes['annotator']['folder'].format(**values)
-    assert f'annotator {{\n        path "{annotator}"' in FAMILY_TABLES
+    assert f'def annotatorFolder(group, catalog) {{\n    return "{annotator}"\n}}' in FAMILY_TABLES
+    # The output block gives each function the run's values.
+    assert 'family_tables {\n        path { r -> familyFolder(r.family, params.catalog) }' in FAMILY_TABLES
+    assert 'union {\n        path unionFolder(params.group, params.catalog)\n        overwrite true' in FAMILY_TABLES
+    assert 'annotator {\n        path annotatorFolder(params.group, params.catalog)' in FAMILY_TABLES
 
 
 def _named(folder: str) -> set[str]:

@@ -70,8 +70,9 @@ SCHEMA_VERSION = importlib.resources.files('case_annotation').joinpath('tables-v
 # copy under the same name, so that a reader of the folder has the notes on the tables it reads.
 NOTES = 'tables.md'
 # The release of the pipeline that writes a folder: the version of this package as installed, which the tests hold to
-# pyproject.toml, to nextflow.config and to the contract's workflow.json. A run takes its tools from an image, and the
-# family-tables command refuses to write for a workflow of another version, so the value is the workflow's as well.
+# pyproject.toml, to pipeline-version.txt, to nextflow.config and to the contract's workflow.json. A run takes its tools
+# from an image, and the family-tables command refuses to write for a workflow of another version, which the workflow
+# reads from pipeline-version.txt, so the value is the workflow's as well.
 PIPELINE_VERSION = importlib.metadata.version('case-annotation-tools')
 ROW_GROUP_ROWS = 100_000
 PRIMARY = tuple(f'chr{c}' for c in (*range(1, 23), 'X', 'Y', 'M'))

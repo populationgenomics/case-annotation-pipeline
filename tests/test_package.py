@@ -26,18 +26,25 @@ def test_the_tables_version_is_the_one_line_of_its_file() -> None:
     assert text.removesuffix('\n') == family_tables.SCHEMA_VERSION
 
 
-def test_the_pipelines_version_is_the_packages() -> None:
+def test_the_pipelines_version_is_the_one_line_of_its_file_and_the_packages() -> None:
     repository = pathlib.Path(__file__).parent.parent
-    config = (repository / 'nextflow.config').read_text('utf-8')
-    (manifest,) = re.findall(r'^manifest \{\n(.*?)^\}', config, flags=re.MULTILINE | re.DOTALL)
-    (version,) = re.findall(r"^    version = '([^']+)'$", manifest, flags=re.MULTILINE)
+    text = (repository / 'pipeline-version.txt').read_text('utf-8')
+    assert re.fullmatch(r'\d+\.\d+\.\d+\n', text)
+    version = text.removesuffix('\n')
     assert version == tomllib.loads((repository / 'pyproject.toml').read_text('utf-8'))['project']['version']
     # A manifest gives the installed package's version, which is the same one where the environment is in step.
     assert version == family_tables.PIPELINE_VERSION
-    # The workflow gives its own version to the command that writes a family's folder, which refuses another, and the
-    # workflow's test gives the versions that this commit has.
+    # Nextflow reads the manifest of a project that it pulls from the config's text, with no folder to find the file
+    # in, so the config holds the version written out.
+    config = (repository / 'nextflow.config').read_text('utf-8')
+    (manifest,) = re.findall(r'^manifest \{\n(.*?)^\}', config, flags=re.MULTILINE | re.DOTALL)
+    assert re.findall(r"^    version = '([^']+)'$", manifest, flags=re.MULTILINE) == [version]
+    # The workflow reads the file from its own folder, which it also finds where another pipeline includes it, and
+    # gives the version to the command that writes a family's folder, which refuses another. The workflow's test
+    # gives the versions that this commit has.
     workflow = (repository / 'family_tables.nf').read_text('utf-8')
-    assert '        tablesVersion(),\n        workflow.manifest.version,\n    )' in workflow
+    assert 'def pipelineVersion() {\n    return file("${moduleDir}/pipeline-version.txt").text.trim()\n}' in workflow
+    assert '        tablesVersion(),\n        pipelineVersion(),\n    )' in workflow
     modules = (repository / 'modules' / 'family_tables.nf').read_text('utf-8')
     assert modules.count('--pipeline-version ${pipeline_version}') == 2
     test = (repository / 'tests' / 'workflows' / 'family_tables.nf').read_text('utf-8')
@@ -56,11 +63,12 @@ def test_the_first_step_of_a_run_refuses_tools_of_another_release_before_the_ann
     # the union of the sites of the normalised VCFs, and the union of the sites of the larger variants. A run that
     # reuses an annotation starts with the same step.
     order = (
-        'checked = FAMILY_CHECK(families.join(structural), workflow.manifest.version)',
-        'normalised = NORMALISE_FAMILY(\n        families.join(checked.map',
-        'union = UNION_SITES(params.group, normalised.sites.flatten().collect())',
-        'sv_sites = SV_SITES(\n            structural.join(checked.map',
-        'sv_union = SV_UNION(params.group, sv_group.map',
+        'checked = FAMILY_CHECK(families.map { record -> checkRecord(record, annotates_sv) }, pipelineVersion())',
+        'passed = families.join(checked.map { f -> [f] })',
+        'normalised = NORMALISE_FAMILY(\n        passed.map',
+        'union = UNION_SITES(settings.group, normalised.sites.flatten().collect())',
+        'sv_sites = SV_SITES(\n            passed.filter',
+        'sv_union = SV_UNION(settings.group, sv_group.map',
         'annotated = ILLUMINA_ANNOTATE(\n            union.map',
         'sv_annotated = ILLUMINA_ANNOTATE_SV(\n                sv_union.union.map',
     )

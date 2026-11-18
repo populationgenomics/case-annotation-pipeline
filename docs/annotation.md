@@ -84,9 +84,9 @@ The rest of the document has two halves, and each reads on its own.
   Illumina's data and runs the Annotator. It covers catalogs and sources, which of the sources are dated, the three
   modes, the licence and the machines.
 - [Family tables](#family-tables) is for the operator who runs `family_tables.nf`. It covers what the workflow takes,
-  its steps and what it publishes. [Reading the family tables](family-tables.md) is for the reader who writes the
-  queries, and the notes on the tables, [`tables.md`](../src/case_annotation/tables.md), hold what a table does not
-  show.
+  its steps, what it publishes and how another pipeline includes it. [Reading the family tables](family-tables.md) is
+  for the reader who writes the queries, and the notes on the tables, [`tables.md`](../src/case_annotation/tables.md),
+  hold what a table does not show.
 
 ## Annotating with Illumina's Annotator
 
@@ -665,6 +665,107 @@ sources, so one Annotator run serves all their alleles, and a second one all the
 
 Families that need another catalog or other sources form a group of their own. A large set of families with the same
 catalog and sources can still be split into groups, which only keeps each run to a manageable size.
+
+### Including the workflow in another pipeline
+
+The steps of `family_tables.nf` are a workflow of their own, `ANNOTATE_FAMILIES`, which another pipeline can include.
+Such a pipeline makes the families' files itself and gives each family to the workflow as a channel value, so that one
+run makes the files and annotates them, and nothing writes a families sheet. A run of `family_tables.nf` goes through
+the same workflow: its entry workflow reads the sheet and the params, and publishes what `ANNOTATE_FAMILIES` emits. In a
+run's log each process therefore has the workflow's name before its own, as `ANNOTATE_FAMILIES:FAMILY_CHECK`.
+
+```groovy
+include { ANNOTATE_FAMILIES ; unionFolder ; annotatorFolder ; familyFolder } from './case-annotation-pipeline/family_tables.nf'
+
+workflow {
+    main:
+    annotated = ANNOTATE_FAMILIES(families, annotates_sv, settings)
+
+    publish:
+    union = annotated.union
+    annotator = annotated.annotator
+    family_tables = annotated.family_tables
+}
+
+output {
+    union {
+        path unionFolder(params.group, params.catalog)
+        overwrite true
+    }
+    annotator {
+        path annotatorFolder(params.group, params.catalog)
+    }
+    family_tables {
+        path { r -> familyFolder(r.family, params.catalog) }
+    }
+}
+```
+
+The workflow takes three values.
+
+| Value          | What it holds                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `families`     | a channel with one value for each family, `tuple(family, vcf, ped, proband, sv, cnv, repeats)`. The first four are the family's id, its VCF, its PED file and its proband's sample id, as in [the sheet's columns](#the-input-contract) of those names. The last three are the VCFs of its structural-variant caller, of its copy-number caller and of its members' repeats, each as a list of the VCFs and their `.tbi` indexes, which is empty for what the family does not have. |
+| `annotates_sv` | `true` where any family has a structural-variant or a copy-number VCF                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `settings`     | a map with the keys `group`, `reference`, `catalog`, `annotation_data`, `sources`, `workers`, `annotator`, `annotator_version`, `license_secret`, `annotated` and `gnomad_joint`. Each holds the value of [the param of that name](#params-of-family_tablesnf), with the param's type, and `null` where the run does not need it.                                                                                                                                                   |
+
+A family's files can be written during the run. `annotates_sv` and the settings are read while Nextflow builds the
+workflow, before any task runs. `annotates_sv` decides whether the run has the steps of the structural variants' union
+at all, so the including pipeline has to know at its launch whether a family will have such a VCF. The reference's
+`.fai` and the files of a reused annotation are looked for at the same point, so they exist when the run starts.
+
+The workflow checks a family's id and its proband's sample id when the family arrives. It stops the run for a family
+with a structural-variant or a copy-number VCF where `annotates_sv` is `false`, and where it is `true` and no family has
+one. The sheet's other checks are the entry workflow's, so an including pipeline gives each family once, and each VCF of
+the larger variants with its index.
+
+The workflow emits the three values that `family_tables.nf` publishes, and a function gives the folder of each under the
+output directory ([What a run publishes](#what-a-run-publishes)).
+
+| Emitted         | What it holds                                                                           | Folder                            |
+| --------------- | --------------------------------------------------------------------------------------- | --------------------------------- |
+| `union`         | each file and folder of the two unions                                                  | `unionFolder(group, catalog)`     |
+| `annotator`     | each file of the Annotator's output, and nothing in a run that reuses an annotation     | `annotatorFolder(group, catalog)` |
+| `family_tables` | a record of each family, with its id as `family` and the files of its folder as `files` | `familyFolder(family, catalog)`   |
+
+The output of `union` needs `overwrite true`, which removes the tables of an earlier run into the same folder before the
+new ones are written.
+
+The workflow gives its steps the version in `pipeline-version.txt` of its own repository, whatever the manifest of the
+launched pipeline says, and the tools image has to be of that release
+([Checks that stop a run](#checks-that-stop-a-run)).
+
+An included workflow comes without this repository's `nextflow.config`. Its processes keep the directives that are
+written in them, which are the machine type, the CPUs, the memory and the disk of the larger steps. The config of the
+including pipeline provides the rest:
+
+- the image of each process: the Annotator's image for `ILLUMINA_ANNOTATE` and `ILLUMINA_ANNOTATE_SV`, and
+  `case-annotation-tools` of the workflow's release for every other process
+- a machine for the steps that name none, which are `FAMILY_CHECK`, the normalisations and the steps of the unions'
+  sites (`e2-standard-2` in this repository's config)
+- outbound access for the VMs of the Annotator's steps
+  ([The Annotator's image](annotator-image.md#the-helper-that-fetches-the-key))
+- anything else that it wants of this repository's config, such as `errorStrategy = 'finish'` and the Google Batch
+  settings
+
+The processes carry the labels `tools` and `illumina`, and this repository's config selects the two images by them. An
+including pipeline whose own processes carry one of these labels for another image selects by the process's name
+instead, since a `withName` selector applies over a `withLabel` selector:
+
+```groovy
+process {
+    withName: 'ANNOTATE_FAMILIES:.*' {
+        container = params.annotation_tools_container
+    }
+    withName: 'ANNOTATE_FAMILIES:ILLUMINA_ANNOTATE.*' {
+        container = params.annotator_container
+    }
+}
+```
+
+The Annotator's selector comes second, because the later of two `withName` selectors that match a process applies. A
+pattern matches a process's whole name, which also has the name of every workflow that the call of `ANNOTATE_FAMILIES`
+lies in.
 
 ### gnomAD's joint values
 

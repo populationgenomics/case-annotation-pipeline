@@ -8,8 +8,9 @@ on:
 
 jobs:
   stub-runs:
-    # Runs both workflows in stub mode: the wiring between processes, with no Annotator and no cloud. Linting is in the
-    # pre-commit config. The image is the one the nextflow-lint hook pins.
+    # Runs both workflows in stub mode, and the family tables' workflow as another pipeline includes it: the wiring
+    # between processes, with no Annotator and no cloud. Linting is in the pre-commit config. The image is the one the
+    # nextflow-lint hook pins.
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -302,6 +303,64 @@ jobs:
             --families /src/stub/misspelt-column.csv
           refused 'stub-group: /src/stub/annotated-no-sv holds no out/stub-group.sv.json.gz' \
             --families /src/stub/larger.csv --annotated /src/stub/annotated-no-sv
+
+      - name: Stub runs of a pipeline that includes the family tables' workflow, and of what the workflow refuses
+        run: |
+          mkdir -p stub/illumina-bundle/runConfigs stub/annotated/out
+          echo '{"data": {"catalog": "202610", "versionSelector": {"clinvar": {"SmallVariant": "1"}}}}' \
+            > stub/illumina-bundle/runConfigs/bundle.json
+          touch stub/reference.fa stub/reference.fa.fai stub/annotated/out/stub-group.json.gz \
+            stub/annotated/out/stub-group.sv.json.gz stub/annotated/run.json stub/gnomad-joint.zip
+          # tests/workflows/include/main.nf makes one family's files in the run and gives the family to the workflow.
+          # -C gives the run that pipeline's config alone, as the run of a project that includes the workflow has.
+          included_run() {
+            docker run --rm -v "${PWD}:/src" -w /src \
+              nextflow/nextflow:26.04.7@sha256:08a3a53e8fd317b22711b6fbabb268678b91b023b39099da2b902261515f438e \
+              nextflow -C tests/workflows/include/nextflow.config run tests/workflows/include/main.nf -stub-run \
+                --group stub-group \
+                --reference /src/stub/reference.fa \
+                --catalog 202610 \
+                --annotation_data /src/stub/illumina-bundle \
+                --gnomad_joint /src/stub/gnomad-joint.zip \
+                --annotated /src/stub/annotated \
+                --proband A3 \
+                "$@"
+          }
+          included_run --family fam-c --with_sv --annotates_sv --output_dir /src/stub/included > included.log
+          # Each of the workflow's processes runs under the workflow's name, and the including pipeline's under its own.
+          for task in 'Submitted process > MADE_FAMILY' 'ANNOTATE_FAMILIES:FAMILY_CHECK (fam-c)' \
+            'ANNOTATE_FAMILIES:SV_UNION (stub-group)' 'ANNOTATE_FAMILIES:FAMILY_TABLES (fam-c)'; do
+            grep -qF "${task}" included.log || { echo "did not run: ${task}" >&2; cat included.log; exit 1; }
+          done
+          if grep -q ILLUMINA_ANNOTATE included.log; then
+            cat included.log
+            exit 1
+          fi
+          # What it publishes lies where a run of family_tables.nf publishes it.
+          union=annotation-unions/stub-group/tables-0.5.0-illumina-202610
+          for f in "${union}"/{stub-group.vcf.gz,stub-group.vcf.gz.tbi,tables,gnomad_joint} \
+            "${union}"/{stub-group.sv.vcf.gz,stub-group.sv.map.parquet,sv_annotation} \
+            annotations/fam-c/tables-0.5.0-illumina-202610/{variants,transcripts,sv,sv_transcripts}.parquet \
+            annotations/fam-c/tables-0.5.0-illumina-202610/{manifest.json,tables.md}; do
+            test -L "stub/included/${f}" || { echo "not published: ${f}" >&2; exit 1; }
+          done
+          # Refused, each with its own message: a family id that is not a folder name; a structural-variant VCF in a
+          # run built without the steps of the structural variants; such a run without a family that has one; a
+          # setting that is none of the workflow's.
+          refused() {
+            local message=$1
+            shift
+            if included_run --output_dir /src/stub/included-refused "$@" > refused.log 2>&1; then
+              echo "accepted: $*" >&2
+              exit 1
+            fi
+            grep -qF "${message}" refused.log || { echo "expected: ${message}" >&2; cat refused.log; exit 1; }
+          }
+          refused 'a family id may hold' --family 'fam c'
+          refused 'fam-c: a structural-variant or copy-number VCF in a run with annotates_sv false' \
+            --family fam-c --with_sv
+          refused 'annotates_sv is true, and no family has' --family fam-c --annotates_sv
+          refused 'ANNOTATE_FAMILIES takes the settings' --family fam-c --unknown_setting annotate
 
   annotator:
     # Runs the Annotator's processes for real on an invented stand-in for the Annotator, in a stand-in for its image, and
