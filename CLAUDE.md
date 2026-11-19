@@ -12,12 +12,11 @@ uv run pre-commit run --all-files
 uv run case-annotation contract --out contract
 ```
 
-## This repository will be public
+## This repository is public
 
-The repository is private for now and will be made public later. Publishing exposes its whole history, so every file,
-commit message, branch name, pull request, issue and review comment written now has to be fit to publish. Rewriting
-history before publication would not remove anything: pull requests keep their own commits on GitHub, along with their
-review comments.
+Anyone can read the repository and its whole history, so every file, commit message, branch name, pull request, issue
+and review comment has to be fit to publish when it is written. Rewriting history would not remove anything: pull
+requests keep their own commits on GitHub, along with their review comments.
 
 - No patient data, and nothing derived from a real case: no real variant tied to a phenotype, no case or sample
   accession, no text from a real referral or report. Fixtures are invented and say so.
