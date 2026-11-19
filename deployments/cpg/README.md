@@ -63,10 +63,6 @@ The analysis-runner launches with Nextflow's v2 syntax parser, which the pipelin
 the commit to be on `main`. The dataset has to allow this repository for the analysis-runner. The repository is public,
 so Seqera needs no credential to clone it.
 
-Where the analysis-runner is not installed, `uvx analysis-runner@3.5.0` runs it in place of `analysis-runner` in these
-commands. `uvx` does not read `[tool.uv]` in `pyproject.toml`, so the dependency age gate for the tool's own
-dependencies is the `exclude-newer` setting of the operator's own uv configuration.
-
 A run's input files are given as `gs://` paths that the dataset's accounts can read.
 
 ## The Annotator
