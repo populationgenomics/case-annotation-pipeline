@@ -1652,6 +1652,8 @@ def _matched(sv_id: str, site: sv_sites.Site) -> dict[str, Any]:
     sources: dict[str, Any] = {}
     transcripts = [_GENE]
     if sv_id == 'inv:DEL:1':
+        partner = invented_sv_annotation.fusion_partner('ENST08.1', 'GENEC', intron='4/17')
+        transcripts = [_GENE | {'geneFusions': [partner]}]
         sources['gnomad'] = [entry('inv-gnomad-1', 1001, 5000, 'deletion', 0.25, **overlaps(1.0))]
         sources['clinvar'] = [
             record('VCV9', 1001, 4000, 'deletion', 'Pathogenic', single, '2099-01-01', **overlaps(0.75))
@@ -1665,9 +1667,9 @@ def _matched(sv_id: str, site: sv_sites.Site) -> dict[str, Any]:
         sources['clinvar'] = [
             record('VCV1' if loss else 'VCV2', 5001, 15000, kind, 'Benign', single, '2099-01-01', **overlaps(1.0))
         ]
-        transcripts = [
-            _GENE | {'transcript': 'ENST09.1'} if loss else _GENE | {'transcript': 'ENST08.1', 'hgnc': 'GENEC'}
-        ]
+        # The loss ends inside a transcript of GENEA, and the gain covers one of GENEC whole.
+        whole = {'transcript': 'ENST08.1', 'hgnc': 'GENEC', 'completeOverlap': True}
+        transcripts = [_GENE | {'transcript': 'ENST09.1'} if loss else _GENE | whole]
     for source in sources.values():
         for held in source:
             held['variantType'] = {'loss': 'copy_number_loss', 'gain': 'copy_number_gain'}.get(
@@ -1701,6 +1703,14 @@ def test_each_record_has_the_annotation_of_its_site(tmp_path: pathlib.Path) -> N
     assert deletion['hgnc_ids'] == [gene]
     transcripts = [r for r in _rows(tmp_path / 'out' / 'sv_transcripts.parquet') if r['sv_id'] == 'inv:DEL:1']
     assert [(r['gene_symbol'], r['hgnc_id']) for r in transcripts] == [('GENEA', gene)]
+    # The deletion ends inside that transcript, which the Annotator fuses with one of another gene.
+    assert deletion['breakpoint_hgnc_ids'] == [gene]
+    assert [(p['transcript_id'], p['hgnc_id'], p['intron']) for p in transcripts[0]['fusion_partners']] == [
+        ('ENST08.1', invented_sv_annotation.HGNC['GENEC'], '4/17')
+    ]
+    others = [r for r in _rows(tmp_path / 'out' / 'sv_transcripts.parquet') if r['sv_id'] != 'inv:DEL:1']
+    assert others
+    assert all(r['fusion_partners'] is None for r in others)
     # A record without a match has the columns, empty; the short insertion is annotated as a small variant.
     assert rows['inv:DEL:3']['gnomad_sv_id'] is None
     assert rows['inv:DEL:3']['gnomad_sv_matches'] is None
@@ -1733,6 +1743,7 @@ def test_a_record_of_two_alleles_keeps_the_matches_of_both_and_no_summary(tmp_pa
     )
     # The genes of both alleles' transcripts, and each allele's own transcripts under its own type.
     assert segment['hgnc_ids'] == [invented_sv_annotation.HGNC[gene] for gene in ('GENEA', 'GENEC')]
+    assert segment['breakpoint_hgnc_ids'] == [invented_sv_annotation.HGNC['GENEA']]
     transcripts = [
         (r['variant_type'], r['transcript_id'], r['chrom'], r['pos'], r['end_pos'])
         for r in _rows(out / 'sv_transcripts.parquet')

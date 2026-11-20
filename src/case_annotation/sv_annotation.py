@@ -4,9 +4,11 @@ The Annotator reads the union of the group's sites (sv_sites), one allele per re
 record, which echoes the record's ID. This module reads the document line by line, as annotation_tables reads the one
 of the small variants, and writes two tables of the union, each a folder of parts:
 
-- `sv`, one row per site: how the Annotator treated it, the interval it annotated, and what it matched in gnomAD's
-  structural variants and copy-number variants, in the 1000 Genomes structural variants and in ClinVar;
-- `sv_transcripts`, one row per site and transcript the Annotator lists for it.
+- `sv`, one row per site: how the Annotator treated it, the interval it annotated, its genes and those that one of
+  its breakpoints falls inside, and what it matched in gnomAD's structural variants and copy-number variants, in the
+  1000 Genomes structural variants and in ClinVar;
+- `sv_transcripts`, one row per site and transcript the Annotator lists for it, with the partners of each gene fusion
+  that the Annotator reports for the transcript.
 
 The Annotator annotates a record in one of two ways. A symbolic allele, a breakend and a sequence of more than 50
 bases are structural: its sources are matched by overlap and sit on the position. A shorter sequence is a small
@@ -75,6 +77,22 @@ CLINVAR_SV_RECORD = pa.struct(
     ]
 )
 
+# One partner of a gene fusion that the Annotator reports for a transcript, as the Annotator gives it: the partner
+# transcript and its gene, and the exon or the intron of the partner that holds the junction.
+FUSION_PARTNER = pa.struct(
+    [
+        pa.field('transcript_id', _STRING),
+        pa.field('gene_symbol', _STRING),
+        pa.field('hgnc_id', _HGNC_ID),
+        pa.field('exon', _STRING),
+        pa.field('intron', _STRING),
+        pa.field('in_frame', pa.bool_()),
+        pa.field('imprecise', pa.bool_()),
+        pa.field('directionality', _STRING),
+        pa.field('hgvsr', _STRING),
+    ]
+)
+
 # The columns the annotation adds to a family's sv table.
 COLUMNS = pa.schema(
     [
@@ -82,6 +100,7 @@ COLUMNS = pa.schema(
         pa.field('annotated_pos', _INT),
         pa.field('annotated_end_pos', _INT),
         pa.field('hgnc_ids', pa.list_(_HGNC_ID)),
+        pa.field('breakpoint_hgnc_ids', pa.list_(_HGNC_ID)),
         pa.field('gnomad_sv_id', _STRING),
         pa.field('gnomad_sv_af', _FLOAT),
         pa.field('gnomad_sv_ac', _INT),
@@ -148,6 +167,7 @@ TRANSCRIPT_COLUMNS = pa.schema(
         pa.field('intron', _STRING),
         pa.field('cdna_pos', _STRING),
         pa.field('protein_pos', _STRING),
+        pa.field('fusion_partners', pa.list_(FUSION_PARTNER)),
     ]
 )
 SV_TRANSCRIPTS = pa.schema([pa.field('site_id', _STRING, nullable=False), *TRANSCRIPT_COLUMNS])
@@ -227,6 +247,11 @@ _SMALL_TYPES: Mapping[str, frozenset[str]] = {
     'DEL': frozenset({'deletion', 'delins', 'MNV'}),
     'INS': frozenset({'insertion', 'delins'}),
 }
+# The terms of a transcript that no breakpoint of the record falls inside: one that the record takes or copies whole,
+# which a deletion written as a sequence has without completeOverlap, and one that the record lies beside.
+_NO_BREAKPOINT_TERMS = frozenset(
+    {'transcript_ablation', 'transcript_amplification', 'upstream_gene_variant', 'downstream_gene_variant'}
+)
 
 
 def _need(held: Mapping[str, Any], key: str, where: str) -> Any:  # noqa: ANN401 (a value of the Annotator's JSON)
@@ -472,6 +497,59 @@ def _clinvar(entries: Sequence[Mapping[str, Any]], where: str) -> dict[str, Any]
     return columns | ({'clinvar_overlap': records[0]['reciprocal_overlap']} if records else {})
 
 
+def _fusion_partners(
+    transcript: Mapping[str, Any], hgnc: Mapping[str, int | None], where: str
+) -> list[dict[str, Any]] | None:
+    """The partners of the gene fusions that the Annotator reports for a transcript, by partner transcript.
+
+    Each is copied as the Annotator gives it (FUSION_PARTNER), with the HGNC id of its gene by the genes section. The
+    Annotator gives the exon or the intron of the partner that holds the junction. A partner without inFrame or
+    isImprecise has the flag false, as a transcript without isCanonical has. An entry without a key that the column
+    reads fails, and so does a partner whose gene symbol the genes section lacks.
+    """
+    partners = []
+    for entry in _entries(transcript.get('geneFusions', []), f'{where}: geneFusions'):
+        partner_id = _need(entry, 'transcript', f'{where}: a fusion partner')
+        partner = f'{where}: the fusion partner {partner_id}'
+        symbol = _need(entry, 'hgnc', partner)
+        if symbol not in hgnc:
+            raise ValueError(f'{partner}: the genes section lacks {symbol!r}, its gene')
+        if entry.get('exon') is None and entry.get('intron') is None:
+            raise ValueError(f'{partner}: neither exon nor intron')
+        partners.append(
+            {
+                'transcript_id': partner_id,
+                'gene_symbol': symbol,
+                'hgnc_id': hgnc[symbol],
+                'exon': entry.get('exon'),
+                'intron': entry.get('intron'),
+                'in_frame': bool(entry.get('inFrame', False)),
+                'imprecise': bool(entry.get('isImprecise', False)),
+                'directionality': _need(entry, 'directionality', partner),
+                'hgvsr': _need(entry, 'hgvsr', partner),
+            }
+        )
+    return sorted(partners, key=lambda partner: (partner['transcript_id'], partner['hgvsr'])) or None
+
+
+def _holds_breakpoint(transcript: Mapping[str, Any]) -> bool:
+    """Whether a breakpoint of the record falls inside the transcript of an entry (TRANSCRIPT_COLUMNS).
+
+    The Annotator lists a transcript for a record in one of three ways. The record covers the transcript whole: the
+    entry has completeOverlap, or the term of an ablation or an amplification, which a deletion written as a sequence
+    has without the flag. The record lies beside the transcript: the entry has an upstream or a downstream term. Or
+    the record overlaps a part of the transcript, which is every other entry, and then an end of the record's interval
+    lies inside the transcript. An insertion and a breakend are annotated at one position, so each of their entries
+    that is not beside the transcript is of a transcript that holds that position.
+    """
+    return not (transcript['complete_overlap'] or _NO_BREAKPOINT_TERMS & set(transcript['consequences']))
+
+
+def _hgnc_ids(transcripts: Iterable[Mapping[str, Any]]) -> list[int] | None:
+    """The HGNC ids of the genes of the transcript entries given, each once; None where no gene of theirs has one."""
+    return sorted({t['hgnc_id'] for t in transcripts if t['hgnc_id'] is not None}) or None
+
+
 def _transcripts(
     variant_type: str, variant: Mapping[str, Any], hgnc: Mapping[str, int | None], where: str
 ) -> list[dict[str, Any]]:
@@ -505,6 +583,7 @@ def _transcripts(
             'intron': transcript.get('introns'),
             'cdna_pos': transcript.get('cdnaPos'),
             'protein_pos': transcript.get('proteinPos'),
+            'fusion_partners': _fusion_partners(transcript, hgnc, f'{where}: the transcript {transcript_id}'),
         }
     return [rows[transcript_id] for transcript_id in sorted(rows)]
 
@@ -556,7 +635,8 @@ def position_rows(
         row |= annotation_tables.gnomad_values('gnomad_exomes', variant.get('gnomad-exome'))
         row |= annotation_tables.allele_clinvar(_entries(variant.get('clinvar', []), f'{where}: clinvar'))
     transcripts = _transcripts(variant_type, variant, hgnc, where)
-    row['hgnc_ids'] = sorted({t['hgnc_id'] for t in transcripts if t['hgnc_id'] is not None}) or None
+    row['hgnc_ids'] = _hgnc_ids(transcripts)
+    row['breakpoint_hgnc_ids'] = _hgnc_ids(t for t in transcripts if _holds_breakpoint(t))
     return (
         row,
         transcripts,
@@ -570,9 +650,10 @@ def record_of_alleles(alleles: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
 
     The lists hold the matches of every allele, one allele's after the other's, each match with its type. The
     interval is the alleles' where they share one, and the HGNC ids are those of every allele's transcripts, which
-    are the record's. Every other column is empty: a best match or a frequency would be that of one allele, and a
-    member of the family may carry either. Alleles that are not all annotated in one way fail, since no value of
-    annotated_as would be true of the record.
+    are the record's: all of them in hgnc_ids, and in breakpoint_hgnc_ids those that a breakpoint of an allele falls
+    inside. Every other column is empty: a best match or a frequency would be that of one allele, and a member of the
+    family may carry either. Alleles that are not all annotated in one way fail, since no value of annotated_as would
+    be true of the record.
     """
     kinds = {allele['annotated_as'] for allele in alleles}
     if len(kinds) != 1:
@@ -581,7 +662,8 @@ def record_of_alleles(alleles: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     for name in ('annotated_pos', 'annotated_end_pos'):
         held = {allele[name] for allele in alleles}
         row[name] = held.pop() if len(held) == 1 else None
-    row['hgnc_ids'] = sorted({hgnc_id for allele in alleles for hgnc_id in allele['hgnc_ids'] or ()}) or None
+    for name in ('hgnc_ids', 'breakpoint_hgnc_ids'):
+        row[name] = sorted({hgnc_id for allele in alleles for hgnc_id in allele[name] or ()}) or None
     for name in LISTS:
         if any(name in allele for allele in alleles):
             row[name] = [match for allele in alleles for match in allele.get(name) or ()] or None

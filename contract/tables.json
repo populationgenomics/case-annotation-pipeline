@@ -1604,6 +1604,15 @@
           }
         },
         {
+          "name": "breakpoint_hgnc_ids",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "int32",
+            "nullable": true
+          }
+        },
+        {
           "name": "gnomad_sv_id",
           "type": "string",
           "nullable": true
@@ -2164,6 +2173,62 @@
           "name": "protein_pos",
           "type": "string",
           "nullable": true
+        },
+        {
+          "name": "fusion_partners",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "struct",
+            "nullable": true,
+            "fields": [
+              {
+                "name": "transcript_id",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "gene_symbol",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "hgnc_id",
+                "type": "int32",
+                "nullable": true
+              },
+              {
+                "name": "exon",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "intron",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "in_frame",
+                "type": "bool",
+                "nullable": true
+              },
+              {
+                "name": "imprecise",
+                "type": "bool",
+                "nullable": true
+              },
+              {
+                "name": "directionality",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "hgvsr",
+                "type": "string",
+                "nullable": true
+              }
+            ]
+          }
         }
       ]
     },

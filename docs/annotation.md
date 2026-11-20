@@ -930,7 +930,15 @@ overlaps it most, and that of an insertion or a breakend the nearest; among equa
 
 `sv` also names the genes of a record. `hgnc_ids` holds the HGNC id of each gene that one of the record's transcripts
 belongs to, as `variants` holds them for an allele, and each row of `sv_transcripts` has its gene's `hgnc_id`. Both come
-from the genes section of the second JSON, so a record and an allele in the same gene share an id.
+from the genes section of the second JSON, so a record and an allele in the same gene share an id. `breakpoint_hgnc_ids`
+holds those of the record's genes that one of its breakpoints falls inside. The conversion reads them from the
+transcripts' own fields and adds no rule about what a breakpoint does to a gene
+([A breakpoint inside a gene](family-tables.md#a-breakpoint-inside-a-gene)).
+
+`sv_transcripts` copies the partners of each gene fusion that the Annotator reports for a transcript into
+`fusion_partners`, each with the HGNC id of its gene by the same genes section. The conversion fails for a partner
+without its transcript, its gene, its exon or intron, its directionality or its HGVS name, and for one whose gene the
+genes section lacks.
 
 The best match and the highest frequency differ for about one matched record in seven, because a record often overlaps
 several entries, so a filter for common variants reads `gnomad_sv_max_af`. An insertion's matches lie anywhere within
@@ -938,13 +946,13 @@ the 500 bases, which is why each match keeps its place and `gnomad_sv_distance` 
 
 The tables leave these parts of the Annotator's output out, and the conversion still knows their keys.
 
-| Left out                                                               | Why                                                                                                                  |
-| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| ClinGen's dosage sensitivity map, and gnomAD's gene scores             | they are knowledge about a gene or a region, which the tables do not hold                                            |
-| ClinGen's legacy records (`clingen (legacy)`)                          | they repeat ClinVar's records of the same intervals                                                                  |
-| DECIPHER's common copy-number variants                                 | they are matched at any overlap, however small, and come from as few as 40 samples                                   |
-| MITOMAP's structural entries                                           | an entry is an interval and a type, with no identifier and no disease                                                |
-| a transcript's impact, coding position, HGVS names and fusion partners | [How a record hits a transcript](family-tables.md#how-a-record-hits-a-transcript) says why, and what to read instead |
+| Left out                                                   | Why                                                                                                                  |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| ClinGen's dosage sensitivity map, and gnomAD's gene scores | they are knowledge about a gene or a region, which the tables do not hold                                            |
+| ClinGen's legacy records (`clingen (legacy)`)              | they repeat ClinVar's records of the same intervals                                                                  |
+| DECIPHER's common copy-number variants                     | they are matched at any overlap, however small, and come from as few as 40 samples                                   |
+| MITOMAP's structural entries                               | an entry is an interval and a type, with no identifier and no disease                                                |
+| a transcript's impact, coding position and HGVS names      | [How a record hits a transcript](family-tables.md#how-a-record-hits-a-transcript) says why, and what to read instead |
 
 The tables carry the rest of the output as it was observed:
 
