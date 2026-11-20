@@ -86,7 +86,11 @@ class Control(pydantic.BaseModel, frozen=True, extra='forbid'):
 
 class GeneModelFile(pydantic.BaseModel, frozen=True, extra='forbid'):
     source: Source
-    file: str  # the prepared file's name in the folder, with its .tbi beside it
+    # The prepared file in the folder, which has its .tbi beside it: its name, its size and its SHA-256, by which a
+    # run's record is held to the folder that it read.
+    file: str
+    bytes: int
+    sha256: str
     prepared_from: PublicFile
     controls: tuple[Control, ...]
 
@@ -313,7 +317,12 @@ def _prepare_file(
     pysam.tabix_index(str(prepared), preset='gff', force=True)
     plain.unlink()
     return GeneModelFile(
-        source=source, file=prepared.name, prepared_from=_public(public, tuple(stated)), controls=controls
+        source=source,
+        file=prepared.name,
+        bytes=prepared.stat().st_size,
+        sha256=_sha256(prepared),
+        prepared_from=_public(public, tuple(stated)),
+        controls=controls,
     )
 
 

@@ -215,6 +215,13 @@ workflow ANNOTATE_FAMILIES {
     if (!reference_index.exists()) {
         error("${settings.reference}: no .fai beside it")
     }
+    // The files of the prepared gene models are looked for before any task runs: without one of them the steps of
+    // VEP would fail beside an Annotator run that is billed.
+    geneModelFiles().each { name ->
+        if (!settings.gene_models.resolve(name).exists()) {
+            error("${settings.gene_models}: no ${name}, so it is no folder that case-annotation gene-models prepared")
+        }
+    }
     def bundle_config = settings.annotation_data.resolve('runConfigs/bundle.json')
 
     // The first step in the tools image, which refuses an image of another release than this workflow's. A family is
@@ -415,6 +422,12 @@ def pipelineVersion() {
 // The settings of ANNOTATE_FAMILIES, each of which the entry workflow takes as the param of the same name.
 def settingNames() {
     return ['group', 'reference', 'catalog', 'annotation_data', 'sources', 'workers', 'annotator', 'annotator_version', 'license_secret', 'annotated', 'gnomad_joint', 'alphagenome_avi', 'alphagenome_avi_breakdown', 'alphagenome_splicing', 'gnomad_mito', 'mitotip', 'gencode_polya', 'aparent2', 'genomic_constraint', 'mcr', 'mpc', 'strchive', 'strchive_release', 'strchive_release_date', 'gene_models']
+}
+
+// The files of a folder of prepared gene models (docs/annotation.md): the two gene model files with their indexes,
+// and what the steps of VEP read beside them.
+def geneModelFiles() {
+    return ['ensembl.gff3.gz', 'ensembl.gff3.gz.tbi', 'refseq.gff.gz', 'refseq.gff.gz.tbi', 'chromosome-synonyms.txt', 'exons.bed', 'controls.vcf', 'gene-models.json']
 }
 
 // The columns of the families sheet: four that every sheet has, and the optional ones of the larger variants.

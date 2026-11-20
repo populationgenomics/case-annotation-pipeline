@@ -465,7 +465,7 @@ process INVENTED_REPEATED_SITES {
 // allele that makes a stop codon in that frame has one record of a gained stop, with the plugin's values; the
 // frameshift is evaluated by the NMD plugin and not flagged; the missense variant has no row. The record holds VEP's
 // version, the plugin's commit and its file of translated reading frames as the image holds them, and each gene model
-// file with the invented file that it was prepared from.
+// file with the invented file that it was prepared from, and no count of the union's.
 process CHECK_VEP_PLUGINS {
     input:
     tuple path(given), path(given_index)
@@ -514,11 +514,11 @@ assert info['uorf_evidence']['sha256'] == 'e220023a747465dcdf6725ce809511bccc20b
 assert info['nmd_plugin']['name'] == 'NMD.pm', info
 assert {'--safe', '--transcript_version', '--json'} <= set(info['options']), info
 assert info['environment'] == ['PERL_HASH_SEED=0', 'PERL_PERTURB_KEYS=0'], info
-assert info['alleles'] == 5, info
-models = [(m['source'], m['file']['name'], m['prepared_from']['name'], m['rows'], m['skipped_transcript_ids'])
-          for m in info['gene_models']]
-assert models == [('Ensembl', 'ensembl.gff3.gz', 'invented.gff3.gz', 4, 0),
-                  ('RefSeq', 'refseq.gff.gz', 'invented.gff.gz', 4, 0)], models
+models = [(m['source'], m['file']['name'], m['prepared_from']['name']) for m in info['gene_models']]
+assert models == [('Ensembl', 'ensembl.gff3.gz', 'invented.gff3.gz'),
+                  ('RefSeq', 'refseq.gff.gz', 'invented.gff.gz')], models
+assert sorted(info) == ['environment', 'gene_models', 'nmd_plugin', 'options', 'uorf_evidence',
+                        'utrannotator_commit', 'vep_version'], info
 stated = [m['prepared_from']['stated'] for m in info['gene_models']]
 assert [len(lines) for lines in stated] == [2, 3] and all(line.startswith('#!') for lines in stated for line in lines), info
 EOF

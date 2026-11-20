@@ -258,6 +258,8 @@ def _prepared() -> gene_models.GeneModels:
         return gene_models.GeneModelFile(
             source=source,
             file=gene_models.FILES[source],
+            bytes=1000,
+            sha256='c' * 64,
             prepared_from=gene_models.PublicFile(
                 name=f'invented.{source}.gff.gz', bytes=100, sha256='a' * 64, stated=(f'#!invented {source}',)
             ),
@@ -324,7 +326,7 @@ def _control_documents(source: gene_models.Source) -> dict[str, list[dict[str, A
 
 # What VEP lists for each invented allele with each gene model file: an allele in a 5' UTR with two kinds of effect on
 # one transcript and none on another, one that ends a reading frame, one that neither plugin evaluates and one between
-# genes. RefSeq's file also has a feature whose id is no transcript id of `transcripts`.
+# genes. RefSeq's file also has a feature whose id is no transcript id of `transcripts`, and its row is kept.
 _LISTED: Mapping[gene_models.Source, Mapping[str, list[dict[str, Any]]]] = {
     'Ensembl': {
         _IDS[0]: [
@@ -401,6 +403,7 @@ def test_the_table_holds_a_row_for_each_allele_and_transcript_that_a_plugin_eval
         (_IDS[0], 'ENST04.1', 'Ensembl'),
         (_IDS[0], 'ENST05.2', 'Ensembl'),
         (_IDS[0], 'NM_05.3', 'RefSeq'),
+        (_IDS[0], 'rna-INV-GTT27-1', 'RefSeq'),
         (_IDS[1], 'ENST05.2', 'Ensembl'),
         (_IDS[1], 'NM_05.3', 'RefSeq'),
     ]
@@ -414,8 +417,17 @@ def test_the_table_holds_a_row_for_each_allele_and_transcript_that_a_plugin_eval
     assert (none['utr5_consequences'], none['utr5_uorfs'], none['utr5_existing_oorfs_out_of_frame']) == (None, None, 1)
     assert [by_key[(_IDS[1], t)]['nmd_escaping'] for t in ('ENST05.2', 'NM_05.3')] == [False, True]
     assert by_key[(_IDS[1], 'NM_05.3')]['utr5_existing_uorfs'] is None
-    # No row of a control, of an allele that no plugin evaluated, or of a feature that is no transcript.
+    # No row of a control or of an allele that no plugin evaluated.
     assert {r['variant_id'] for r in rows} == {_IDS[0], _IDS[1]}
+    # A feature of RefSeq's file whose id is no transcript id has its row, which no row of `transcripts` matches.
+    assert [vep_plugins.TRANSCRIPT_ID.fullmatch(key[1]) is None for key in keys] == [
+        False,
+        False,
+        False,
+        True,
+        False,
+        False,
+    ]
 
 
 def test_two_runs_whose_documents_come_in_another_order_write_the_same_table(tmp_path: pathlib.Path) -> None:
@@ -428,24 +440,32 @@ def test_two_runs_whose_documents_come_in_another_order_write_the_same_table(tmp
     assert (first / name).read_bytes() == (second / name).read_bytes()
 
 
-def test_the_record_holds_the_run_and_what_each_gene_model_file_gave(tmp_path: pathlib.Path) -> None:
+def test_the_record_holds_the_run_and_each_gene_model_file(tmp_path: pathlib.Path) -> None:
     info = _convert(tmp_path)
     assert info == vep_plugins.read_info(tmp_path / 'out')
     run = _run()
     assert (info.vep_version, info.utrannotator_commit) == (run['vep_version'], run['utrannotator_commit'])
     assert (list(info.options), list(info.environment)) == (run['options'], run['environment'])
     assert info.uorf_evidence.name == 'invented-uorfs.txt'
-    assert info.alleles == len(_ALLELES)
     described = {file.source: file for file in _prepared().gene_models}
     assert [m.source for m in info.gene_models] == list(gene_models.FILES)
     for model in info.gene_models:
         assert model.file.name == gene_models.FILES[model.source]
         assert model.prepared_from == described[model.source].prepared_from
-    # The feature that is no transcript is counted for RefSeq's file, and has no row.
-    assert [(m.source, m.rows, m.skipped_transcript_ids) for m in info.gene_models] == [
-        ('Ensembl', 3, 0),
-        ('RefSeq', 2, 1),
-    ]
+
+
+def test_the_record_is_the_same_whatever_alleles_the_union_holds(tmp_path: pathlib.Path) -> None:
+    # A family's tables carry the record, so it holds nothing that changes with the other families of a group.
+    first, second = tmp_path / 'first', tmp_path / 'second'
+    first.mkdir()
+    second.mkdir()
+    _convert(first)
+    fewer = {source: {**listed, _IDS[0]: []} for source, listed in _LISTED.items()}
+    _convert(second, listed=fewer)
+    name = pathlib.Path('out') / vep_plugins.INFO_NAME
+    assert (first / name).read_bytes() == (second / name).read_bytes()
+    assert pq.read_metadata(first / 'out' / vep_plugins.TABLE_NAME).num_rows == 6
+    assert pq.read_metadata(second / 'out' / vep_plugins.TABLE_NAME).num_rows == 2
 
 
 def test_the_command_writes_the_table_and_the_record(tmp_path: pathlib.Path) -> None:
@@ -564,11 +584,16 @@ def test_a_run_that_read_a_source_twice_is_refused(tmp_path: pathlib.Path) -> No
         _convert(tmp_path, run=_run() | {'gene_models': [*models, models[0]]})
 
 
-def test_a_run_that_read_a_file_under_another_name_is_refused(tmp_path: pathlib.Path) -> None:
+@pytest.mark.parametrize(
+    'changed', [{'name': 'other.gff3.gz'}, {'bytes': 999}, {'sha256': 'e' * 64}], ids=['name', 'size', 'checksum']
+)
+def test_a_run_that_read_another_file_than_the_prepared_one_is_refused(
+    tmp_path: pathlib.Path, changed: Mapping[str, Any]
+) -> None:
     models = _run()['gene_models']
-    renamed = [{'source': 'Ensembl', 'file': models[0]['file'] | {'name': 'other.gff3.gz'}}, models[1]]
-    with pytest.raises(ValueError, match=r'VEP read other\.gff3\.gz for Ensembl, and the record names ensembl\.gff3'):
-        _convert(tmp_path, run=_run() | {'gene_models': renamed})
+    other = [{'source': 'Ensembl', 'file': models[0]['file'] | changed}, models[1]]
+    with pytest.raises(ValueError, match=r'for Ensembl, which is not the file ensembl\.gff3\.gz of 1000 bytes'):
+        _convert(tmp_path, run=_run() | {'gene_models': other})
 
 
 @pytest.mark.parametrize(
@@ -632,6 +657,12 @@ def test_the_workflow_names_the_files_as_the_tools_do() -> None:
     assert f'--synonyms gene-models/{gene_models.SYNONYMS_NAME}' in MODULES
     for name in (gene_models.EXONS_NAME, gene_models.CONTROLS_NAME, gene_models.RECORD_NAME):
         assert f"settings.gene_models.resolve('{name}')" in WORKFLOW
+    # The workflow looks for every file of the prepared folder before a task runs.
+    (listed,) = re.findall(r'\ndef geneModelFiles\(\) \{\n    return \[([^\]]+)\]\n\}', WORKFLOW)
+    prepared = [*gene_models.FILES.values(), *(f'{name}.tbi' for name in gene_models.FILES.values())]
+    prepared += [gene_models.SYNONYMS_NAME, gene_models.EXONS_NAME, gene_models.CONTROLS_NAME, gene_models.RECORD_NAME]
+    assert sorted(name.strip().strip("'") for name in listed.split(',')) == sorted(prepared)
+    assert 'geneModelFiles().each { name ->\n        if (!settings.gene_models.resolve(name).exists()) {' in WORKFLOW
     stub = f'touch vep_plugins/{vep_plugins.TABLE_NAME} vep_plugins/{vep_plugins.INFO_NAME}'
     assert stub in MODULES
     # The record's keys are the model's.

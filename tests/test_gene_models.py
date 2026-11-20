@@ -186,6 +186,8 @@ def test_the_record_names_each_public_file_by_its_checksum_and_what_it_states(tm
     for file, (public, text) in zip(record.gene_models, given, strict=True):
         content = (tmp_path / public).read_bytes()
         assert file.file == gene_models.FILES[file.source]
+        prepared = (tmp_path / 'gene-models' / file.file).read_bytes()
+        assert (file.bytes, file.sha256) == (len(prepared), hashlib.sha256(prepared).hexdigest())
         assert (file.prepared_from.name, file.prepared_from.bytes) == (public, len(content))
         assert file.prepared_from.sha256 == hashlib.sha256(content).hexdigest()
         assert list(file.prepared_from.stated) == [line for line in text.splitlines() if line.startswith('#!')]

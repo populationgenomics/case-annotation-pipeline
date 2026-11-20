@@ -6,7 +6,8 @@ says which upstream open reading frames such a variant creates, removes or chang
 collection says whether a variant that ends a reading frame early is predicted to escape nonsense-mediated decay. VEP
 runs once for each gene model file (gene_models), on the union's alleles that overlap an exon, and writes one JSON
 document per allele. This module turns those documents into one row per allele and transcript that a plugin evaluated,
-keyed as `transcripts` is, with a record of what ran beside it.
+keyed as `transcripts` is, with a record of what ran beside it. The record holds nothing of the union's own, such as a
+count of its alleles, so that it is the same for every union that the same image and gene models annotate.
 
 The plugins are run as they are, and nothing here classifies a variant. A value is the plugin's, under a name in snake
 case and with the type that the value has: UTRannotator writes its records as text, a number or `NA` for a distance and
@@ -91,7 +92,8 @@ TABLE = pa.schema(
 )
 
 # A transcript id as `transcripts` holds one: Ensembl's or RefSeq's, with its version. NCBI's file also has a few
-# features with other ids, which begin `rna-` or `id-`, and no row of `transcripts` can match those.
+# features with other ids, which begin `rna-` or `id-`. The table keeps their rows, and no row of `transcripts` can
+# match one.
 TRANSCRIPT_ID = re.compile(r'(ENST|NM_|NR_|XM_|XR_)\d+\.\d+')
 
 _TYPES = frozenset({'uORF', 'inFrame_oORF', 'InFrame_oORF', 'OutOfFrame_oORF'})
@@ -231,15 +233,11 @@ class VepRun(pydantic.BaseModel, frozen=True, extra='forbid'):
 
 
 class GeneModelAnnotated(pydantic.BaseModel, frozen=True, extra='forbid'):
-    """One gene model file of a run: the file, the public file it was prepared from, and what VEP gave with it."""
+    """One gene model file of a run: the file as the run read it, and the public file that it was prepared from."""
 
     source: gene_models.Source
     file: FileRecord
     prepared_from: gene_models.PublicFile
-    rows: int  # the table's rows of this source
-    # The rows that a plugin evaluated on a transcript whose id is no transcript id of `transcripts` (TRANSCRIPT_ID),
-    # which the table leaves out.
-    skipped_transcript_ids: int
 
 
 class VepPluginsInfo(pydantic.BaseModel, frozen=True, extra='forbid'):
@@ -252,7 +250,6 @@ class VepPluginsInfo(pydantic.BaseModel, frozen=True, extra='forbid'):
     options: tuple[str, ...]
     environment: tuple[str, ...]
     gene_models: tuple[GeneModelAnnotated, ...]
-    alleles: int  # the union's alleles that overlap an exon of a gene model file, which VEP read
 
 
 def uorf_records(consequence: str, annotation: str) -> list[dict[str, Any]]:
@@ -413,8 +410,8 @@ def _source_rows(
     given: frozenset[str],
     controls: Sequence[gene_models.Control],
     passed_over: frozenset[str],
-) -> tuple[list[dict[str, Any]], int]:
-    """The rows of one VEP output, and how many more it would hold of transcripts whose id is no transcript id.
+) -> list[dict[str, Any]]:
+    """The rows of one VEP output.
 
     `given` are the ids of the union's alleles that VEP read, and `controls` the positive controls of the output's own
     gene model file. Each run also reads the controls of the other file, whose ids are `passed_over`: this file's
@@ -427,7 +424,6 @@ def _source_rows(
     own = {control.id: control for control in controls}
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
-    skipped = 0
     for document in _documents(path):
         record_id = document['id']
         if record_id in seen:
@@ -449,16 +445,13 @@ def _source_rows(
             if columns is None:
                 continue
             transcript_id = transcript['transcript_id']
-            if not TRANSCRIPT_ID.fullmatch(transcript_id):
-                skipped += 1
-                continue
             if transcript_id in listed:
                 raise ValueError(f'{path}: {record_id}: a plugin evaluated the transcript {transcript_id} twice')
             listed.add(transcript_id)
             rows.append({'variant_id': record_id, 'transcript_id': transcript_id, 'source': source} | columns)
     if missing := sorted((given | own.keys() | passed_over) - seen)[:5]:
         raise ValueError(f'{path}: no document of records that VEP was given, such as {missing}')
-    return rows, skipped
+    return rows
 
 
 def convert(
@@ -473,7 +466,7 @@ def convert(
 
     Raises:
         ValueError: if an input is not what the step before wrote (read_given, _source_rows), the run read other gene
-            model files than the record names, or two sources give a row for the same allele and transcript.
+            model files than the record describes, or two sources give a row for the same allele and transcript.
     """
     run = VepRun.model_validate_json((vep / RUN_NAME).read_text())
     files: dict[gene_models.Source, FileRecord] = {read.source: read.file for read in run.gene_models}
@@ -481,25 +474,17 @@ def convert(
     if files.keys() != described.keys() or len(run.gene_models) != len(files):
         raise ValueError(f'VEP read the gene models of {sorted(files)}, and the record names {sorted(described)}')
     for source, file in described.items():
-        if files[source].name != file.file:
-            raise ValueError(f'VEP read {files[source].name} for {source}, and the record names {file.file}')
+        if files[source] != FileRecord(name=file.file, bytes=file.bytes, sha256=file.sha256):
+            raise ValueError(
+                f'VEP read {files[source].name} of {files[source].bytes} bytes for {source}, which is not the file '
+                f'{file.file} of {file.bytes} bytes that the record of the prepared gene models describes'
+            )
     controls = [control for file in prepared.gene_models for control in file.controls]
     alleles = read_given(given, controls)
     rows: list[dict[str, Any]] = []
-    annotated = []
     for source, file in described.items():
         others = frozenset(control.id for control in controls) - {control.id for control in file.controls}
-        found, skipped = _source_rows(vep / OUTPUTS[source], source, frozenset(alleles), file.controls, others)
-        rows.extend(found)
-        annotated.append(
-            GeneModelAnnotated(
-                source=source,
-                file=files[source],
-                prepared_from=file.prepared_from,
-                rows=len(found),
-                skipped_transcript_ids=skipped,
-            )
-        )
+        rows.extend(_source_rows(vep / OUTPUTS[source], source, frozenset(alleles), file.controls, others))
     rows.sort(key=lambda row: (row['variant_id'], row['transcript_id']))
     for row, following in itertools.pairwise(rows):
         if (row['variant_id'], row['transcript_id']) == (following['variant_id'], following['transcript_id']):
@@ -513,10 +498,13 @@ def convert(
         nmd_plugin=run.nmd_plugin,
         options=run.options,
         environment=run.environment,
-        gene_models=tuple(annotated),
-        alleles=len(alleles),
+        gene_models=tuple(
+            GeneModelAnnotated(source=source, file=files[source], prepared_from=file.prepared_from)
+            for source, file in described.items()
+        ),
     )
     (output / INFO_NAME).write_text(info.model_dump_json(indent=2) + '\n')
+    print(f'{len(alleles)} alleles read by VEP, {len(rows)} rows of an allele and transcript that a plugin evaluated')
     return info
 
 

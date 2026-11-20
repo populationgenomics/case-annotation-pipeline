@@ -106,9 +106,12 @@ jobs:
             stub/alphagenome-avi.zip stub/alphagenome-avi-breakdown.zip stub/alphagenome-splicing.zip \
             stub/gnomad-mito.vcf.bgz stub/mitotip.txt stub/gencode-polya.gtf.gz stub/aparent2.csv.gz \
             stub/genomic-constraint.txt.gz stub/mcr.tsv stub/mpc.tsv.bgz stub/strchive.json
-          # The folder of prepared gene models, with the three files that the workflow gives a step by name.
-          mkdir -p stub/gene-models
-          touch stub/gene-models/exons.bed stub/gene-models/controls.vcf stub/gene-models/gene-models.json
+          # The folder of prepared gene models with its eight files, and one that lacks an index.
+          mkdir -p stub/gene-models stub/gene-models-unindexed
+          touch stub/gene-models/{ensembl.gff3.gz,ensembl.gff3.gz.tbi,refseq.gff.gz,refseq.gff.gz.tbi} \
+            stub/gene-models/{chromosome-synonyms.txt,exons.bed,controls.vcf,gene-models.json}
+          cp stub/gene-models/* stub/gene-models-unindexed/
+          rm stub/gene-models-unindexed/refseq.gff.gz.tbi
           # An annotation folder of the group's alleles alone, without the annotation of its structural variants.
           mkdir -p stub/annotated-no-sv/out
           touch stub/annotated-no-sv/out/stub-group.json.gz stub/annotated-no-sv/run.json
@@ -338,7 +341,7 @@ jobs:
           # row's repeat VCFs; a sheet with a column that is none of a families sheet; a reused annotation without
           # that of the structural variants, for a group with a family that names their VCF; a release of STRchive
           # without its name and date; a name and a date without the release's file; a name that is not one of a
-          # release; a date that is not written as YYYY-MM-DD.
+          # release; a date that is not written as YYYY-MM-DD; a folder of gene models without one of its files.
           refused() {
             local message=$1
             shift
@@ -380,6 +383,8 @@ jobs:
           refused 'a release of STRchive, such as v2.28.0, may hold' "${reused[@]}" "${strchive[@]:0:2}" \
             --strchive_release 'v 0' "${strchive[@]:4}"
           refused 'is written as YYYY-MM-DD' "${reused[@]}" "${strchive[@]:0:4}" --strchive_release_date 1-1-2099
+          refused '/src/stub/gene-models-unindexed: no refseq.gff.gz.tbi' "${sources[@]}" "${annotator[@]}" \
+            "${families[@]}" --gene_models /src/stub/gene-models-unindexed
 
       - name: Stub runs of a pipeline that includes the family tables' workflow, and of what the workflow refuses
         run: |
@@ -390,7 +395,8 @@ jobs:
             stub/annotated/out/stub-group.sv.json.gz stub/annotated/run.json stub/gnomad-joint.zip \
             stub/alphagenome-avi.zip stub/gencode-polya.gtf.gz stub/strchive.json
           mkdir -p stub/gene-models
-          touch stub/gene-models/exons.bed stub/gene-models/controls.vcf stub/gene-models/gene-models.json
+          touch stub/gene-models/{ensembl.gff3.gz,ensembl.gff3.gz.tbi,refseq.gff.gz,refseq.gff.gz.tbi} \
+            stub/gene-models/{chromosome-synonyms.txt,exons.bed,controls.vcf,gene-models.json}
           # tests/workflows/include/main.nf makes one family's files in the run and gives the family to the workflow.
           # -C gives the run that pipeline's config alone, as the run of a project that includes the workflow has.
           # NXF_ANSI_LOG=false gives the log with one line for each task, as in the step above.
