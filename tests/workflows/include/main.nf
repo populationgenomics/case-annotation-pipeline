@@ -16,7 +16,8 @@ params {
     with_sv: Boolean = false
     // What ANNOTATE_FAMILIES takes beside the family: whether the run has the steps of the structural variants, and
     // its settings. The run reuses an annotation, so it names no source and nothing of the Annotator's. It can name
-    // any of the archives of AlphaGenome's scores and any of the public files that are joined to the alleles.
+    // any of the archives of AlphaGenome's scores, any of the public files that are joined to the alleles, and a
+    // release of STRchive with its name and date.
     annotates_sv: Boolean = false
     group: String
     reference: Path
@@ -34,6 +35,9 @@ params {
     genomic_constraint: Path?
     mcr: Path?
     mpc: Path?
+    strchive: Path?
+    strchive_release: String?
+    strchive_release_date: String?
     // A name to add to the settings, and the name of a setting to give as null, for the runs that ANNOTATE_FAMILIES
     // refuses for them.
     unknown_setting: String?
@@ -66,6 +70,9 @@ workflow {
         genomic_constraint: params.genomic_constraint,
         mcr: params.mcr,
         mpc: params.mpc,
+        strchive: params.strchive,
+        strchive_release: params.strchive_release,
+        strchive_release_date: params.strchive_release_date,
     ]
     families = MADE_FAMILY(params.with_sv).map { vcf, ped, sv -> tuple(params.family, vcf, ped, params.proband, sv, [], []) }
     annotated = ANNOTATE_FAMILIES(

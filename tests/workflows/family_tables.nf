@@ -24,7 +24,10 @@
 // family-a.vcf has it, a deletion that no small variant is, a symbolic deletion, a breakend and its mate, a record off
 // the primary chromosomes and a symbolic deletion on X, where the father is called haploid. family-a.cnv.vcf holds a
 // segment at the reference's copy number, a loss, a segment that the father loses and the mother gains, and a gain on
-// X. A1, A2 and A3.repeats.vcf hold each member's genotypes of two invented repeats. The checks refuse repeat VCFs of
+// X. A1, A2 and A3.repeats.vcf hold each member's genotypes of two invented repeats. strchive.json stands in for the
+// loci of a release of STRchive, with three invented loci under STRchive's field names: one that the repeat on chr1 is
+// of, with a wider interval and another rotation of its unit, one that overlaps the repeat on X with another motif, and
+// one that no repeat lies in. The checks refuse repeat VCFs of
 // two of the three members, a structural-variant VCF of another family's samples, and a structural variant whose REF is
 // not the reference's (sv-ref-mismatch.vcf).
 // The structural variants and copy-number segments go the way family_tables.nf sends them: SV_SITES cuts family A's
@@ -195,6 +198,9 @@ workflow {
         joined,
         sv_tables,
         sv_union.map,
+        file("${fixture}/strchive.json"),
+        'v0.0.0',
+        '2099-01-01',
         '0.5.0',
         '0.3.1',
     )
@@ -862,7 +868,8 @@ EOF
 }
 
 // Family B's manifest: the sheet names no proband, so nobody has a role, although the PED file has an affected son with
-// both parents.
+// both parents. The family has no repeats table, so its manifest records no release of STRchive and no column left out
+// of that table.
 process CHECK_NO_ROLES {
     input:
     path manifest
@@ -872,9 +879,11 @@ process CHECK_NO_ROLES {
     python3 - <<'EOF'
 import json
 
-members = json.load(open('${manifest}'))['members']
+manifest = json.load(open('${manifest}'))
+members = manifest['members']
 assert {m['sample_id']: m['role'] for m in members} == {'B1': None, 'B2': None, 'B3': None}, members
 assert [m['sample_id'] for m in members if m['affected']] == ['B3'], members
+assert (manifest['strchive'], manifest['repeats_omitted_columns']) == (None, []), manifest
 EOF
     """
 }
@@ -892,7 +901,8 @@ EOF
 // symbolic alleles, the breakends and the segments name none. Each breakend has its mate's place. The father carries
 // the deletion on his one X by its haploid genotype, and the gain there by a copy number of 2 where 1 is expected,
 // with no zygosity; the mother, at 2 copies, carries neither segment. repeats holds each member's sizes of both
-// repeats, one for the father on X.
+// repeats, one for the father on X, and STRchive's values of the repeat on chr1, which is of an invented locus. The
+// repeat on X is of none, and the manifest records the release as the run stated it, with both counts.
 process CHECK_LARGER {
     input:
     tuple path(variants), path(manifest), path(larger)
@@ -989,9 +999,24 @@ assert copies == {
     'inv:GAIN:1': {'A1': ('1', 2, True, None), 'A2': ('./.', 2, False, 'hom_ref'), 'A3': ('./1', 3, True, None)},
 }, copies
 repeats = pq.read_table('repeats.parquet')
-assert repeats.column_names == ['chrom', 'pos', 'end_pos', 'repeat_id', 'repeat_unit', 'ref_copies', 'A1', 'A2',
-                                'A3'], repeats.column_names
+ranges = ['strchive_id', 'strchive_gene', 'strchive_inheritance', 'strchive_start_hg38', 'strchive_stop_hg38',
+          'strchive_pathogenic_motif_reference_orientation', 'strchive_benign_min', 'strchive_benign_max',
+          'strchive_intermediate_min', 'strchive_intermediate_max', 'strchive_pathogenic_min',
+          'strchive_pathogenic_max']
+assert repeats.column_names == ['chrom', 'pos', 'end_pos', 'repeat_id', 'repeat_unit', 'ref_copies', *ranges, 'A1',
+                                'A2', 'A3'], repeats.column_names
+assert repeats.schema.field('strchive_pathogenic_min').type == pa.int32(), repeats.schema
+assert json.loads(repeats.schema.metadata[b'strchive']) == manifest['strchive'], repeats.schema.metadata
 repeats = {r['repeat_id']: r for r in repeats.to_pylist()}
+assert [repeats['RPTA'][c] for c in ranges] == ['INVA_GENEA', 'GENEA', ['AD'], 47, 83, ['AGC'], 5, 20, 21, 35, 36,
+                                                200], repeats
+assert [repeats['RPTX_CGG'][c] for c in ranges] == [None] * len(ranges), repeats
+assert {k: v for k, v in manifest['strchive'].items() if k not in ('bytes', 'sha256')} == {
+    'file': 'strchive.json', 'release': 'v0.0.0', 'release_date': '2099-01-01', 'matched_repeats': 1,
+    'unmatched_repeats': 1}, manifest
+assert manifest['repeats_omitted_columns'] == [], manifest
+# The daughter's longer allele of the repeat lies in the locus's pathogenic range.
+assert repeats['RPTA']['strchive_pathogenic_min'] <= max(repeats['RPTA']['A3']['repcn']) <= 200, repeats
 assert list(repeats) == ['RPTA', 'RPTX_CGG'], repeats
 assert (repeats['RPTX_CGG']['repeat_unit'], repeats['RPTX_CGG']['ref_copies']) == ('CGG', 20), repeats
 sizes = {s: repeats['RPTX_CGG'][s]['repcn'] for s in ('A1', 'A2', 'A3')}

@@ -38,7 +38,8 @@ CALL = pa.struct(
         pa.field('filters', pa.list_(_STRING)),
     ]
 )
-# The columns that describe the repeat, which every member's file must give alike; a member's column follows them.
+# The columns that describe the repeat, which every member's file must give alike. STRchive's values of the repeat
+# follow them in the table, and then a column of each member (family_tables.repeats_schema).
 LOCUS = pa.schema(
     [
         pa.field('chrom', _STRING, nullable=False),
@@ -49,11 +50,6 @@ LOCUS = pa.schema(
         pa.field('ref_copies', _INT),
     ]
 )
-
-
-def schema(samples: Sequence[str]) -> pa.Schema:
-    """The repeats table of a family with these samples: the repeat, then a genotype column per sample."""
-    return pa.schema([*LOCUS, *(pa.field(sample, CALL, nullable=False) for sample in samples)])
 
 
 def _per_allele(

@@ -339,5 +339,15 @@
       }
     ]
   },
-  "sv_omitted_columns": []
+  "sv_omitted_columns": [],
+  "strchive": {
+    "file": "STRchive-loci-v0.0.0.invented.json",
+    "bytes": 500000,
+    "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "release": "v0.0.0",
+    "release_date": "2099-01-01",
+    "matched_repeats": 45,
+    "unmatched_repeats": 15
+  },
+  "repeats_omitted_columns": []
 }

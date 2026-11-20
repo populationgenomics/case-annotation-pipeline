@@ -402,7 +402,9 @@ process SV_ANNOTATION_TABLES {
 // too, and sv_transcripts, and one with repeat VCFs repeats; sv_alleles is NORMALISE_SV's output for a family with a
 // structural-variant VCF. sv_annotation and sv_map are the tables and the map of the union of the group's structural
 // variants, which a family with either VCF reads its records' annotation from, and empty lists in a group without
-// such a family.
+// such a family. strchive is the file of the loci of one release of STRchive, with the release's name and date as the
+// run states them, and an empty list and empty strings in a run without one: case-annotation checks the file for every
+// family and adds its size ranges to the repeats table of a family that has one.
 process FAMILY_TABLES {
     tag "${family}"
     label 'tools'
@@ -418,6 +420,9 @@ process FAMILY_TABLES {
     path joined_values
     path sv_annotation, stageAs: 'sv-union/*'
     path sv_map, stageAs: 'sv-union/*'
+    path strchive, stageAs: 'strchive/*'
+    val strchive_release
+    val strchive_release_date
     val schema_version
     val pipeline_version
 
@@ -427,10 +432,11 @@ process FAMILY_TABLES {
     script:
     // Only a family with a caller's VCF reads the annotation of the group's structural variants.
     def annotated = vcfs(sv) + vcfs(cnv) ? "--sv-annotation ${sv_annotation} --sv-map ${sv_map}" : ''
+    def ranges = strchive ? "--strchive ${strchive} --strchive-release ${strchive_release} --strchive-release-date ${strchive_release_date}" : ''
     """
     case-annotation family-tables --family ${family} --ped ${ped} --vcf ${vcf} ${probandOption(proband)} \\
         ${structuralOptions(sv, cnv, repeats)} ${vcfs(sv_alleles).collect { f -> "--sv-alleles ${f}" }.join(' ')} \\
-        ${annotated} \\
+        ${annotated} ${ranges} \\
         --annotation ${tables} --echtvar-values ${echtvar_values} --joined-values ${joined_values} \\
         --schema-version ${schema_version} --pipeline-version ${pipeline_version} --output out --scratch /tmp
     mv out/* .

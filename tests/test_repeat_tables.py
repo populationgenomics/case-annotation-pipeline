@@ -32,7 +32,6 @@ def test_a_repeat_has_one_row_with_a_column_per_member(tmp_path: pathlib.Path) -
         'repeat_unit': 'GCC',
         'ref_copies': 7,
     }
-    assert repeat_tables.schema(('S3', 'S1')).names == [*repeat_tables.LOCUS.names, 'S3', 'S1']
 
 
 def test_a_members_column_holds_a_value_for_each_of_its_alleles(tmp_path: pathlib.Path) -> None:
