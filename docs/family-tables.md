@@ -112,6 +112,9 @@ erDiagram
         float avi_phred "AlphaGenome's score, where the run read its archive"
         float avi_shap_splicing "one of 16 shares of that score"
         float alphagenome_splicing
+        float gnomad_mito_af_hom "gnomAD's, on chrM, where the run read its file"
+        bool gencode_polya_signal "in a polyadenylation signal"
+        float aparent2_min "APARENT2's lowest effect on a site"
         double alphamissense_max
         double revel
         double spliceai_max
@@ -1560,6 +1563,111 @@ contributions = con.sql(
 ).to_arrow_table()
 ```
 
+### Mitochondrial frequencies and polyadenylation
+
+A run that was given the public files for them has up to 19 more columns in `variants`, from three files that the
+workflow joins to the alleles ([Joined files](annotation.md#joined-files)). The counts are 32-bit integers and the
+frequencies and scores 32-bit floats.
+
+gnomAD's sites of the mitochondrial genome give the 15 `gnomad_mito_` columns, which hold a value only for an allele on
+chrM that gnomAD's file lists. gnomAD counts a sample as homoplasmic for an allele at a heteroplasmy level of 0.95 or
+more, which is the share of the sample's mitochondrial DNA that has the allele, and as heteroplasmic at a level from
+0.10 up to 0.95.
+
+| Column                                                                   | Holds                                                                                                                                                                            | gnomAD's field                             |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `gnomad_mito_ac_hom`, `gnomad_mito_ac_het`                               | the number of samples that are homoplasmic and that are heteroplasmic for the allele                                                                                             | `AC_hom`, `AC_het`                         |
+| `gnomad_mito_af_hom`, `gnomad_mito_af_het`                               | those counts as a share of `gnomad_mito_an`                                                                                                                                      | `AF_hom`, `AF_het`                         |
+| `gnomad_mito_an`                                                         | the number of samples with a call at the site                                                                                                                                    | `AN`                                       |
+| `gnomad_mito_max_heteroplasmy`                                           | the highest heteroplasmy level of the allele in any sample                                                                                                                       | `max_hl`                                   |
+| `gnomad_mito_hapmax_af_hom`, `gnomad_mito_hapmax_af_het`                 | the highest homoplasmic and the highest heteroplasmic frequency among gnomAD's 29 haplogroups                                                                                    | the highest of `hap_AF_hom`, `hap_AF_het`  |
+| `gnomad_mito_hapmax_hom_haplogroup`, `gnomad_mito_hapmax_het_haplogroup` | the haplogroup that has that frequency; null where the frequency is 0 or several haplogroups share it                                                                            | `hapmax_AF_hom`, `hapmax_AF_het`           |
+| `gnomad_mito_faf_hapmax_hom`                                             | the highest filtering allele frequency of the homoplasmic calls among the haplogroups, which allows for a haplogroup's size                                                      | `faf_hapmax_hom`                           |
+| `gnomad_mito_filters`                                                    | the record's FILTER values as a list: `['PASS']`, or the names of gnomAD's filters `artifact_prone_site`, `indel_stack` and `npg` (no sample passed the filters with the allele) | FILTER                                     |
+| `gnomad_mito_hap_defining`                                               | whether the allele defines a haplogroup in PhyloTree                                                                                                                             | `hap_defining_variant`                     |
+| `gnomad_mito_mitotip_score`, `gnomad_mito_mitotip_prediction`            | MitoTIP's score of a change in a tRNA gene and the predictor's reading of it, such as `possibly_benign`; null for an allele outside the tRNA genes                               | `mitotip_score`, `mitotip_trna_prediction` |
+
+GENCODE's polyadenylation features give `gencode_polya_signal`, a flag that is true where the allele changes a base of a
+polyadenylation signal: the short motif, nearly always six bases, before the place where a transcript is cut and gets
+its poly(A) tail. An insertion counts where it lies between two bases of a signal, and not at either end of one.
+
+APARENT2 is a model that predicts from the sequence how much a polyadenylation site is used. Its table of single-base
+changes gives three columns:
+
+| Column               | Holds                                                                                                                                                                                       |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `aparent2_min`       | the lowest `delta_logodds_narrow` among the allele's rows: the predicted change in the natural-log odds of cleavage within 50 bases after a site's signal. A value below 0 weakens the site |
+| `aparent2_max`       | the highest such change among the allele's rows                                                                                                                                             |
+| `aparent2_ref_usage` | the `ref_usage` of the site of the lowest row, between 0 and 1: the site's share of use without the change, which is the value that the table's changes of usage start from                 |
+
+An allele has a row for each site near it, so the two columns differ where it lies near two sites, or near sites of
+genes on both strands.
+
+A query has to allow for these things.
+
+- A run that was not given a file has none of its columns, and a query that reads one fails. The manifest lists the
+  missing columns in `omitted_columns` and the files that the run read in `joined_files`
+  ([The manifest](#the-manifest)).
+- A null in a `gnomad_mito_` column says that gnomAD's file does not list the allele, which holds for every allele off
+  chrM. gnomAD also lists alleles that it never counted: such a row has frequencies of 0 and `npg` among its filters. A
+  comparison drops the null, so a search for rare alleles on chrM reads `coalesce(gnomad_mito_af_hom, 0)`.
+- `gnomad_mito_hapmax_af_hom` can be 1 because of one sample: a haplogroup with a single sample that carries the allele
+  has a frequency of 1. `gnomad_mito_faf_hapmax_hom` is the value that allows for the number of samples.
+- `gnomad_mito_mitotip_score` is gnomAD's copy of the score, so a change in a tRNA gene that gnomAD's file does not list
+  has none. The prediction is the predictor's wording and no classification of the variant.
+- `gencode_polya_signal` is false for an allele in a signal that GENCODE has not annotated, and GENCODE annotates the
+  signals by hand.
+- The three `aparent2_` columns are null for every insertion and deletion, also one that removes a whole signal, and for
+  a single-base change that is not near a site of the table. A search for a weakened site reads `aparent2_min`: a
+  threshold on `aparent2_max` alone misses every allele whose rows are all below 0.
+
+The first query is for the proband's alleles on chrM that are rare in gnomAD and define no haplogroup, with gnomAD's
+values and MitoTIP's score beside the call. `proband.allele_balance` is the share of the proband's reads at the site
+that show the allele. The query needs the run to have had the file `gnomad_mito`.
+
+```python
+rare_mito = con.sql(
+    """
+    SELECT variant_id, proband.gt AS proband_gt, proband.allele_balance AS proband_balance,
+           gnomad_mito_af_hom, gnomad_mito_af_het, gnomad_mito_max_heteroplasmy, gnomad_mito_filters,
+           gnomad_mito_mitotip_score, gnomad_mito_mitotip_prediction
+    FROM trio
+    WHERE chrom = 'chrM'
+      AND proband.carries
+      AND coalesce(gnomad_mito_af_hom, 0) < $max_af_hom
+      AND NOT coalesce(gnomad_mito_hap_defining, false)
+    ORDER BY pos
+    """,
+    params={'max_af_hom': 0.00002},
+).to_arrow_table()
+```
+
+The second query is for the proband's rare alleles that change a base of a polyadenylation signal, or that APARENT2
+predicts to change the odds of a site's use about 2.7-fold or more in either direction, which is 1 on the scale of the
+natural logarithm. It needs the files `gencode_polya` and `aparent2`.
+
+```python
+polyadenylation = con.sql(
+    """
+    SELECT variant_id, worst_consequence, proband.gt AS proband_gt, gnomad_joint_af,
+           gencode_polya_signal, aparent2_min, aparent2_max, aparent2_ref_usage
+    FROM trio
+    WHERE proband.carries
+      AND coalesce(gnomad_joint_af, 0) < $max_af
+      AND (gencode_polya_signal
+           OR aparent2_min <= -$min_effect
+           OR aparent2_max >= $min_effect)
+    ORDER BY aparent2_min NULLS LAST, variant_id
+    """,
+    params={'max_af': 0.001, 'min_effect': 1.0},
+).to_arrow_table()
+```
+
+Both queries were run on a toy table of eight invented alleles. The first returned two of its four alleles on chrM: one
+with a homoplasmic frequency of 0, and one that gnomAD's file does not list. It left out a common allele and one that
+defines a haplogroup. The second returned three of the other four: a change in a signal with an effect of -3.5, a change
+outside every signal that raises a site's odds by 1.4, and last a deletion in a signal, which has no score.
+
 ### A de novo search
 
 The tables hold no de novo calls (see [De novo variants](annotation.md#de-novo-variants)), so a reader has to search for
@@ -2367,15 +2475,15 @@ a key that is added under the same version.
 
 The tables share these properties:
 
-| Property           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| order of the rows  | sorted by chromosome (1 to 22, X, Y, M) and position; `sv` and `repeats` then by `end_pos` and their key, and `sv_transcripts` then by `end_pos`, `sv_id`, `variant_type` and `transcript_id`                                                                                                                                                                                                                                                                                                                                                               |
-| compression        | zstd, in row groups of 100,000 rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| Bloom filters      | on the columns a lookup uses: in `variants` the variant id and the values of `hgnc_ids`; in `transcripts` the variant id, the transcript id, the gene symbol and id and the HGNC id; `sv_id` in `sv` and in `sv_transcripts`, which also has them on its transcript id, its gene symbol and id and its HGNC id; and `repeat_id` in `repeats`. DuckDB 2.0 does not use the one of `hgnc_ids` ([Variants in a gene](#variants-in-a-gene)), and a reader that tests a list's values against a filter can                                                       |
-| key-value metadata | the tables' version (`schema_version`), the table's name, the family, and the annotation's provenance (`annotation`, `gnomad_joint` and the three `alphagenome_` keys, as in the manifest); `sv` and `sv_transcripts` carry the provenance of the annotation of the structural variants instead (`annotation`, which is the manifest's `sv_annotation`), and `repeats` none, since nothing annotated it                                                                                                                                                     |
-| variant id         | `<chrom>-<pos>-<ref>-<alt>` with the VCF's contig name, such as `chr2-1234567-C-T`                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| shared columns     | a column that means the same thing has the same name and type in every table ([Shared column names](#shared-column-names))                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| a missing value    | a null. That holds for the list columns `rsids`, `hgnc_ids`, `breakpoint_hgnc_ids`, `genes`, `regulatory_features`, `clinvar_records`, `clinvar_other_alleles`, `clinvar_conditions`, `clinvar_pubmed_ids`, `amino_acid_conservation`, `gnomad_sv_matches`, `fusion_partners`, `pl` and `ft` too, and for `cipos`, `ciend` and the lists of a repeat's genotype: an allele without an rsID has no `rsids`, not an empty list. `filters` differs: in every table it holds the VCF record's FILTER values, and an empty list for a record whose FILTER is `.` |
+| Property           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| order of the rows  | sorted by chromosome (1 to 22, X, Y, M) and position; `sv` and `repeats` then by `end_pos` and their key, and `sv_transcripts` then by `end_pos`, `sv_id`, `variant_type` and `transcript_id`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| compression        | zstd, in row groups of 100,000 rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Bloom filters      | on the columns a lookup uses: in `variants` the variant id and the values of `hgnc_ids`; in `transcripts` the variant id, the transcript id, the gene symbol and id and the HGNC id; `sv_id` in `sv` and in `sv_transcripts`, which also has them on its transcript id, its gene symbol and id and its HGNC id; and `repeat_id` in `repeats`. DuckDB 2.0 does not use the one of `hgnc_ids` ([Variants in a gene](#variants-in-a-gene)), and a reader that tests a list's values against a filter can                                                                                                                                                                                 |
+| key-value metadata | the tables' version (`schema_version`), the table's name, the family, and the annotation's provenance (`annotation`, `gnomad_joint`, the three `alphagenome_` keys and `joined_files`, as in the manifest); `sv` and `sv_transcripts` carry the provenance of the annotation of the structural variants instead (`annotation`, which is the manifest's `sv_annotation`), and `repeats` none, since nothing annotated it                                                                                                                                                                                                                                                               |
+| variant id         | `<chrom>-<pos>-<ref>-<alt>` with the VCF's contig name, such as `chr2-1234567-C-T`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| shared columns     | a column that means the same thing has the same name and type in every table ([Shared column names](#shared-column-names))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| a missing value    | a null. That holds for the list columns `rsids`, `hgnc_ids`, `breakpoint_hgnc_ids`, `genes`, `regulatory_features`, `clinvar_records`, `clinvar_other_alleles`, `clinvar_conditions`, `clinvar_pubmed_ids`, `amino_acid_conservation`, `gnomad_sv_matches`, `fusion_partners`, `pl` and `ft` too, and for `cipos`, `ciend` and the lists of a repeat's genotype: an allele without an rsID has no `rsids`, not an empty list. `filters` differs: in every table it holds the VCF record's FILTER values, and an empty list for a record whose FILTER is `.`. `gnomad_mito_filters` holds those of gnomAD's record in the same way, and is null for an allele that gnomAD's file lacks |
 
 The tables hold no gene-level knowledge beyond a gene's identifiers. What OMIM, ClinGen and other gene–disease sources
 say about a gene is knowledge that the reader brings.
@@ -2385,24 +2493,25 @@ say about a gene is knowledge that the reader brings.
 `manifest.json` describes the folder: its tables, the family and what annotated the alleles and the structural variants.
 Every manifest holds every key below, also the manifest of a family without the optional tables.
 
-| Key                         | Holds                                                                                                                                                                                                                                                                                                   |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema_version`            | the tables' version, such as `0.5.0`                                                                                                                                                                                                                                                                    |
-| `pipeline_version`          | the release of the pipeline that wrote the folder, such as `0.3.0`: the version of the workflow and of the tools image at once, because the workflow gives its own version to the step that writes the folder, which refuses to write with tools of another. It is the same in every run of one release |
-| `family`                    | the family's id                                                                                                                                                                                                                                                                                         |
-| `members`                   | the pedigree: each member with its `sample_id`, `father`, `mother`, `sex`, `affected` (empty where the PED file gives the phenotype as unknown), `sequenced` (whether `variants` has its column, and `sv` and `repeats` where the family has them) and `role`                                           |
-| `notes`                     | the notes on the tables in the folder: the `path`, which is `tables.md`, with the file's size in `bytes` and its `sha256`, as an entry of `tables` gives a table's                                                                                                                                      |
-| `tables`                    | each table the folder holds, with its rows, size and SHA-256: `variants` and `transcripts`, then `sv`, `sv_transcripts` and `repeats` where the family has them                                                                                                                                         |
-| `sv_callers`                | the callers whose records `sv` holds: `sv`, `cnv` or both, and an empty list in a family without the table. A named caller with no row of `sv` reported nothing                                                                                                                                         |
-| `alleles`                   | the number of alleles, which is the number of rows of `variants`                                                                                                                                                                                                                                        |
-| `annotation`                | what annotated the alleles: the Annotator, the catalog, the sources named and the versions they pinned, the data sources the JSON header records, and the bundle's sources the run left out, each with its reason: `dated`, `not_applicable`, `current` or `unplaced`                                   |
-| `gnomad_joint`              | the archive of gnomAD's joint values: its file name, its size and SHA-256 as the run read it, echtvar's version, and each field the archive's embedded configuration declares, with gnomAD's name for it, the archive's alias, its type, its multiplier and the value that stands for a missing one     |
-| `alphagenome_avi`           | the archive of AlphaGenome's AVI scores, which `avi_phred` and `avi_raw` come from, in the form of `gnomad_joint`; null in a run that was not given it                                                                                                                                                  |
-| `alphagenome_avi_breakdown` | the archive of the breakdown of the AVI score, which the `avi_shap_` columns come from, in the same form, with the notice that DeepMind's terms ask for as `terms`; null in a run that was not given it                                                                                                 |
-| `alphagenome_splicing`      | the archive of AlphaGenome's splicing scores, which `alphagenome_splicing` comes from, in the form of `alphagenome_avi_breakdown`; null in a run that was not given it                                                                                                                                  |
-| `omitted_columns`           | the columns of `variants` that the run left out because it did not name their source: those of its dated sources, then those of the archives of AlphaGenome's scores that it was not given                                                                                                              |
-| `sv_annotation`             | what annotated the structural variants and copy number segments, in the form of `annotation`: the second Annotator run, which has the catalog and the sources of the first; null in a family without `sv`                                                                                               |
-| `sv_omitted_columns`        | the columns of `sv` that the run left out because it did not name their dated source; an empty list in a family without `sv`                                                                                                                                                                            |
+| Key                         | Holds                                                                                                                                                                                                                                                                                                                |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema_version`            | the tables' version, such as `0.5.0`                                                                                                                                                                                                                                                                                 |
+| `pipeline_version`          | the release of the pipeline that wrote the folder, such as `0.3.0`: the version of the workflow and of the tools image at once, because the workflow gives its own version to the step that writes the folder, which refuses to write with tools of another. It is the same in every run of one release              |
+| `family`                    | the family's id                                                                                                                                                                                                                                                                                                      |
+| `members`                   | the pedigree: each member with its `sample_id`, `father`, `mother`, `sex`, `affected` (empty where the PED file gives the phenotype as unknown), `sequenced` (whether `variants` has its column, and `sv` and `repeats` where the family has them) and `role`                                                        |
+| `notes`                     | the notes on the tables in the folder: the `path`, which is `tables.md`, with the file's size in `bytes` and its `sha256`, as an entry of `tables` gives a table's                                                                                                                                                   |
+| `tables`                    | each table the folder holds, with its rows, size and SHA-256: `variants` and `transcripts`, then `sv`, `sv_transcripts` and `repeats` where the family has them                                                                                                                                                      |
+| `sv_callers`                | the callers whose records `sv` holds: `sv`, `cnv` or both, and an empty list in a family without the table. A named caller with no row of `sv` reported nothing                                                                                                                                                      |
+| `alleles`                   | the number of alleles, which is the number of rows of `variants`                                                                                                                                                                                                                                                     |
+| `annotation`                | what annotated the alleles: the Annotator, the catalog, the sources named and the versions they pinned, the data sources the JSON header records, and the bundle's sources the run left out, each with its reason: `dated`, `not_applicable`, `current` or `unplaced`                                                |
+| `gnomad_joint`              | the archive of gnomAD's joint values: its file name, its size and SHA-256 as the run read it, echtvar's version, and each field the archive's embedded configuration declares, with gnomAD's name for it, the archive's alias, its type, its multiplier and the value that stands for a missing one                  |
+| `alphagenome_avi`           | the archive of AlphaGenome's AVI scores, which `avi_phred` and `avi_raw` come from, in the form of `gnomad_joint`; null in a run that was not given it                                                                                                                                                               |
+| `alphagenome_avi_breakdown` | the archive of the breakdown of the AVI score, which the `avi_shap_` columns come from, in the same form, with the notice that DeepMind's terms ask for as `terms`; null in a run that was not given it                                                                                                              |
+| `alphagenome_splicing`      | the archive of AlphaGenome's splicing scores, which `alphagenome_splicing` comes from, in the form of `alphagenome_avi_breakdown`; null in a run that was not given it                                                                                                                                               |
+| `joined_files`              | the public files that the run joined to the alleles ([Joined files](annotation.md#joined-files)): an entry for each, with the name of its param as `source`, its `file` name, and its size in `bytes` and its `sha256` as the run read it, in the order of their columns; an empty list in a run that was given none |
+| `omitted_columns`           | the columns of `variants` that the run left out because it did not name their source: those of its dated sources, then those of the archives of AlphaGenome's scores that it was not given, then those of the joined files that it was not given                                                                     |
+| `sv_annotation`             | what annotated the structural variants and copy number segments, in the form of `annotation`: the second Annotator run, which has the catalog and the sources of the first; null in a family without `sv`                                                                                                            |
+| `sv_omitted_columns`        | the columns of `sv` that the run left out because it did not name their dated source; an empty list in a family without `sv`                                                                                                                                                                                         |
 
 The reasons, under `annotation.omitted`, follow the groups of sources in [Dated sources](annotation.md#dated-sources):
 `dated` for a dated source, `not_applicable` for one that does not apply to germline small variants, `current` for a

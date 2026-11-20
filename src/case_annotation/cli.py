@@ -14,6 +14,7 @@ from case_annotation import (
     contract,
     echtvar_values,
     family_tables,
+    joined_values,
     sv_annotation,
     sv_sites,
 )
@@ -240,6 +241,61 @@ def _echtvar_values(args: argparse.Namespace) -> None:
     echtvar_values.convert(args.annotated, args.sites, archives, args.echtvar_version, args.output)
 
 
+def _joined_values_arguments(parser: argparse.ArgumentParser) -> None:
+    path = pathlib.Path
+    parser.add_argument('--sites', type=path, required=True, help='the union, a sites-only VCF')
+    parser.add_argument(
+        '--file',
+        nargs=2,
+        action='append',
+        default=[],
+        metavar=('SOURCE', 'FILE'),
+        help=(
+            f'a public file to join to the alleles, after what it holds: one of {", ".join(joined_values.SOURCES)}; '
+            'given once for each file of the run, and not at all in a run without one'
+        ),
+    )
+    parser.add_argument(
+        '--normalised',
+        nargs=2,
+        action='append',
+        default=[],
+        metavar=('SOURCE', 'VCF'),
+        help=(
+            'with --file of a source that is a VCF of alleles: the file as bcftools norm rewrote it against the '
+            "union's reference with the options that normalise a family, which is what is read; such sources are "
+            f'{", ".join(name for name, source in joined_values.SOURCES.items() if source.normalised)}'
+        ),
+    )
+    parser.add_argument(
+        '--output',
+        type=path,
+        required=True,
+        help=f'the folder to write {joined_values.TABLE_NAME} and {joined_values.INFO_NAME} into; it must not exist',
+    )
+    parser.add_argument('--scratch', type=path, help='a local folder for temporary files, rather than the default')
+
+
+def _by_source(option: str, pairs: Sequence[Sequence[str]]) -> dict[str, pathlib.Path]:
+    """The files of an option that is given once for a source, by the source's name."""
+    files: dict[str, pathlib.Path] = {}
+    for source, file in pairs:
+        if source in files:
+            raise SystemExit(f'{option} is given twice for {source}')
+        files[source] = pathlib.Path(file)
+    return files
+
+
+def _joined_values(args: argparse.Namespace) -> None:
+    joined_values.convert(
+        args.sites,
+        _by_source('--file', args.file),
+        _by_source('--normalised', args.normalised),
+        args.output,
+        scratch=args.scratch,
+    )
+
+
 def _family_tables_arguments(parser: argparse.ArgumentParser) -> None:
     path = pathlib.Path
     parser.add_argument('--family', required=True, help="the family's id, which its PED file must hold")
@@ -268,6 +324,7 @@ def _family_tables_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument('--annotation', type=path, required=True, help="annotation-tables' output folder of the union")
     parser.add_argument('--echtvar-values', type=path, required=True, help="echtvar-values' output folder of the union")
+    parser.add_argument('--joined-values', type=path, required=True, help="joined-values' output folder of the union")
     parser.add_argument(
         '--schema-version',
         required=True,
@@ -295,6 +352,7 @@ def _family_tables(args: argparse.Namespace) -> None:
         args.ped,
         args.annotation,
         args.echtvar_values,
+        args.joined_values,
         args.output,
         proband=args.proband,
         structural=_structural(args),
@@ -419,6 +477,16 @@ _SUBCOMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Ca
         ),
         _echtvar_values_arguments,
         _echtvar_values,
+    ),
+    'joined-values': (
+        (
+            'writes the values of a sites union from the public files that a run joins to its alleles by allele or by '
+            "position, which are gnomAD's mitochondrial frequencies, GENCODE's polyadenylation signals and APARENT2's "
+            "effects on polyadenylation, with each file's record; fails for a file that is not what its source "
+            'publishes'
+        ),
+        _joined_values_arguments,
+        _joined_values,
     ),
     'family-tables': (
         (

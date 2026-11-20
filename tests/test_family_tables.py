@@ -26,6 +26,7 @@ from case_annotation import (
     cli,
     echtvar_values,
     family_tables,
+    joined_values,
     pedigree,
     repeat_tables,
     sv_annotation,
@@ -330,6 +331,64 @@ def _write_joint(
     (path / echtvar_values.INFO_NAME).write_text(info.model_dump_json())
 
 
+# The public files that a run can join to the union's alleles, each of which it need not read.
+_JOINED_SOURCES = tuple(joined_values.SOURCES.values())
+_JOINED_COLUMNS = tuple(column for source in _JOINED_SOURCES for column in source.columns)
+# Invented values of the union's alleles from the joined files, by source: gnomAD's mitochondrial sites hold the allele
+# on chrM, a polyadenylation signal the first allele, and APARENT2 scores the second, a single-base change.
+_JOINED: dict[str, dict[str, dict[str, Any]]] = {
+    'gnomad_mito': {
+        _ALLELES[4]: {
+            'gnomad_mito_ac_hom': 12,
+            'gnomad_mito_ac_het': 3,
+            'gnomad_mito_af_hom': _float32(0.0002),
+            'gnomad_mito_af_het': _float32(0.00005),
+            'gnomad_mito_an': 60_000,
+            'gnomad_mito_max_heteroplasmy': _float32(0.998),
+            'gnomad_mito_hapmax_af_hom': _float32(0.004),
+            'gnomad_mito_hapmax_af_het': _float32(0.001),
+            'gnomad_mito_hapmax_hom_haplogroup': 'H',
+            'gnomad_mito_hapmax_het_haplogroup': None,
+            'gnomad_mito_faf_hapmax_hom': _float32(0.003),
+            'gnomad_mito_filters': ['npg'],
+            'gnomad_mito_hap_defining': True,
+            'gnomad_mito_mitotip_score': _float32(12.5),
+            'gnomad_mito_mitotip_prediction': 'possibly_benign',
+        }
+    },
+    'gencode_polya': {_ALLELES[0]: {'gencode_polya_signal': True}},
+    'aparent2': {
+        _ALLELES[1]: {
+            'aparent2_min': _float32(-2.5),
+            'aparent2_max': _float32(0.125),
+            'aparent2_ref_usage': _float32(0.75),
+        }
+    },
+}
+
+
+def _joined_file(source: joined_values.Source) -> joined_values.JoinedFile:
+    """An invented record of a joined file."""
+    return joined_values.JoinedFile(source=source.name, file=f'{source.name}.invented', bytes=1, sha256='1' * 64)
+
+
+def _write_joined(path: pathlib.Path, alleles: Sequence[str], sources: Sequence[joined_values.Source]) -> None:
+    """The union's values from the joined files of the sources given, for these alleles."""
+    path.mkdir()
+    rows = [
+        {'variant_id': vid}
+        | {
+            column: _JOINED[source.name].get(vid, {}).get(column, False if source.flags else None)
+            for source in sources
+            for column in source.columns
+        }
+        for vid in alleles
+    ]
+    pq.write_table(pa.Table.from_pylist(rows, schema=joined_values.schema(sources)), path / joined_values.TABLE_NAME)
+    info = joined_values.JoinedFiles(files=tuple(_joined_file(source) for source in sources))
+    (path / joined_values.INFO_NAME).write_text(info.model_dump_json())
+
+
 # The tables of a family's alleles, which every family has.
 _ALLELE_TABLES = ('variants', 'transcripts')
 # A family whose sheet row names no VCF of its larger variants.
@@ -345,17 +404,21 @@ def _inputs(
     proband: str | None = 'S3',
     structural: family_tables.Structural | None = None,
     scores: Sequence[echtvar_values.Source] = _SCORE_SOURCES,
+    joined: Sequence[joined_values.Source] = _JOINED_SOURCES,
+    joined_alleles: Sequence[str] = (*_ALLELES, 'chr2-500-C-A'),
 ) -> dict[str, Any]:
     _write_vcf(tmp_path / 'family.vcf.gz', records)
     (tmp_path / 'family.ped').write_text(ped)
     _write_union(tmp_path / 'union', _ALLELES, info or _info('Ensembl', 'dbSNP', 'clinvar'))
     _write_joint(tmp_path / 'joint', joint, scores)
+    _write_joined(tmp_path / 'joined', joined_alleles, joined)
     return {
         'family': 'fam-1',
         'vcf_path': tmp_path / 'family.vcf.gz',
         'ped_path': tmp_path / 'family.ped',
         'annotation': tmp_path / 'union',
         'archive_values': tmp_path / 'joint',
+        'joined': tmp_path / 'joined',
         'output': tmp_path / 'out',
         'proband': proband,
         'structural': structural or _NO_STRUCTURAL,
@@ -429,14 +492,15 @@ def test_the_variants_table_is_written_with_its_declared_schema(tmp_path: pathli
     family_tables.assemble(**_inputs(tmp_path))
     written = pq.read_schema(tmp_path / 'out' / 'variants.parquet')
     assert written.equals(family_tables.variants_schema(('S1', 'S2', 'S3')), check_metadata=False)
-    # The file itself says which columns always have a value: the allele, and each member's column and genotype.
-    # Whether the member carries the allele is none of them, because a genotype can leave it open.
+    # The file itself says which columns always have a value: the allele, the flags of a joined file, and each member's
+    # column and genotype. Whether the member carries the allele is none of them, because a genotype can leave it open.
     parquet = pq.read_metadata(tmp_path / 'out' / 'variants.parquet').schema
     required = {
         parquet.column(i).path for i in range(len(parquet.names)) if parquet.column(i).max_definition_level == 0
     }
     members = {f'{sample}.gt' for sample in ('S1', 'S2', 'S3')}
-    assert required == {'chrom', 'pos', 'ref', 'alt', 'variant_id'} | members
+    flags = {column for source in _JOINED_SOURCES if source.flags for column in source.columns}
+    assert required == {'chrom', 'pos', 'ref', 'alt', 'variant_id'} | flags | members
 
 
 def test_the_declared_schema_leaves_out_the_columns_a_run_omits(tmp_path: pathlib.Path) -> None:
@@ -791,6 +855,7 @@ def _tables_command(
     """The family-tables command of the inputs, without its proband."""
     args = ['family-tables', '--family', 'fam-1', '--ped', str(inputs['ped_path']), '--vcf', str(inputs['vcf_path'])]
     args += ['--annotation', str(inputs['annotation']), '--echtvar-values', str(inputs['archive_values'])]
+    args += ['--joined-values', str(inputs['joined'])]
     args += ['--output', str(output or inputs['output'])]
     return [*args, '--schema-version', version, '--pipeline-version', pipeline]
 
@@ -880,6 +945,10 @@ REFUSED = {
     "an allele the union's values from the echtvar archives lack": (
         {'joint': {vid: _JOINT[vid] for vid in _ALLELES[1:]}},
         "alleles the union's values from the echtvar archives lack, such as \\['chr1-5-C-T'\\]",
+    ),
+    "an allele the union's values from the joined files lack": (
+        {'joined_alleles': _ALLELES[1:]},
+        "alleles the union's values from the joined files lack, such as \\['chr1-5-C-T'\\]",
     ),
     'an allele off the primary chromosomes': (
         {'records': [*_RECORDS, ('chr1_KI270706v1_random', 9, 'T', 'A', (_HET, _REF, _HET))]},
@@ -1954,5 +2023,58 @@ def test_a_run_without_the_archives_writes_the_other_columns_as_a_run_with_them(
 
 def test_a_sample_cannot_take_the_name_of_a_score_column_whatever_the_run_reads() -> None:
     for column in ('avi_phred', 'AVI_SHAP_ATAC', 'alphagenome_splicing'):
+        with pytest.raises(ValueError, match=f'the VCF sample {column!r} would share the column name'):
+            family_tables.check_column_names(['S1', column])
+
+
+JOINED_RUNS = {
+    'no joined file': (),
+    "gnomAD's mitochondrial sites alone": _JOINED_SOURCES[:1],
+    'the two files on polyadenylation': _JOINED_SOURCES[1:],
+    'all three files': _JOINED_SOURCES,
+}
+
+
+@pytest.mark.parametrize('case', JOINED_RUNS)
+def test_a_family_has_the_columns_of_the_files_its_run_joined(tmp_path: pathlib.Path, case: str) -> None:
+    given = JOINED_RUNS[case]
+    manifest = family_tables.assemble(**_inputs(tmp_path, joined=given))
+    path = tmp_path / 'out' / 'variants.parquet'
+    schema = pq.read_schema(path)
+    assert schema.equals(family_tables.variants_schema(('S1', 'S2', 'S3'), manifest.omitted_columns))
+    # The columns of a file that the run did not join are left out and listed, after those of the archives.
+    held = [column for source in given for column in source.columns]
+    assert [name for name in schema.names if name in _JOINED_COLUMNS] == held
+    assert manifest.omitted_columns == tuple(column for column in _JOINED_COLUMNS if column not in held)
+    # The columns of the files stand between those of the archives and the family's record.
+    order = [name for name in schema.names if name in (_SCORE_COLUMNS[-1], *held, 'qual')]
+    assert order == [_SCORE_COLUMNS[-1], *held, 'qual']
+    # An allele has the values of each file that holds it. One that a file lacks has no value, and a flag that is
+    # false.
+    rows = {row['variant_id']: row for row in _rows(path)}
+    for source in given:
+        for vid in _ALLELES:
+            values = _JOINED[source.name].get(vid, dict.fromkeys(source.columns, False if source.flags else None))
+            assert {column: rows[vid][column] for column in source.columns} == values
+    # The manifest and the table's metadata record each file with its source's name, in the columns' order.
+    written = json.loads((tmp_path / 'out' / 'manifest.json').read_text())
+    assert manifest.joined_files == tuple(_joined_file(source) for source in given)
+    assert [file['source'] for file in written['joined_files']] == [source.name for source in given]
+    assert json.loads(schema.metadata[b'joined_files']) == written['joined_files']
+
+
+def test_a_run_without_the_joined_files_writes_the_other_columns_as_a_run_with_them(tmp_path: pathlib.Path) -> None:
+    for run in ('with', 'without'):
+        (tmp_path / run).mkdir()
+    family_tables.assemble(**_inputs(tmp_path / 'with'))
+    family_tables.assemble(**_inputs(tmp_path / 'without', joined=()))
+    with_files = _rows(tmp_path / 'with' / 'out' / 'variants.parquet')
+    assert [{name: value for name, value in row.items() if name not in _JOINED_COLUMNS} for row in with_files] == _rows(
+        tmp_path / 'without' / 'out' / 'variants.parquet'
+    )
+
+
+def test_a_sample_cannot_take_the_name_of_a_joined_column_whatever_the_run_joins() -> None:
+    for column in ('gnomad_mito_af_hom', 'GENCODE_POLYA_SIGNAL', 'aparent2_min'):
         with pytest.raises(ValueError, match=f'the VCF sample {column!r} would share the column name'):
             family_tables.check_column_names(['S1', column])

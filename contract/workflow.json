@@ -91,6 +91,21 @@
           "required": false
         },
         {
+          "name": "gnomad_mito",
+          "type": "Path",
+          "required": false
+        },
+        {
+          "name": "gencode_polya",
+          "type": "Path",
+          "required": false
+        },
+        {
+          "name": "aparent2",
+          "type": "Path",
+          "required": false
+        },
+        {
           "name": "tools_container",
           "type": "String",
           "required": true

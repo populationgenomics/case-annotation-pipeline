@@ -42,14 +42,23 @@
 // negative, a PHRED is 0, one is above 67, where a 32-bit float is coarser than the millionths that the archive
 // stores, and one contribution is in scientific notation. ECHTVAR_VALUES reads the three archives with gnomAD's in one
 // echtvar call, and a second time gnomAD's alone, as in a run that names no archive of the scores.
+// gencode_polya.gtf and aparent2.tsv stand in for GENCODE's polyadenylation features and for APARENT2's table of
+// effects, with invented features and values in the layout of the public files. JOINED_VALUES joins them to the union:
+// three alleles change a base of a signal, one of them a deletion whose last base lies in it, and a change in a site
+// and one in a pseudogene's signal overlap none; one allele has a row for each of two sites, and others one row or
+// none. The run names no file of gnomAD's mitochondrial sites, so the families' tables lack those columns.
+// gnomad_mito.vcf stands in for that file, with invented values under gnomAD's field names, and is joined to
+// mito-union.vcf, an invented union on an invented chrM of 120 bases (mito-reference.fa): it writes a deletion at the
+// right end of a repeat, which the union holds at the left end, as a family's normalised VCF would.
 // Refused inputs must fail, and so must Annotator outputs without the group's annotation. The case-annotation and
 // echtvar steps run in the tools image, built first. Run with Docker from the repository's root, with this folder's
 // config alone (-C), because a run from the root would otherwise read the pipeline's nextflow.config over it:
 //   docker build -f containers/tools/Dockerfile -t case-annotation-tools-test .
 //   nextflow -C tests/workflows/nextflow.config run tests/workflows/family_tables.nf
 
-include { FAMILY_CHECK ; NORMALISE_FAMILY ; NORMALISE_SV ; UNION_SITES ; SV_SITES ; SV_UNION ; ECHTVAR_VALUES ; ANNOTATION_TABLES ; SV_ANNOTATION_TABLES ; FAMILY_TABLES ; groupAnnotation ; svName ; svGroup ; archivesDisk } from '../../modules/family_tables'
+include { FAMILY_CHECK ; NORMALISE_FAMILY ; NORMALISE_SV ; UNION_SITES ; SV_SITES ; SV_UNION ; ECHTVAR_VALUES ; JOINED_VALUES ; ANNOTATION_TABLES ; SV_ANNOTATION_TABLES ; FAMILY_TABLES ; groupAnnotation ; svName ; svGroup ; archivesDisk } from '../../modules/family_tables'
 include { ECHTVAR_VALUES as ECHTVAR_VALUES_GNOMAD_ALONE } from '../../modules/family_tables'
+include { JOINED_VALUES as JOINED_VALUES_MITO } from '../../modules/family_tables'
 include { SV_SITES as SV_SITES_NO_END } from '../../modules/family_tables'
 include { SV_UNION as SV_UNION_NO_END_REFUSED } from '../../modules/family_tables'
 include { NORMALISE_SV as NORMALISE_SV_REF_MISMATCH_REFUSED } from '../../modules/family_tables'
@@ -131,6 +140,22 @@ workflow {
     if (archivesDisk([small, [], [], []]) != 51.GB || archivesDisk([small, small, small, small]) != 51.GB) {
         error("the disk of four small archives is ${archivesDisk([small, small, small, small])}, and of one ${archivesDisk([small, [], [], []])}")
     }
+    // The two files on polyadenylation, joined to the union, and no file of gnomAD's mitochondrial sites.
+    polya = file("${fixture}/gencode_polya.gtf")
+    effects = file("${fixture}/aparent2.tsv")
+    joined = JOINED_VALUES(union, reference, [], polya, effects)
+    // gnomAD's mitochondrial sites, joined to an invented union on an invented chrM.
+    mito = file("${fixture}/gnomad_mito.vcf")
+    CHECK_JOINED_MITO(
+        JOINED_VALUES_MITO(
+            INVENTED_MITO_UNION(file("${fixture}/mito-union.vcf")),
+            channel.value(tuple(file("${fixture}/mito-reference.fa"), file("${fixture}/mito-reference.fa.fai"))),
+            mito,
+            [],
+            [],
+        ),
+        mito,
+    )
     // The union of the group's structural variants and copy-number segments, which are family A's, and its tables.
     sv_sites = SV_SITES(
         structural.join(checked.map { f -> [f] }).filter { _f, sv, cnv, _repeats -> sv || cnv }.map { f, sv, cnv, _repeats -> tuple(f, sv, cnv) }
@@ -150,6 +175,7 @@ workflow {
         },
         tables,
         joint,
+        joined,
         sv_tables,
         sv_union.map,
         '0.5.0',
@@ -157,6 +183,7 @@ workflow {
     )
     CHECK_TABLES(written.filter { w -> w[0] == 'family-a' }.map { w -> w[0..4] }, archive)
     CHECK_NO_ROLES(written.filter { w -> w[0] == 'family-b' }.map { w -> w[3] })
+    CHECK_JOINED(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[1], w[3]) }, polya, effects)
     CHECK_LARGER(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[1], w[3], w[5]) })
     // A family whose row names no such VCF gets no table of them.
     written
@@ -637,6 +664,122 @@ for name in ('alphagenome_avi', 'alphagenome_avi_breakdown', 'alphagenome_splici
 notice = 'By using this information, you agree to AlphaGenome Output Terms of Use found at '
 assert manifest['alphagenome_splicing']['terms'].startswith(notice), manifest
 assert not set(added) & set(manifest['omitted_columns']), manifest
+EOF
+    """
+}
+
+// An invented union on chrM, bgzipped with its index, as UNION_SITES writes a union.
+process INVENTED_MITO_UNION {
+    input:
+    path vcf
+
+    output:
+    tuple val('mito'), path("${vcf}.gz"), path("${vcf}.gz.tbi")
+
+    script:
+    """
+    bcftools view --no-version -Oz -o ${vcf}.gz ${vcf}
+    bcftools index -t ${vcf}.gz
+    """
+}
+
+// Family A's values from the two files on polyadenylation, after the columns of the echtvar archives: the flag of a
+// signal, which is true for the three alleles that change a base of one and false for every other allele, and
+// APARENT2's lowest and highest effect with the usage of the lowest row's site, for the four single-base changes that
+// the invented table scores. The manifest and the table's metadata record both files by name, size and SHA-256, and the
+// manifest lists the columns of gnomAD's mitochondrial sites, which the run did not name, as left out, after those of
+// the dated sources.
+process CHECK_JOINED {
+    input:
+    tuple path(variants), path(manifest)
+    path polya
+    path effects
+
+    script:
+    """
+    python3 - <<'EOF'
+import hashlib
+import json
+
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+variants = pq.read_table('${variants}')
+added = ('gencode_polya_signal', 'aparent2_min', 'aparent2_max', 'aparent2_ref_usage')
+at = variants.column_names.index('alphagenome_splicing')
+assert tuple(variants.column_names[at + 1:at + 1 + len(added)]) == added, variants.column_names
+assert variants.column_names[at + 1 + len(added)] == 'qual', variants.column_names
+kinds = [variants.schema.field(c).type for c in added]
+assert kinds == [pa.bool_(), pa.float32(), pa.float32(), pa.float32()], kinds
+assert not variants.schema.field('gencode_polya_signal').nullable, variants.schema
+rows = {r['variant_id']: tuple(r[c] for c in added) for r in variants.to_pylist()}
+assert rows == {
+    'chr1-100-G-A': (False, -2.25, 0.75, 0.5),
+    'chr1-100-G-C': (False, 0.03125, 0.03125, 0.5),
+    'chr1-200-G-A': (False, None, None, None),
+    'chr1-300-T-A': (True, None, None, None),
+    'chr1-400-TCA-T': (True, None, None, None),
+    'chr2-60-C-A': (False, -0.5, -0.5, 0.25),
+    'chr2-80-C-T': (True, None, None, None),
+    'chr2-90-GCGTAAA-G': (False, None, None, None),
+    'chrX-100-T-A': (False, None, None, None),
+    'chrX-100-T-C': (False, 1.5, 1.5, 0.0625),
+}, rows
+manifest = json.load(open('${manifest}'))
+files = {'gencode_polya': '${polya}', 'aparent2': '${effects}'}
+assert manifest['joined_files'] == [
+    {'source': source, 'file': name, 'bytes': len(open(name, 'rb').read()),
+     'sha256': hashlib.sha256(open(name, 'rb').read()).hexdigest()}
+    for source, name in files.items()], manifest
+assert json.loads(variants.schema.metadata[b'joined_files']) == manifest['joined_files'], variants.schema.metadata
+left_out = [c for c in manifest['omitted_columns'] if c.startswith('gnomad_mito_')]
+assert len(left_out) == 15 and left_out == manifest['omitted_columns'][-15:], manifest
+assert not [c for c in variants.column_names if c.startswith('gnomad_mito_')], variants.column_names
+EOF
+    """
+}
+
+// The values of the invented union on chrM from the invented file of gnomAD's mitochondrial sites: the single-base
+// change has the file's values, the deletion those of the record that the file writes six bases to the right, and the
+// allele that the file lacks none. The record is of the file as it was given.
+process CHECK_JOINED_MITO {
+    input:
+    path values
+    path mito
+
+    script:
+    """
+    python3 - <<'EOF'
+import hashlib
+import json
+import struct
+
+import pyarrow.parquet as pq
+
+
+def float32(value):
+    return struct.unpack('f', struct.pack('f', value))[0]
+
+
+table = pq.read_table('${values}/joined_values.parquet')
+assert table.column_names[0] == 'variant_id' and len(table.column_names) == 16, table.column_names
+assert all(c.startswith('gnomad_mito_') for c in table.column_names[1:]), table.column_names
+rows = {r.pop('variant_id'): {c.removeprefix('gnomad_mito_'): v for c, v in r.items()} for r in table.to_pylist()}
+assert list(rows) == ['chrM-10-A-C', 'chrM-12-C-T', 'chrM-30-GCA-G'], rows
+assert rows['chrM-10-A-C'] == {
+    'ac_hom': 8, 'ac_het': 2, 'af_hom': float32(0.002), 'af_het': float32(0.0005), 'an': 4000,
+    'max_heteroplasmy': 0.5, 'hapmax_af_hom': 0.125, 'hapmax_af_het': 0.03125, 'hapmax_hom_haplogroup': 'B',
+    'hapmax_het_haplogroup': 'B', 'faf_hapmax_hom': 0.0625, 'filters': ['PASS'], 'hap_defining': True,
+    'mitotip_score': 12.5, 'mitotip_prediction': 'possibly_benign'}, rows
+assert set(rows['chrM-12-C-T'].values()) == {None}, rows
+deletion = rows['chrM-30-GCA-G']
+assert (deletion['an'], deletion['ac_hom'], deletion['af_hom'], deletion['filters']) == (4000, 0, 0.0, ['npg']), rows
+assert (deletion['hap_defining'], deletion['hapmax_hom_haplogroup'], deletion['mitotip_score']) == (
+    False, None, None), rows
+mito = open('${mito}', 'rb').read()
+assert json.load(open('${values}/joined_values.json')) == {'files': [{
+    'source': 'gnomad_mito', 'file': '${mito}', 'bytes': len(mito),
+    'sha256': hashlib.sha256(mito).hexdigest()}]}
 EOF
     """
 }

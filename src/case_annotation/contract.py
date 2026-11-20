@@ -16,7 +16,14 @@ from typing import Any, Literal
 import pyarrow as pa
 import pydantic.json_schema
 
-from case_annotation import alphagenome_archives, annotation_tables, echtvar_values, family_tables, pedigree
+from case_annotation import (
+    alphagenome_archives,
+    annotation_tables,
+    echtvar_values,
+    family_tables,
+    joined_values,
+    pedigree,
+)
 
 # A family's id, a sample's, a group's and a catalog's: each names files and folders and goes into command lines.
 NAME = pedigree.NAME.pattern
@@ -139,6 +146,7 @@ def _family_tables_workflow() -> dict[str, Any]:
                 for source in echtvar_values.SOURCES.values()
                 if source is not echtvar_values.REQUIRED
             ),
+            *(_param(name, 'Path') for name in joined_values.SOURCES),
             _param('tools_container', 'String', required=True),
             _param('output_dir', 'String'),
             _param('arGuid', 'String'),
@@ -256,8 +264,8 @@ def tables() -> dict[str, Any]:
     A type is the name of an Arrow type, or `list` with its `element`, or `struct` with its `fields`. `nullable` is
     what the file declares. A column with a `source` holds the data of a source that a run can leave out, and the table
     of a run that did not name the source lacks the column: a dated source, by its name in a run config, or an echtvar
-    archive that a run need not read, by its param's name. `member` is the type of the column that each sequenced member
-    has after the others, named as the member's sample.
+    archive or a joined file that a run need not read, by its param's name. `member` is the type of the column that each
+    sequenced member has after the others, named as the member's sample.
     """
     described = []
     for name, table in family_tables.TABLES.items():
@@ -369,7 +377,8 @@ def _example_annotation() -> annotation_tables.AnnotationInfo:
 def example_manifest() -> family_tables.FamilyManifest:
     """An invented manifest: a trio with the tables of its larger variants.
 
-    Its run did not name dbSNP, and read AlphaGenome's scores and splicing scores and no breakdown of the scores.
+    Its run did not name dbSNP, read AlphaGenome's scores and splicing scores and no breakdown of the scores, and
+    joined gnomAD's mitochondrial sites and GENCODE's polyadenylation features and no effects of APARENT2.
     """
 
     def member(
@@ -433,9 +442,17 @@ def example_manifest() -> family_tables.FamilyManifest:
         alphagenome_splicing=echtvar_values.NoticedArchiveInfo(
             **_example_scores('alphagenome_splicing'), terms=alphagenome_archives.NOTICE
         ),
+        joined_files=tuple(
+            joined_values.JoinedFile(source=source.name, file=file, bytes=size, sha256=digit * 64)
+            for source, file, size, digit in (
+                (joined_values.GNOMAD_MITO, 'gnomad-mito.invented.vcf.bgz', 5_000_000, 'b'),
+                (joined_values.GENCODE_POLYA, 'gencode-polya.invented.gtf.gz', 2_000_000, 'c'),
+            )
+        ),
         omitted_columns=(
             *family_tables.VARIANT_SOURCES['dbSNP'],
             *family_tables.VARIANT_SOURCES['alphagenome_avi_breakdown'],
+            *family_tables.VARIANT_SOURCES['aparent2'],
         ),
         sv_annotation=annotation,
         sv_omitted_columns=(),
