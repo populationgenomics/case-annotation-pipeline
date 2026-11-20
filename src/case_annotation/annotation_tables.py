@@ -119,6 +119,23 @@ _SPLICEAI: Mapping[str, tuple[str, str]] = {
 # out. An entry with a key outside these is refused, so that a second set is never read as the first.
 _SPLICEAI_KEYS = frozenset({'geneId'}) | {key for keys in _SPLICEAI.values() for key in keys}
 
+# gnomAD's ancestry groups and then its two sexes, under the names the Annotator gives them, by the key that each of
+# gnomAD's two sets has on a variant. The exomes have no `ami` group.
+_GNOMAD_GROUPS: Mapping[str, tuple[str, ...]] = {
+    'gnomad': ('afr', 'ami', 'amr', 'asj', 'eas', 'fin', 'mid', 'nfe', 'sas', 'remaining', 'female', 'male'),
+    'gnomad-exome': ('afr', 'amr', 'asj', 'eas', 'fin', 'mid', 'nfe', 'sas', 'remaining', 'female', 'male'),
+}
+# The four values the Annotator gives of a group, by the name each has in a column, with the ending of its key:
+# `afrAf` is the frequency in `afr`.
+_GNOMAD_VALUES: Mapping[str, str] = {'af': 'Af', 'ac': 'Ac', 'an': 'An', 'hom': 'Hc'}
+# Every key of a gnomAD entry, by the entry's key on a variant. An entry with a key outside these is refused, so that a
+# group the columns have no field for is never left out of them without a word.
+_GNOMAD_KEYS: Mapping[str, frozenset[str]] = {
+    key: frozenset({'coverage', 'failedFilter'})
+    | {f'{group}{ending}' for group in ('all', *groups) for ending in _GNOMAD_VALUES.values()}
+    for key, groups in _GNOMAD_GROUPS.items()
+}
+
 
 def gnomad_fields(prefix: str) -> list[pa.Field]:
     # Illumina gives a frequency to six decimal places, which a 32-bit float holds.
@@ -128,6 +145,26 @@ def gnomad_fields(prefix: str) -> list[pa.Field]:
         pa.field(f'{prefix}_an', pa.int32()),
         pa.field(f'{prefix}_hom', pa.int32()),
         pa.field(f'{prefix}_failed_filter', pa.bool_()),
+    ]
+
+
+# What gnomAD counted in one ancestry group or one sex: the allele's frequency, its count, the number of alleles
+# called and the Annotator's count of homozygotes.
+GNOMAD_GROUP = pa.struct(
+    [
+        pa.field('af', pa.float32()),
+        pa.field('ac', pa.int32()),
+        pa.field('an', pa.int32()),
+        pa.field('hom', pa.int32()),
+    ]
+)
+
+
+def _gnomad_detail_fields(prefix: str, key: str) -> list[pa.Field]:
+    """The columns of a gnomAD entry beyond its all-sample values: its coverage, and a struct with a field per group."""
+    return [
+        pa.field(f'{prefix}_coverage', pa.int32()),
+        pa.field(f'{prefix}_groups', pa.struct([pa.field(group, GNOMAD_GROUP) for group in _GNOMAD_GROUPS[key]])),
     ]
 
 
@@ -149,6 +186,17 @@ CLINVAR_RECORD = pa.struct(
         pa.field('stars', pa.int8()),
         pa.field('last_evaluated', _STRING),
         pa.field('conditions', pa.list_(_STRING)),
+    ]
+)
+
+# One ClinVar record of another allele at the allele's position: the fields of a record of the allele itself, and after
+# them the two alleles that the record is of, as the Annotator writes them. The Annotator trims them, so they are not
+# spelt as the `ref` and `alt` of `variants` are.
+CLINVAR_OTHER_ALLELE = pa.struct(
+    [
+        *CLINVAR_RECORD,
+        pa.field('ref_allele', _STRING, nullable=False),
+        pa.field('alt_allele', _STRING, nullable=False),
     ]
 )
 
@@ -195,13 +243,18 @@ VARIANTS = pa.schema(
         pa.field('hgnc_ids', pa.list_(_HGNC_ID)),
         pa.field('genes', pa.list_(GENE)),
         pa.field('regulatory_features', pa.list_(REGULATORY_FEATURE)),
+        pa.field('in_low_complexity_region', pa.bool_()),
         *gnomad_fields('gnomad_genomes'),
+        *_gnomad_detail_fields('gnomad_genomes', 'gnomad'),
         *gnomad_fields('gnomad_exomes'),
+        *_gnomad_detail_fields('gnomad_exomes', 'gnomad-exome'),
         pa.field('alphamissense_max', _FLOAT),
         pa.field('alphamissense_max_class', _STRING),
         pa.field('revel', _FLOAT),
         pa.field('spliceai_max', _FLOAT),
         pa.field('primateai3d_max', _FLOAT),
+        pa.field('primateai3d_max_percentile', _FLOAT),
+        pa.field('primateai3d_max_class', _STRING),
         pa.field('promoterai_min', _FLOAT),
         pa.field('promoterai_max', _FLOAT),
         pa.field('dann', _FLOAT),
@@ -214,7 +267,10 @@ VARIANTS = pa.schema(
         pa.field('clinvar_stars', pa.int8()),
         pa.field('clinvar_conditions', pa.list_(_STRING)),
         pa.field('clinvar_last_evaluated', _STRING),
+        pa.field('clinvar_last_updated', _STRING),
+        pa.field('clinvar_pubmed_ids', pa.list_(_STRING)),
         pa.field('clinvar_records', pa.list_(CLINVAR_RECORD)),
+        pa.field('clinvar_other_alleles', pa.list_(CLINVAR_OTHER_ALLELE)),
     ]
 )
 
@@ -244,9 +300,13 @@ TRANSCRIPTS = pa.schema(
         pa.field('protein_pos', _STRING),
         pa.field('codons', _STRING),
         pa.field('amino_acids', _STRING),
+        pa.field('amino_acid_conservation', pa.list_(_FLOAT)),
         pa.field('alphamissense_pathogenicity', _FLOAT),
         pa.field('alphamissense_class', _STRING),
+        pa.field('alphamissense_is_isoform', pa.bool_()),
         pa.field('primateai3d_score', _FLOAT),
+        pa.field('primateai3d_percentile', _FLOAT),
+        pa.field('primateai3d_class', _STRING),
         pa.field('spliceai_max', _FLOAT),
         *(
             field
@@ -491,6 +551,39 @@ def gnomad_values(prefix: str, data: Mapping[str, Any] | None) -> dict[str, Any]
     }
 
 
+def _gnomad_details(prefix: str, key: str, data: Mapping[str, Any] | None, where: str) -> dict[str, Any]:
+    """The coverage and the groups of a gnomAD entry (_gnomad_detail_fields), and nothing for an allele without one.
+
+    A group that the entry leaves out has no struct. Fails on an entry without `coverage`, on a key outside
+    _GNOMAD_KEYS, and on a group with some of its four values and not the others.
+    """
+    if data is None:
+        return {}
+    _require(data, ('coverage',), key, where)
+    if unknown := sorted(set(data) - _GNOMAD_KEYS[key]):
+        raise ValueError(f'{where}: a {key} entry with the keys {unknown}, which the conversion does not know')
+    groups: dict[str, dict[str, Any] | None] = {}
+    for group in _GNOMAD_GROUPS[key]:
+        values = {name: data.get(f'{group}{ending}') for name, ending in _GNOMAD_VALUES.items()}
+        given = [value is not None for value in values.values()]
+        if any(given) and not all(given):
+            raise ValueError(f'{where}: a {key} entry with some of the four values of {group!r} and not the others')
+        groups[group] = values if all(given) else None
+    return {f'{prefix}_coverage': data['coverage'], f'{prefix}_groups': groups}
+
+
+def _conservation(transcript: Mapping[str, Any], where: str) -> list[float] | None:
+    """The amino-acid conservation scores of a transcript as the Annotator lists them, and None without any.
+
+    Fails on an `aminoAcidConservation` entry without `scores`.
+    """
+    entry = transcript.get('aminoAcidConservation')
+    if entry is None:
+        return None
+    _require(entry, ('scores',), 'transcript aminoAcidConservation', where)
+    return list(entry['scores']) or None
+
+
 def clinvar_record(record: Mapping[str, Any]) -> dict[str, Any]:
     germline = record.get('classifications', {}).get('germlineClassification', {})
     status = germline.get('reviewStatus')
@@ -548,6 +641,51 @@ def allele_clinvar(entries: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     their review (by_review), and the summary columns are the first record's.
     """
     return clinvar_columns(by_review([clinvar_record(e) for e in entries if e.get('isAlleleSpecific')]))
+
+
+def _pubmed_ids(entry: Mapping[str, Any]) -> list[str] | None:
+    """The PubMed ids that a ClinVar record cites, each once and sorted, and None for a record that cites none.
+
+    They are those of the record's germline classification and those of its submissions (`clinicalAssertions`).
+    """
+    germline = entry.get('classifications', {}).get('germlineClassification', {})
+    cited = set(germline.get('pubMedIds', ()))
+    for assertion in entry.get('clinicalAssertions', ()):
+        cited.update(assertion.get('pubMedIds', ()))
+    return sorted(cited) or None
+
+
+def _other_allele(entry: Mapping[str, Any], where: str) -> dict[str, Any]:
+    """A ClinVar record of another allele (CLINVAR_OTHER_ALLELE); fails without its accession or one of its alleles."""
+    _require(entry, ('accession', 'refAllele', 'altAllele'), 'ClinVar', where)
+    return clinvar_record(entry) | {'ref_allele': entry['refAllele'], 'alt_allele': entry['altAllele']}
+
+
+def variant_clinvar(entries: Sequence[Mapping[str, Any]], where: str) -> dict[str, Any]:
+    """The ClinVar columns of an allele of `variants`; nothing for an allele without an entry.
+
+    The allele's own records give what allele_clinvar gives. The first of them, which the summary columns are of, also
+    gives the date ClinVar last updated it and the PubMed ids it cites (_pubmed_ids). The entries that are not the
+    allele's own are the records of other alleles at its position, ordered as the allele's own are (by_review). Fails
+    on a record of the allele without `dateLastUpdated`, and as _other_allele does.
+    """
+    columns = allele_clinvar(entries)
+    own = [entry for entry in entries if entry.get('isAlleleSpecific')]
+    for entry in own:
+        _require(entry, ('dateLastUpdated',), 'ClinVar', where)
+    if own:
+        # Each record with what the two columns hold of it, in the order that allele_clinvar gave the records alone.
+        first = by_review(
+            [
+                clinvar_record(entry) | {'last_updated': entry['dateLastUpdated'], 'pubmed_ids': _pubmed_ids(entry)}
+                for entry in own
+            ]
+        )[0]
+        columns |= {'clinvar_last_updated': first['last_updated'], 'clinvar_pubmed_ids': first['pubmed_ids']}
+    others = by_review([_other_allele(entry, where) for entry in entries if not entry.get('isAlleleSpecific')])
+    if others:
+        columns['clinvar_other_alleles'] = others
+    return columns
 
 
 def _highest(entries: Iterable[Mapping[str, Any]], score: str, *id_keys: str) -> dict[str, Mapping[str, Any]]:
@@ -653,7 +791,11 @@ def position_rows(
     A SpliceAI score belongs to a gene, and a transcript row holds the highest score of each kind among the entries of
     its genes, with that score's distance. A PromoterAI entry belongs to a transcript, and the allele's
     `promoterai_min` and `promoterai_max` are over all its entries. The entries of both and of the regulatory features
-    are held to the keys this function reads (_spliceai_values, _require).
+    are held to the keys this function reads (_spliceai_values, _require), and so are the entries of gnomAD
+    (_gnomad_details), of ClinVar (variant_clinvar) and of a transcript's amino-acid conservation (_conservation).
+
+    The Annotator writes a flag only where it is true, so an allele without `inLowComplexityRegion` is outside those
+    regions, and an AlphaMissense entry without `isIsoform` is not of an isoform.
     """
     chrom, pos, ref = position['chromosome'], position['position'], position['refAllele']
     alts = position['altAlleles']
@@ -743,9 +885,13 @@ def position_rows(
                 'protein_pos': t.get('proteinPos'),
                 'codons': t.get('codons'),
                 'amino_acids': t.get('aminoAcids'),
+                'amino_acid_conservation': _conservation(t, where),
                 'alphamissense_pathogenicity': am.get('pathogenicity') if am else None,
                 'alphamissense_class': am.get('classification') if am else None,
+                'alphamissense_is_isoform': bool(am.get('isIsoform', False)) if am else None,
                 'primateai3d_score': p3d.get('score') if p3d else None,
+                'primateai3d_percentile': p3d.get('scorePercentile') if p3d else None,
+                'primateai3d_class': p3d.get('classification') if p3d else None,
                 **_spliceai_columns(gene_spliceai(t)),
                 'promoterai_score': promoter['score'] if promoter else None,
                 'promoterai_tss_distance': promoter['distanceFromTss'] if promoter else None,
@@ -778,20 +924,25 @@ def position_rows(
         'hgvsg': v.get('hgvsg'),
         'rsids': v.get('dbsnp') or None,
         'regulatory_features': _regulatory_features(v.get('regulatoryRegions', ()), where),
+        'in_low_complexity_region': bool(v.get('inLowComplexityRegion', False)),
         **gnomad_values('gnomad_genomes', v.get('gnomad')),
+        **_gnomad_details('gnomad_genomes', 'gnomad', v.get('gnomad'), where),
         **gnomad_values('gnomad_exomes', v.get('gnomad-exome')),
+        **_gnomad_details('gnomad_exomes', 'gnomad-exome', v.get('gnomad-exome'), where),
         'alphamissense_max': top_am['pathogenicity'] if top_am else None,
         'alphamissense_max_class': top_am.get('classification') if top_am else None,
         'revel': v.get('revel', {}).get('score'),
         'spliceai_max': max(splice_scores) if splice_scores else None,
         'primateai3d_max': top_p3d['score'] if top_p3d else None,
+        'primateai3d_max_percentile': top_p3d.get('scorePercentile') if top_p3d else None,
+        'primateai3d_max_class': top_p3d.get('classification') if top_p3d else None,
         'promoterai_min': min(promoterai_scores, default=None),
         'promoterai_max': max(promoterai_scores, default=None),
         'dann': v.get('dannScore'),
         'phylop': v.get('phylopScore'),
         'phylop_primate': v.get('phyloPPrimateScore'),
         'gerp': v.get('gerpScore'),
-        **allele_clinvar(v.get('clinvar', ())),
+        **variant_clinvar(v.get('clinvar', ()), where),
     }
     return row, transcript_rows, keys
 

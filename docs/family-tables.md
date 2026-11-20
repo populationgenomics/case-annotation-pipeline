@@ -1108,6 +1108,133 @@ catalog `202610`.
   and runs from -500 to 500.
 - `phylop_primate` and `phylop` have a value for SNVs only, and are null for every insertion and deletion.
 
+### gnomAD by group, missense scores and ClinVar at the position
+
+`gnomad_genomes_af`, `gnomad_genomes_ac`, `gnomad_genomes_an` and `gnomad_genomes_hom` are gnomAD's values over all its
+genomes: the allele's frequency, its count, the number of alleles called and the count of homozygotes.
+`gnomad_genomes_groups` has the same four values for each of gnomAD's ancestry groups and for each sex, as the Annotator
+gives them, and `gnomad_exomes_groups` has them for the exomes. Each is a struct with one field per group: `afr`, `ami`
+(in the genomes only), `amr`, `asj`, `eas`, `fin`, `mid`, `nfe`, `sas` and `remaining`, then `female` and `male`. A
+group is a struct too, with the fields `af`, `ac`, `an` and `hom`. A query reads a value by its path, such as
+`gnomad_genomes_groups.male.ac`, and DuckDB then reads that one value from the file and not the whole struct. This query
+returns how many copies of each allele of a region of chrX gnomAD counted in its male samples, and among how many
+alleles called:
+
+```python
+male_counts = con.sql(
+    """
+    SELECT variant_id, gnomad_genomes_groups.male.ac AS genomes_male_ac,
+           gnomad_genomes_groups.male.an AS genomes_male_an,
+           gnomad_exomes_groups.male.ac AS exomes_male_ac,
+           gnomad_exomes_groups.male.an AS exomes_male_an
+    FROM variants
+    WHERE chrom = 'chrX' AND pos BETWEEN $start AND $end
+    ORDER BY pos
+    """,
+    params={'start': 1_200_000, 'end': 1_300_000},
+).to_arrow_table()
+```
+
+The Annotator gives no value over several groups, such as the highest frequency in any of them, and the tables compute
+none from its groups. The one such value in the tables is gnomAD's own, `gnomad_joint_faf95_max`, the highest filtering
+allele frequency of its joint release. A query on the groups chooses them and takes the highest with `greatest`, which
+skips a group without a value. This one returns the alleles that are common in one of five groups, also where they are
+rare over all samples:
+
+```python
+common_in_a_group = con.sql(
+    """
+    SELECT variant_id, gnomad_genomes_af,
+           greatest(g.afr.af, g.amr.af, g.eas.af, g.nfe.af, g.sas.af) AS highest_group_af
+    FROM (SELECT *, gnomad_genomes_groups AS g FROM variants)
+    WHERE greatest(g.afr.af, g.amr.af, g.eas.af, g.nfe.af, g.sas.af) >= $min_af
+    """,
+    params={'min_af': 0.01},
+).to_arrow_table()
+```
+
+A frequency in a small group rests on few alleles, and the group's `an` says on how many.
+
+`clinvar_records` holds ClinVar's records of the allele itself. ClinVar's records of other alleles at the same position
+are in `clinvar_other_alleles`: a pathogenic change at a position is evidence about another change there that ClinVar
+calls of uncertain significance or has no record of. Each entry has the fields of an entry of `clinvar_records` and
+after them `ref_allele` and `alt_allele`, the two alleles that the record is of. This query lists the classified records
+at the positions of the family's alleles, each beside ClinVar's classification of the family's own allele:
+
+```python
+classified_at_the_position = con.sql(
+    """
+    SELECT v.variant_id, v.clinvar_classification, r.accession, r.ref_allele, r.alt_allele, r.variant_type,
+           r.classification, r.stars
+    FROM variants v
+    CROSS JOIN unnest(v.clinvar_other_alleles) AS u(r)
+    WHERE regexp_matches(r.classification, $pattern) AND r.stars >= $min_stars
+    ORDER BY v.pos
+    """,
+    params={'pattern': '^(Likely )?[Pp]athogenic', 'min_stars': 2},
+).to_arrow_table()
+```
+
+A query on these columns has to allow for the following.
+
+- A group that the Annotator's entry leaves out has no struct, so each of its four values reads as null, and an allele
+  without a gnomAD entry has no `gnomad_genomes_groups` at all. A comparison on a group's value drops such a row, as a
+  comparison on a null frequency does.
+- gnomAD's exomes have no `ami` group, so `gnomad_exomes_groups` has no such field and a query that reads it fails.
+- `hom` is the Annotator's `Hc`, which Illumina describes as the count of homozygous individuals. The Annotator gives no
+  count of hemizygotes under a name of its own. On chrX outside the pseudoautosomal regions that count is `male.ac`, and
+  `male.hom` is 0 there, as measured below.
+- `gnomad_genomes_coverage` and `gnomad_exomes_coverage` hold the `coverage` of the allele's gnomAD entry, which
+  Illumina describes as the average coverage. An allele without an entry has no coverage either. The column therefore
+  says how deeply gnomAD sequenced the site of an allele that it holds, and cannot tell an allele that gnomAD did not
+  see from a site that gnomAD did not cover.
+- `in_low_complexity_region` is true for an allele in one of gnomAD's low-complexity regions and false for every other
+  allele that the Annotator annotated. The Annotator writes the flag only where it is true, so the column is false in
+  every row where the Annotator ran without those regions. A family's manifest lists the source as `gnomAD_LCR` in
+  `annotation.data_sources` where the Annotator had it.
+- `primateai3d_percentile` and `primateai3d_class` in `transcripts` are of the PrimateAI-3D entry that gives the row its
+  `primateai3d_score`, and `primateai3d_max_percentile` and `primateai3d_max_class` in `variants` are of the entry that
+  gives `primateai3d_max`. Illumina gives the percentile from 0 to 1 and the class as `pathogenic` or `benign`. An entry
+  can hold a score without them, and both are then null beside the score.
+- `alphamissense_is_isoform` in `transcripts` is true where the row's AlphaMissense score comes from AlphaMissense's
+  file of isoform predictions and false where it comes from its main file. It is null in a row without a score.
+- `amino_acid_conservation` in `transcripts` is the list of amino-acid conservation scores that the Annotator writes on
+  the row's transcript, in its order. Illumina computes a score from UCSC's alignment of 100 vertebrates and describes
+  it as the share that is conserved with respect to the human amino acid, from 0.01 to 1. It has scores for few
+  transcripts, so a row without a list says nothing about conservation.
+- `clinvar_last_updated` and `clinvar_pubmed_ids` are of the record that the other summary columns are of, the first of
+  `clinvar_records`. The date is the one on which ClinVar last updated the record. The ids are those that the record's
+  germline classification and its submissions cite, each once, as strings sorted as text, and a record that cites
+  nothing has no list.
+- The Annotator marks a ClinVar record as the allele's own where the record's alternate allele matches the allele's, and
+  `clinvar_other_alleles` holds every other record that it lists on the allele, the best reviewed first. An allele
+  without one has no list. An allele can have such records and none of its own, and `clinvar_classification` is then
+  null.
+- `ref_allele` and `alt_allele` are spelt as the Annotator spells them. Illumina trims the alleles of a ClinVar record,
+  and its example of an insertion has `-` as the reference allele. They do not compare with `ref` and `alt` of
+  `variants`, which keep the base before an insertion or a deletion.
+- `clinvar_other_alleles` is a list of structs like `clinvar_records`, so a condition on a field of an entry is written
+  with `list_filter` or with `unnest`, as above.
+- `clinvar_last_updated`, `clinvar_pubmed_ids` and `clinvar_other_alleles` are `clinvar_` columns, so a run without
+  ClinVar leaves them out with the others.
+
+The following was measured on the Annotator's output for one whole genome with catalog `202610`. Illumina states none of
+it except the rule for the flags.
+
+- On chrX outside the pseudoautosomal regions, `male.hom` is 0 for every one of 242,291 common alleles with a `male.ac`
+  above 0. The Annotator therefore does not count a hemizygous male as a homozygote there, and `male.ac` is the number
+  of hemizygous males.
+- Every group can be missing from an entry as a whole, while the all-sample values never are. `male` is missing from
+  some entries of the genomes, and `mid` from many entries of the exomes.
+- Every gnomAD entry has `coverage` beside the allele's all-sample values, so no entry gives the coverage of a site
+  whose allele gnomAD lacks.
+- The Annotator writes each of the three flags as true or leaves it out, and never writes false:
+  `inLowComplexityRegion`, `isIsoform` of an AlphaMissense entry and `isAlleleSpecific` of a ClinVar record. Illumina's
+  page says the same of every boolean key.
+- The PrimateAI-3D entries with a score and neither a percentile nor a class are those of insertions and deletions.
+- An amino-acid conservation list has one score for nearly all transcripts that have one, two for a few, and at most
+  five.
+
 ### A variant by its rsID
 
 `rsids` holds an allele's dbSNP ids as a list, and `list_contains` finds an id wherever it stands in the list, also
@@ -1414,6 +1541,11 @@ the father carries on his X.
 In a pseudoautosomal region a male is called diploid, and his alleles there show as `het` or `hom_alt` like any
 autosome's. The VCF filter for the genotypes is `bcftools view -r chrX -i 'GT[2]="A" && GT[0]="R"'`, where `A` and `R`
 match a haploid call of the allele and of the reference.
+
+gnomAD's count of an allele in its male samples is `gnomad_genomes_groups.male.ac` for the genomes and
+`gnomad_exomes_groups.male.ac` for the exomes. On chrX outside the pseudoautosomal regions it is the number of
+hemizygous males, and `male.hom` is 0 there
+([gnomAD by group, missense scores and ClinVar at the position](#gnomad-by-group-missense-scores-and-clinvar-at-the-position)).
 
 ### Rare variants in every affected member
 
@@ -1918,16 +2050,16 @@ some have hundreds. `sv` has `hgnc_ids` as well.
 
 Columns that mean the same thing have the same name and type in every table of a family.
 
-| What                                     | Columns                                                                                                                                                                                                                                                                  |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| the position                             | `chrom` and `pos`, and `end_pos` in a table whose rows have an end                                                                                                                                                                                                       |
-| the allele                               | `variant_id`; `sv` names the row of `variants` that a record is the same allele as in `small_variant_id`                                                                                                                                                                 |
-| what the VCF record says                 | `ref`, `alt`, `qual` and `filters`, the record's FILTER values                                                                                                                                                                                                           |
-| a gene                                   | `gene_symbol` and its HGNC id `hgnc_id`, in `transcripts`, in `sv_transcripts` and in an entry of `genes`, and `hgnc_ids` where a row has several genes; `gene_id`, the id that the transcript's own gene model gives the gene, in `transcripts` and in `sv_transcripts` |
-| a transcript                             | `transcript_id`, `source`, `biotype`, `consequences`, `protein_id`, `is_mane_select`, `is_canonical`, `exon`, `intron`, `cdna_pos` and `protein_pos`, in `transcripts` and `sv_transcripts`                                                                              |
-| what a source holds on the allele itself | gnomAD's values in the `gnomad_genomes_` and `gnomad_exomes_` columns, and ClinVar's records in the `clinvar_` columns, in `variants` and for a record of `sv` that is annotated as a small variant                                                                      |
-| the members' calls                       | one struct column per sequenced member, named as the sample, after the columns that say what a row is of                                                                                                                                                                 |
-| the fields of a call                     | `gt`, `gq`, `pl`, `ft`, `dn` and `dq`, and in a table whose rows are variants `carries` and `zygosity`                                                                                                                                                                   |
+| What                                     | Columns                                                                                                                                                                                                                                                                                                                                          |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| the position                             | `chrom` and `pos`, and `end_pos` in a table whose rows have an end                                                                                                                                                                                                                                                                               |
+| the allele                               | `variant_id`; `sv` names the row of `variants` that a record is the same allele as in `small_variant_id`                                                                                                                                                                                                                                         |
+| what the VCF record says                 | `ref`, `alt`, `qual` and `filters`, the record's FILTER values                                                                                                                                                                                                                                                                                   |
+| a gene                                   | `gene_symbol` and its HGNC id `hgnc_id`, in `transcripts`, in `sv_transcripts` and in an entry of `genes`, and `hgnc_ids` where a row has several genes; `gene_id`, the id that the transcript's own gene model gives the gene, in `transcripts` and in `sv_transcripts`                                                                         |
+| a transcript                             | `transcript_id`, `source`, `biotype`, `consequences`, `protein_id`, `is_mane_select`, `is_canonical`, `exon`, `intron`, `cdna_pos` and `protein_pos`, in `transcripts` and `sv_transcripts`                                                                                                                                                      |
+| what a source holds on the allele itself | gnomAD's values in the `gnomad_genomes_` and `gnomad_exomes_` columns, and ClinVar's records in the `clinvar_` columns, in `variants` and for a record of `sv` that is annotated as a small variant; `variants` alone has gnomAD's coverage and groups, the last update and the PubMed ids of a ClinVar record, and the records of other alleles |
+| the members' calls                       | one struct column per sequenced member, named as the sample, after the columns that say what a row is of                                                                                                                                                                                                                                         |
+| the fields of a call                     | `gt`, `gq`, `pl`, `ft`, `dn` and `dq`, and in a table whose rows are variants `carries` and `zygosity`                                                                                                                                                                                                                                           |
 
 `variants` and `sv` are the tables whose rows are variants. In both, `carries` says whether the member carries the row's
 variant and `zygosity` on how many copies, where the call determines that. A genotype with a missing allele beside the
@@ -2007,15 +2139,15 @@ a key that is added under the same version.
 
 The tables share these properties:
 
-| Property           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| order of the rows  | sorted by chromosome (1 to 22, X, Y, M) and position; `sv` and `repeats` then by `end_pos` and their key, and `sv_transcripts` then by `end_pos`, `sv_id`, `variant_type` and `transcript_id`                                                                                                                                                                                                                                                                                                         |
-| compression        | zstd, in row groups of 100,000 rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| Bloom filters      | on the columns a lookup uses: in `variants` the variant id and the values of `hgnc_ids`; in `transcripts` the variant id, the transcript id, the gene symbol and id and the HGNC id; `sv_id` in `sv` and in `sv_transcripts`, which also has them on its transcript id, its gene symbol and id and its HGNC id; and `repeat_id` in `repeats`. DuckDB 2.0 does not use the one of `hgnc_ids` ([Variants in a gene](#variants-in-a-gene)), and a reader that tests a list's values against a filter can |
-| key-value metadata | the tables' version (`schema_version`), the table's name, the family, and the annotation's provenance (`annotation` and `gnomad_joint`, as in the manifest); `sv` and `sv_transcripts` carry the provenance of the annotation of the structural variants instead (`annotation`, which is the manifest's `sv_annotation`), and `repeats` none, since nothing annotated it                                                                                                                              |
-| variant id         | `<chrom>-<pos>-<ref>-<alt>` with the VCF's contig name, such as `chr2-1234567-C-T`                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| shared columns     | a column that means the same thing has the same name and type in every table ([Shared column names](#shared-column-names))                                                                                                                                                                                                                                                                                                                                                                            |
-| a missing value    | a null. That holds for the list columns `rsids`, `hgnc_ids`, `genes`, `regulatory_features`, `clinvar_records`, `clinvar_conditions`, `gnomad_sv_matches`, `pl` and `ft` too, and for `cipos`, `ciend` and the lists of a repeat's genotype: an allele without an rsID has no `rsids`, not an empty list. `filters` differs: in every table it holds the VCF record's FILTER values, and an empty list for a record whose FILTER is `.`                                                               |
+| Property           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| order of the rows  | sorted by chromosome (1 to 22, X, Y, M) and position; `sv` and `repeats` then by `end_pos` and their key, and `sv_transcripts` then by `end_pos`, `sv_id`, `variant_type` and `transcript_id`                                                                                                                                                                                                                                                                                                                     |
+| compression        | zstd, in row groups of 100,000 rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Bloom filters      | on the columns a lookup uses: in `variants` the variant id and the values of `hgnc_ids`; in `transcripts` the variant id, the transcript id, the gene symbol and id and the HGNC id; `sv_id` in `sv` and in `sv_transcripts`, which also has them on its transcript id, its gene symbol and id and its HGNC id; and `repeat_id` in `repeats`. DuckDB 2.0 does not use the one of `hgnc_ids` ([Variants in a gene](#variants-in-a-gene)), and a reader that tests a list's values against a filter can             |
+| key-value metadata | the tables' version (`schema_version`), the table's name, the family, and the annotation's provenance (`annotation` and `gnomad_joint`, as in the manifest); `sv` and `sv_transcripts` carry the provenance of the annotation of the structural variants instead (`annotation`, which is the manifest's `sv_annotation`), and `repeats` none, since nothing annotated it                                                                                                                                          |
+| variant id         | `<chrom>-<pos>-<ref>-<alt>` with the VCF's contig name, such as `chr2-1234567-C-T`                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| shared columns     | a column that means the same thing has the same name and type in every table ([Shared column names](#shared-column-names))                                                                                                                                                                                                                                                                                                                                                                                        |
+| a missing value    | a null. That holds for the list columns `rsids`, `hgnc_ids`, `genes`, `regulatory_features`, `clinvar_records`, `clinvar_other_alleles`, `clinvar_conditions`, `clinvar_pubmed_ids`, `amino_acid_conservation`, `gnomad_sv_matches`, `pl` and `ft` too, and for `cipos`, `ciend` and the lists of a repeat's genotype: an allele without an rsID has no `rsids`, not an empty list. `filters` differs: in every table it holds the VCF record's FILTER values, and an empty list for a record whose FILTER is `.` |
 
 The tables hold no gene-level knowledge beyond a gene's identifiers. What OMIM, ClinGen and other gene–disease sources
 say about a gene is knowledge that the reader brings.

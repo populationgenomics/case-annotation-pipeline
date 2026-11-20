@@ -120,6 +120,23 @@ _REGULATORY: tuple[list[dict[str, str]] | None, ...] = (
     [{'id': 'R01', 'type': 'enhancer'}, {'id': 'R02', 'type': 'promoter'}],
     *(None,) * 5,
 )
+# What gnomAD's genomes hold of the first allele of the union beyond the all-sample values: the coverage, and two
+# groups of which one has a count. The other alleles have neither.
+_COVERAGE = 31
+_GROUPS: dict[str, dict[str, float | int]] = {
+    'afr': {'af': 0.5, 'ac': 2, 'an': 4, 'hom': 0},
+    'male': {'af': 0.25, 'ac': 3, 'an': 12, 'hom': 1},
+}
+# The invented ClinVar record of another allele at the first allele's position.
+_OTHER_ALLELE = {
+    'accession': 'VCV9',
+    'classification': 'Pathogenic',
+    'review_status': 'reviewed by expert panel',
+    'stars': 3,
+    'conditions': ['an invented condition'],
+    'ref_allele': 'G',
+    'alt_allele': 'T',
+}
 # What a predictor says of the one transcript of each allele of the union: a SpliceAI score with its distance, and a
 # PromoterAI score with its distance from the transcript's start.
 _PREDICTED = {
@@ -174,10 +191,11 @@ def _write_union(path: pathlib.Path, alleles: Sequence[str], info: annotation_ta
     (path / 'variants').mkdir(parents=True)
     (path / 'transcripts').mkdir()
     variants, transcripts = [], []
-    for vid, rsids, hgnc_ids, genes, regulatory in zip(
-        [*alleles, 'chr2-500-C-A'], _RSIDS, _HGNC_IDS, _GENES, _REGULATORY, strict=True
+    for index, (vid, rsids, hgnc_ids, genes, regulatory) in enumerate(
+        zip([*alleles, 'chr2-500-C-A'], _RSIDS, _HGNC_IDS, _GENES, _REGULATORY, strict=True)
     ):
         chrom, pos, ref, alt = vid.split('-')
+        first = index == 0
         variants.append(
             {
                 'chrom': chrom,
@@ -190,7 +208,10 @@ def _write_union(path: pathlib.Path, alleles: Sequence[str], info: annotation_ta
                 'regulatory_features': regulatory,
                 'rsids': rsids,
                 'clinvar_accession': 'VCV1',
+                'clinvar_other_alleles': [_OTHER_ALLELE] if first else None,
                 **_PER_TYPE,
+                'gnomad_genomes_coverage': _COVERAGE if first else None,
+                'gnomad_genomes_groups': _GROUPS if first else None,
             }
         )
         transcripts.append(
@@ -421,6 +442,58 @@ def test_an_alleles_regulatory_features_are_a_list_of_structs_and_an_allele_with
     assert by_type == [{'variant_id': _ALLELES[0]}]
 
 
+def test_gnomads_groups_are_a_struct_whose_fields_a_query_reads_by_name(tmp_path: pathlib.Path) -> None:
+    family_tables.assemble(**_inputs(tmp_path))
+    path = tmp_path / 'out' / 'variants.parquet'
+    schema = pq.read_schema(path)
+    for kind in ('genomes', 'exomes'):
+        declared = annotation_tables.VARIANTS.field(f'gnomad_{kind}_groups').type
+        assert schema.field(f'gnomad_{kind}_groups').type == declared
+    rows = _rows(
+        path,
+        """
+        SELECT variant_id, gnomad_genomes_coverage AS coverage, gnomad_genomes_groups.male.ac AS male_ac,
+               greatest(gnomad_genomes_groups.afr.af, gnomad_genomes_groups.nfe.af) AS highest,
+               gnomad_genomes_groups IS NULL AS no_groups, gnomad_exomes_groups IS NULL AS no_exome_groups
+        FROM t
+        """,
+    )
+    # A group without values is skipped by `greatest`, and an allele without an entry has no struct at all.
+    assert rows[0] == {
+        'variant_id': _ALLELES[0],
+        'coverage': _COVERAGE,
+        'male_ac': 3,
+        'highest': 0.5,
+        'no_groups': False,
+        'no_exome_groups': True,
+    }
+    assert {(r['coverage'], r['male_ac'], r['highest'], r['no_groups']) for r in rows[1:]} == {(None, None, None, True)}
+    held = {r['variant_id']: r['g'] for r in _rows(path, 'SELECT variant_id, gnomad_genomes_groups AS g FROM t')}
+    assert {group: values for group, values in held[_ALLELES[0]].items() if values is not None} == _GROUPS
+
+
+def test_the_clinvar_records_of_other_alleles_are_a_list_of_structs_and_an_allele_without_any_has_none(
+    tmp_path: pathlib.Path,
+) -> None:
+    family_tables.assemble(**_inputs(tmp_path))
+    path = tmp_path / 'out' / 'variants.parquet'
+    kind = pq.read_schema(path).field('clinvar_other_alleles').type
+    assert kind == pa.list_(annotation_tables.CLINVAR_OTHER_ALLELE)
+    rows = {v['variant_id']: v['clinvar_other_alleles'] for v in _rows(path)}
+    assert set(rows) == set(_ALLELES)
+    assert {vid for vid, held in rows.items() if held is not None} == {_ALLELES[0]}
+    (entry,) = rows[_ALLELES[0]]
+    assert {name: value for name, value in entry.items() if value is not None} == _OTHER_ALLELE
+    classified = _rows(
+        path,
+        """
+        SELECT variant_id FROM t
+        WHERE len(list_filter(clinvar_other_alleles, lambda r: r.stars >= 2 AND r.classification = 'Pathogenic')) > 0
+        """,
+    )
+    assert classified == [{'variant_id': _ALLELES[0]}]
+
+
 def test_the_transcripts_table_has_the_columns_and_types_of_the_unions_with_their_values(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -484,6 +557,14 @@ def test_the_columns_of_a_dated_source_the_run_did_not_name_are_left_out(tmp_pat
     assert 'gnomad_genomes_af' in columns
     assert 'gnomad_joint_af' in columns
     assert 'rsids' in manifest.omitted_columns
+    # Every ClinVar column is left out, also the ones of the records of other alleles and of the PubMed ids, and no
+    # column of a current source is.
+    clinvar = {'clinvar_records', 'clinvar_other_alleles', 'clinvar_pubmed_ids', 'clinvar_last_updated'}
+    assert clinvar <= set(manifest.omitted_columns)
+    assert set(manifest.omitted_columns) == {'rsids'} | {
+        name for name in annotation_tables.VARIANTS.names if name.startswith('clinvar_')
+    }
+    assert {'gnomad_genomes_groups', 'gnomad_exomes_coverage', 'in_low_complexity_region'} <= set(columns)
 
 
 def test_the_tables_carry_their_metadata_row_groups_and_bloom_filters(
