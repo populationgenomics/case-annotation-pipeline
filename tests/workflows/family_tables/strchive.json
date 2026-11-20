@@ -2,6 +2,9 @@
   {
     "id": "INVA_GENEA",
     "gene": "GENEA",
+    "evidence": [
+      "Definitive"
+    ],
     "chrom": "chr1",
     "start_hg38": 47,
     "stop_hg38": 83,
@@ -25,6 +28,9 @@
   {
     "id": "INVB_GENEB",
     "gene": "GENEB",
+    "evidence": [
+      "Limited"
+    ],
     "chrom": "chr2",
     "start_hg38": 100,
     "stop_hg38": 130,
@@ -49,6 +55,9 @@
   {
     "id": "INVX_GENEX",
     "gene": "GENEX",
+    "evidence": [
+      "Refuted"
+    ],
     "chrom": "chrX",
     "start_hg38": 380,
     "stop_hg38": 470,

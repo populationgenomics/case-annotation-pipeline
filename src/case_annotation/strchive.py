@@ -9,6 +9,8 @@ column says whether a member's allele is pathogenic: a reader compares the sizes
 A row is matched to an entry by what both publish about the repeat, and by no name of it, so that the rule holds for
 any genotyper's catalogue. The two lie on one chromosome, their intervals share a base, and the row's repeat unit is
 one of the entry's motifs (same_repeat). A row that matches no entry has nulls, and a row that matches two is refused.
+One more column says whether the row's interval is the entry's own: only then do a member's sizes and the entry's
+ranges count the same stretch.
 
 The file states neither its release nor a date. STRchive is a dated source, so a run that gives the file states both
 (Release), and a family's manifest records them as stated.
@@ -38,20 +40,30 @@ _INT = pa.int32()
 _INT_MAX = 2**31 - 1
 _RANGES = ('benign', 'intermediate', 'pathogenic')
 _BOUNDS = tuple(f'{kind}_{bound}' for kind in _RANGES for bound in ('min', 'max'))
+# Whether a row's interval is its entry's, start and stop alike: the one column that no field of the file gives.
+SAME_INTERVAL = 'strchive_same_interval'
 # The columns of repeats that hold an entry's values, each named as STRchive's field with the prefix. The six bounds
-# count repeat units of the row's repeat unit's length (Locus.motifs). The entry's interval is among them because a
-# catalogue can draw the repeat's ends elsewhere than STRchive does: a member's size and a bound then count units of
-# one length over different stretches, and nothing here converts one to the other.
+# count repeat units of the row's repeat unit's length (Locus.motifs). A catalogue can draw the repeat's ends
+# elsewhere than STRchive does. A member's size and a bound then count units of one length over different stretches,
+# and nothing here converts one to the other: the entry's interval is a column, and SAME_INTERVAL says where the two
+# intervals are one.
 FIELDS = (
     pa.field('strchive_id', _STRING),
     pa.field('strchive_gene', _STRING),
+    pa.field('strchive_evidence', _STRING),
     pa.field('strchive_inheritance', pa.list_(_STRING)),
     pa.field('strchive_start_hg38', _INT),
     pa.field('strchive_stop_hg38', _INT),
+    pa.field(SAME_INTERVAL, pa.bool_()),
     pa.field('strchive_pathogenic_motif_reference_orientation', pa.list_(_STRING)),
     *(pa.field(f'strchive_{bound}', _INT) for bound in _BOUNDS),
 )
 COLUMNS = tuple(field.name for field in FIELDS)
+# STRchive's levels of evidence for the link between a locus and its disease, as its site lists its classifications.
+# The releases up to v2.28.0 use all of them but `No Known Relationship`.
+LEVELS = frozenset(
+    {'Definitive', 'Strong', 'Moderate', 'Limited', 'Disputed', 'Refuted', 'No Known Relationship', 'Provisional'}
+)
 
 # The bases that a code of a motif or of a repeat unit stands for. STRchive writes N in a motif, and a genotyper's
 # catalogue any IUPAC code in a unit.
@@ -128,7 +140,8 @@ class Locus:
     its reference motif and its pathogenic motifs in the reference's orientation, those as long as its first
     pathogenic motif: STRchive counts a size in units of that length, so a row whose unit is one of them has sizes in
     the unit of the entry's ranges. The length is not read from the entry's `motif_len`, which in every release up to
-    v2.28.0 is another number for some locus. `columns` are the entry's values of FIELDS.
+    v2.28.0 is another number for some locus. `columns` are the entry's values of FIELDS, all but SAME_INTERVAL, which
+    is of a row and its entry together.
     """
 
     chrom: str
@@ -179,6 +192,21 @@ def _motifs(entry: Mapping[str, Any], key: str, where: str) -> tuple[str, ...]:
     return motifs
 
 
+def _evidence(entry: Mapping[str, Any], where: str) -> str | None:
+    """The entry's level of evidence, which the file gives as a list of one level, or of none.
+
+    The releases before v2.18.0 have no such field, and `read` refuses a file in which only some entries have it.
+    """
+    if 'evidence' not in entry:
+        return None
+    levels = _texts(entry, 'evidence', where)
+    if len(levels) > 1 or not set(levels) <= LEVELS:
+        raise ValueError(
+            f'{where}: evidence is {list(levels)}, not one of the levels {", ".join(sorted(LEVELS))}, or no level'
+        )
+    return levels[0] if levels else None
+
+
 def _locus(entry: Mapping[str, Any], where: str) -> Locus:
     locus_id = _text(entry, 'id', where)
     where = f'{where} ({locus_id})'
@@ -208,6 +236,7 @@ def _locus(entry: Mapping[str, Any], where: str) -> Locus:
         columns={
             'strchive_id': locus_id,
             'strchive_gene': _text(entry, 'gene', where),
+            'strchive_evidence': _evidence(entry, where),
             # A list without an entry is a null, as every list of the tables is.
             'strchive_inheritance': list(inheritance) or None,
             'strchive_start_hg38': start,
@@ -226,7 +255,8 @@ def read(path: pathlib.Path) -> tuple[Locus, ...]:
             read, its id, gene or chromosome is no text or the chromosome no primary one, a coordinate or a bound of a
             range is no whole number, its start is not before its stop, the minimum of a range is above its maximum,
             its motifs or its inheritance are no list of texts, a motif holds something other than bases and IUPAC
-            codes, it has no pathogenic motif, or two loci share an id.
+            codes, it has no pathogenic motif, its evidence is not one of STRchive's levels or none, some loci have an
+            evidence and others lack the field, or two loci share an id.
     """
     try:
         entries = json.loads(path.read_bytes())
@@ -235,6 +265,10 @@ def read(path: pathlib.Path) -> tuple[Locus, ...]:
         raise ValueError(f'{path}: not JSON: {unreadable}') from unreadable
     if not isinstance(entries, list) or not entries or not all(isinstance(entry, dict) for entry in entries):
         raise ValueError(f"{path}: not STRchive's loci, which are a list with an object for each locus")
+    # A release has the field in every entry or, before v2.18.0, in none, and its column is then null in every row.
+    without = [number for number, entry in enumerate(entries, start=1) if 'evidence' not in entry]
+    if without and len(without) < len(entries):
+        raise ValueError(f'{path}: locus {without[0]} has no evidence, which other loci of the file have')
     loci: dict[str, Locus] = {}
     for number, entry in enumerate(entries, start=1):
         locus = _locus(entry, f'{path}: locus {number}')
@@ -278,7 +312,8 @@ def _matches(row: Mapping[str, Any], locus: Locus) -> bool:
 def annotate(rows: Sequence[Mapping[str, Any]], loci: Sequence[Locus]) -> tuple[list[dict[str, Any]], int]:
     """The rows of repeats, each with the values of its entry of STRchive, and the number of rows that have one.
 
-    A row without an entry has a null in each of the columns.
+    A row with an entry also says whether its interval is the entry's. A row without one has a null in each of the
+    columns.
 
     Raises:
         ValueError: if a row matches two entries, which no release of STRchive that was read gives a repeat.
@@ -293,5 +328,9 @@ def annotate(rows: Sequence[Mapping[str, Any]], loci: Sequence[Locus]) -> tuple[
                 f'STRchive loci {[locus.id for locus in found]}, and a repeat is of one locus'
             )
         matched += len(found)
-        annotated.append({**row, **(found[0].columns if found else dict.fromkeys(COLUMNS))})
+        values: Mapping[str, Any] = dict.fromkeys(COLUMNS)
+        if found:
+            same = (row['pos'], row['end_pos']) == (found[0].start, found[0].stop)
+            values = {**found[0].columns, SAME_INTERVAL: same}
+        annotated.append({**row, **values})
     return annotated, matched

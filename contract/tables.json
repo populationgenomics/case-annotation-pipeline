@@ -2559,6 +2559,12 @@
           "source": "strchive"
         },
         {
+          "name": "strchive_evidence",
+          "type": "string",
+          "nullable": true,
+          "source": "strchive"
+        },
+        {
           "name": "strchive_inheritance",
           "type": "list",
           "nullable": true,
@@ -2577,6 +2583,12 @@
         {
           "name": "strchive_stop_hg38",
           "type": "int32",
+          "nullable": true,
+          "source": "strchive"
+        },
+        {
+          "name": "strchive_same_interval",
+          "type": "bool",
           "nullable": true,
           "source": "strchive"
         },

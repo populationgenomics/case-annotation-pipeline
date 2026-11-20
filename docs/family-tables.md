@@ -2353,22 +2353,25 @@ to every repeat of the catalogue, which rarely makes sense.
 
 ### A repeat in STRchive's pathogenic range
 
-A run that was given a release of STRchive has twelve more columns in `repeats`
+A run that was given a release of STRchive has fourteen more columns in `repeats`
 ([STRchive's ranges of the repeats](annotation.md#strchives-ranges-of-the-repeats)). STRchive curates the tandem repeats
 that are linked to a disease, and a row has its values where the row's repeat is one of STRchive's loci
-([Matching a repeat to its STRchive locus](annotation.md#matching-a-repeat-to-its-strchive-locus)). Each column holds
-one field of STRchive's file as the file gives it, under the field's name with `strchive_` before it.
+([Matching a repeat to its STRchive locus](annotation.md#matching-a-repeat-to-its-strchive-locus)). Thirteen of the
+columns hold one field of STRchive's file as the file gives it, under the field's name with `strchive_` before it, and
+`strchive_same_interval` compares the row with its locus.
 
-| Column                                                   | Holds                                                                                                                                                                                          | STRchive's field                       |
-| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| `strchive_id`                                            | STRchive's id of the locus, which joins an abbreviation of the disease and the gene                                                                                                            | `id`                                   |
-| `strchive_gene`                                          | the gene's symbol as STRchive writes it                                                                                                                                                        | `gene`                                 |
-| `strchive_inheritance`                                   | the modes of inheritance of the disease as a list of STRchive's abbreviations, such as `AD` for autosomal dominant                                                                             | `inheritance`                          |
-| `strchive_start_hg38`, `strchive_stop_hg38`              | the stretch of GRCh38 that STRchive takes as the repeat, as 32-bit integers in the form of the row's `pos` and `end_pos`: the repeat's bases are those after the first number up to the second | `start_hg38`, `stop_hg38`              |
-| `strchive_pathogenic_motif_reference_orientation`        | the motifs whose repeat causes the disease, as a list, on the reference's strand                                                                                                               | the same name                          |
-| `strchive_benign_min`, `strchive_benign_max`             | the smallest and the largest number of repeat units of an allele in the benign range, as 32-bit integers                                                                                       | `benign_min`, `benign_max`             |
-| `strchive_intermediate_min`, `strchive_intermediate_max` | the same for the intermediate range, which lies between a benign size and a pathogenic one                                                                                                     | `intermediate_min`, `intermediate_max` |
-| `strchive_pathogenic_min`, `strchive_pathogenic_max`     | the same for the pathogenic range                                                                                                                                                              | `pathogenic_min`, `pathogenic_max`     |
+| Column                                                   | Holds                                                                                                                                                                                                 | STRchive's field                               |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `strchive_id`                                            | STRchive's id of the locus, which joins an abbreviation of the disease and the gene                                                                                                                   | `id`                                           |
+| `strchive_gene`                                          | the gene's symbol as STRchive writes it                                                                                                                                                               | `gene`                                         |
+| `strchive_evidence`                                      | STRchive's level of evidence for the link between the locus and the disease, one of the eight below; null where STRchive gives none, which holds for every locus of a release before v2.18.0          | `evidence`                                     |
+| `strchive_inheritance`                                   | the modes of inheritance of the disease as a list of STRchive's abbreviations, such as `AD` for autosomal dominant                                                                                    | `inheritance`                                  |
+| `strchive_start_hg38`, `strchive_stop_hg38`              | the stretch of GRCh38 that STRchive takes as the repeat, as 32-bit integers in the form of the row's `pos` and `end_pos`: the repeat's bases are those after the first number up to the second        | `start_hg38`, `stop_hg38`                      |
+| `strchive_same_interval`                                 | true where the row's `pos` and `end_pos` are STRchive's start and stop, and false where the row matched its locus by an overlap alone                                                                 | none: the comparison of the row with the locus |
+| `strchive_pathogenic_motif_reference_orientation`        | the motifs whose repeat causes the disease, as a list, on the reference's strand                                                                                                                      | the same name                                  |
+| `strchive_benign_min`, `strchive_benign_max`             | the smallest and the largest number of repeat units of an allele in the benign range, as 32-bit integers. A member's size compares with them as it stands only where `strchive_same_interval` is true | `benign_min`, `benign_max`                     |
+| `strchive_intermediate_min`, `strchive_intermediate_max` | the same for the intermediate range, which lies between a benign size and a pathogenic one, with the same condition                                                                                   | `intermediate_min`, `intermediate_max`         |
+| `strchive_pathogenic_min`, `strchive_pathogenic_max`     | the same for the pathogenic range, with the same condition                                                                                                                                            | `pathogenic_min`, `pathogenic_max`             |
 
 A bound and a member's size are both numbers of repeat units. STRchive gives a bound as a number of units, and `repcn`
 in a member's column is the number of units of the row's `repeat_unit` in each of the member's alleles. A row has
@@ -2377,52 +2380,76 @@ bases.
 
 > [!WARNING]
 >
-> The two numbers count the same stretch only where the genotyper's catalogue and STRchive draw the repeat alike. Where
-> `end_pos - pos` and `strchive_stop_hg38 - strchive_start_hg38` differ by the length of a unit or more, a member's size
-> can lie a fixed number of units below or above STRchive's count of the same allele, and the tables convert nothing.
-> For one polyalanine repeat a public catalogue sizes 6 units of the reference where STRchive counts 10, at a locus
-> whose benign and pathogenic sizes are two units apart. For such a row, read how STRchive's entry of `strchive_id`
-> counts the repeat before comparing.
+> A member's size is directly comparable with STRchive's ranges only in a row where `strchive_same_interval` is true. In
+> any other row the genotyper's catalogue and STRchive draw the ends of the repeat differently, so the two numbers can
+> count different stretches: a member's size can then lie a fixed number of units below or above STRchive's count of the
+> same allele, and the tables convert nothing. For one polyalanine repeat a public catalogue sizes 6 units of the
+> reference where STRchive counts 10, at a locus whose benign and pathogenic sizes are two units apart. The column is
+> also false where the two intervals differ by a base or two, less than one unit, and the two interval columns show how
+> far apart they are. For a row where it is false, read how STRchive's entry of `strchive_id` counts the repeat before
+> comparing.
 
-This toy table is the `repeats` of the worked example's family, with an invented locus of STRchive for the first of two
-invented repeats. STRchive lists no locus for the second, whose columns are null.
+STRchive's site lists its levels of evidence with these descriptions. The releases up to v2.28.0 use all of them but
+`No Known Relationship`.
 
-| `repeat_id` | `repeat_unit` | `pos` and `end_pos` | `strchive_id` | STRchive's interval | benign  | intermediate | pathogenic | `S0101.repcn` | `S0102.repcn` | `S0103.repcn` |
-| ----------- | ------------- | ------------------- | ------------- | ------------------- | ------- | ------------ | ---------- | ------------- | ------------- | ------------- |
-| `EXRPT1`    | `CAG`         | 1230000, 1230057    | `EXD_EXMPL1`  | 1229999, 1230058    | 9 to 26 | 27 to 35     | 36 to 250  | `[17, 19]`    | `[19, 30]`    | `[17, 52]`    |
-| `EXRPT2`    | `CGG`         | 5000000, 5000060    | null          | null                | null    | null         | null       | `[20]`        | `[20, 29]`    | `[20, 29]`    |
+| `strchive_evidence`     | STRchive's description                                                             |
+| ----------------------- | ---------------------------------------------------------------------------------- |
+| `Definitive`            | "There is definitive evidence for this locus-disease relationship"                 |
+| `Strong`                | "There is strong evidence for this locus-disease relationship"                     |
+| `Moderate`              | "There is moderate evidence for this locus-disease relationship"                   |
+| `Limited`               | "There is limited evidence for this locus-disease relationship"                    |
+| `Disputed`              | "Evidence disputes this locus-disease relationship"                                |
+| `Refuted`               | "Evidence refutes this locus-disease relationship"                                 |
+| `No Known Relationship` | "No known evidence for this locus-disease relationship"                            |
+| `Provisional`           | "This locus-disease relationship has been proposed but has not yet been evaluated" |
 
-No column says that a member's allele is pathogenic: the query compares each member's longer allele with the two ends of
-the range, and returns the lengths of the two intervals beside the result. It reads no role, so it serves any family,
-and `UNPIVOT` turns the members' columns into one row for each repeat and member.
+This toy table is the `repeats` of the worked example's family, with three invented repeats and two invented loci of
+STRchive. The catalogue and STRchive draw `EXRPT1` alike. STRchive's locus of `EXRPT3` is longer than the stretch that
+the catalogue sizes, and STRchive lists no locus for `EXRPT2`, whose columns are null.
+
+| `repeat_id` | `pos`, `end_pos` | `strchive_id` | `strchive_evidence` | STRchive's interval | `strchive_same_interval` | pathogenic | `S0101.repcn` | `S0102.repcn` | `S0103.repcn` |
+| ----------- | ---------------- | ------------- | ------------------- | ------------------- | ------------------------ | ---------- | ------------- | ------------- | ------------- |
+| `EXRPT1`    | 1230000, 1230057 | `EXD_EXMPL1`  | `Definitive`        | 1230000, 1230057    | true                     | 36 to 250  | `[17, 19]`    | `[19, 30]`    | `[17, 52]`    |
+| `EXRPT3`    | 1300000, 1300018 | `EXD3_EXMPL3` | `Limited`           | 1300000, 1300030    | false                    | 12 to 18   | `[6, 13]`     | `[6, 6]`      | `[6, 13]`     |
+| `EXRPT2`    | 5000000, 5000060 | null          | null                | null                | null                     | null       | `[20]`        | `[20, 29]`    | `[20, 29]`    |
+
+No column says that a member's allele is pathogenic. The query keeps the rows whose interval is STRchive's own and
+compares each member's longer allele with the two ends of the pathogenic range. It reads no role, so it serves any
+family, and `UNPIVOT` turns the members' columns into one row for each repeat and member.
 
 ```python
 in_pathogenic_range = con.sql(
     f"""
-    SELECT repeat_id, strchive_id, strchive_gene, strchive_inheritance, member,
+    SELECT repeat_id, strchive_id, strchive_gene, strchive_evidence, strchive_inheritance, member,
            list_max(genotype.repcn) AS longer, list_max(genotype.repci_upper) AS longer_upper,
-           strchive_pathogenic_min, strchive_pathogenic_max,
-           end_pos - pos AS sized_bases, strchive_stop_hg38 - strchive_start_hg38 AS strchive_bases
+           strchive_pathogenic_min, strchive_pathogenic_max
     FROM (UNPIVOT repeats ON {member_columns} INTO NAME member VALUE genotype)
-    WHERE list_max(genotype.repcn) >= strchive_pathogenic_min
+    WHERE strchive_same_interval
+      AND list_max(genotype.repcn) >= strchive_pathogenic_min
       AND list_max(genotype.repcn) <= strchive_pathogenic_max
     ORDER BY repeat_id, member
     """
 ).to_arrow_table()
 ```
 
-On the toy table it returns one row: `EXRPT1` of the locus `EXD_EXMPL1` in `EXMPL1`, inherited as `['AD']`, for the
-member `S0103`, whose longer allele has 52 units, within the range from 36 to 250. The catalogue sizes 57 bases there
-and STRchive's interval has 59, less than one unit of three bases apart, so the two count the same stretch. Her mother's
-longer allele of 30 units is in the intermediate range, which the same query finds with the two `strchive_intermediate_`
-columns. `EXRPT2` is not returned for anyone, because a comparison with a null bound is never true.
+On the toy table it returns one row: `EXRPT1` of the locus `EXD_EXMPL1` in `EXMPL1`, with the evidence `Definitive`,
+inherited as `['AD']`, for the member `S0103`, whose longer allele has 52 units, within the range from 36 to 250. Her
+mother's longer allele of 30 units is in the intermediate range of that locus, 27 to 35, which the same query finds with
+the two `strchive_intermediate_` columns. Without its first condition the query also returns `EXRPT3` for `S0101` and
+`S0103`, whose 13 units are of the catalogue's shorter stretch and do not compare with STRchive's range as they stand.
+`EXRPT2` is not returned for anyone, because a comparison with a null is never true.
 
 A query has to allow for these things.
 
-- A run that was not given a release of STRchive has none of the twelve columns, and a query that reads one fails. The
+- A run that was not given a release of STRchive has none of the fourteen columns, and a query that reads one fails. The
   manifest lists them in `repeats_omitted_columns` and has a null under `strchive` ([The manifest](#the-manifest)).
 - A null in the columns says that STRchive's release lists no locus for the row's repeat. It does not say that the
   repeat is harmless at every size.
+- A row with a false `strchive_same_interval` is not a negative result. The query above leaves it out because its sizes
+  need STRchive's entry to be read first, and a search for expansions looks at those rows too.
+- STRchive also lists loci whose link to a disease has limited evidence, is disputed or is refuted: 24 of the 82 loci of
+  v2.28.0 have a level below `Moderate`. The condition `strchive_evidence NOT IN ('Disputed', 'Refuted')` leaves the
+  last two out. It also drops every row whose level is null, which is every row with a release before v2.18.0.
 - A range has two ends, and the query tests both. A repeat can cause disease by losing units: one locus of STRchive
   v2.28.0 is pathogenic at 3 units and benign at 4, and a test of the pathogenic minimum alone returns its benign
   allele.
@@ -2436,10 +2463,8 @@ A query has to allow for these things.
 - An allele longer than the reads has an estimated size ([A repeat above a size](#a-repeat-above-a-size)).
   `longer_upper` is the highest upper end of the confidence intervals of the member's alleles, and a test on
   `repci_upper` in place of `repcn` is the cautious one for an expansion.
-- STRchive also lists loci whose link to a disease has limited evidence or is disputed, and the tables do not hold its
-  level of evidence: 24 of the 82 loci of v2.28.0 have a level below moderate. A row in the pathogenic range is a reason
-  to read STRchive's entry of `strchive_id`, and STRchive itself asks that its ranges be verified and marks its site
-  "Research use only."
+- STRchive asks that its ranges be verified and marks its site "Research use only." A row in the pathogenic range is a
+  reason to read STRchive's entry of `strchive_id`.
 - STRchive is a dated source. The manifest's `strchive` gives the release that the columns come from and its date
   ([The manifest](#the-manifest)).
 
@@ -2706,8 +2731,8 @@ The tables share these properties:
 The tables hold no gene-level knowledge beyond a gene's identifiers and, in a run that joined gnomAD's regions of
 missense constraint, the constraint of a transcript's regions. What OMIM, ClinGen and other gene–disease sources say
 about a gene is knowledge that the reader brings. `repeats` is the exception for one kind of knowledge: in a run that
-was given a release of STRchive it holds, for a repeat that STRchive lists, the gene, the mode of inheritance and the
-sizes that STRchive links to a disease.
+was given a release of STRchive it holds, for a repeat that STRchive lists, the gene, the mode of inheritance, the sizes
+that STRchive links to a disease and STRchive's level of evidence for that link.
 
 ### The manifest
 

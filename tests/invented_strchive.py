@@ -25,6 +25,7 @@ def locus(**changed: Any) -> dict[str, Any]:  # noqa: ANN401 (JSON values)
     entry: dict[str, Any] = {
         'id': 'INV1_GENEA',
         'gene': 'GENEA',
+        'evidence': ['Definitive'],
         'chrom': 'chr1',
         'start_hg38': 1_990,
         'stop_hg38': 2_040,
@@ -43,13 +44,14 @@ def locus(**changed: Any) -> dict[str, Any]:  # noqa: ANN401 (JSON values)
 
 
 # One locus of the repeat on chr1, with a wider interval and another rotation of its unit. One of the repeat on chr2,
-# whose motifs hold the code N and whose benign range is one size. One that begins at the base after the repeat on
-# chrX, and so is of no repeat.
+# whose motifs hold the code N, whose benign range is one size and whose link to its disease is disputed. One that
+# begins at the base after the repeat on chrX, and so is of no repeat, and that has no level of evidence.
 LOCI: Sequence[dict[str, Any]] = (
     locus(),
     locus(
         id='INV2_GENEB',
         gene='GENEB',
+        evidence=['Disputed'],
         chrom='chr2',
         start_hg38=695,
         stop_hg38=725,
@@ -66,6 +68,7 @@ LOCI: Sequence[dict[str, Any]] = (
     locus(
         id='INVX_GENEX',
         gene='GENEX',
+        evidence=[],
         chrom='chrX',
         start_hg38=9_060,
         stop_hg38=9_100,
