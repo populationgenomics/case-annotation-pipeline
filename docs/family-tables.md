@@ -1182,8 +1182,8 @@ A query on these columns has to allow for the following.
   comparison on a null frequency does.
 - gnomAD's exomes have no `ami` group, so `gnomad_exomes_groups` has no such field and a query that reads it fails.
 - `hom` is the Annotator's `Hc`, which Illumina describes as the count of homozygous individuals. The Annotator gives no
-  count of hemizygotes. gnomAD counts one allele for an XY sample on chrX outside the pseudoautosomal regions, so
-  `male.ac` there is the number of males with the allele.
+  count of hemizygotes under a name of its own. On chrX outside the pseudoautosomal regions that count is `male.ac`, and
+  `male.hom` is 0 there, as measured below.
 - `gnomad_genomes_coverage` and `gnomad_exomes_coverage` hold the `coverage` of the allele's gnomAD entry, which
   Illumina describes as the average coverage. An allele without an entry has no coverage either. The column therefore
   says how deeply gnomAD sequenced the site of an allele that it holds, and cannot tell an allele that gnomAD did not
@@ -1217,6 +1217,23 @@ A query on these columns has to allow for the following.
   with `list_filter` or with `unnest`, as above.
 - `clinvar_last_updated`, `clinvar_pubmed_ids` and `clinvar_other_alleles` are `clinvar_` columns, so a run without
   ClinVar leaves them out with the others.
+
+The following was measured on the Annotator's output for one whole genome with catalog `202610`. Illumina states none of
+it except the rule for the flags.
+
+- On chrX outside the pseudoautosomal regions, `male.hom` is 0 for every one of 242,291 common alleles with a `male.ac`
+  above 0. The Annotator therefore does not count a hemizygous male as a homozygote there, and `male.ac` is the number
+  of hemizygous males.
+- Every group can be missing from an entry as a whole, while the all-sample values never are. `male` is missing from
+  some entries of the genomes, and `mid` from many entries of the exomes.
+- Every gnomAD entry has `coverage` beside the allele's all-sample values, so no entry gives the coverage of a site
+  whose allele gnomAD lacks.
+- The Annotator writes each of the three flags as true or leaves it out, and never writes false:
+  `inLowComplexityRegion`, `isIsoform` of an AlphaMissense entry and `isAlleleSpecific` of a ClinVar record. Illumina's
+  page says the same of every boolean key.
+- The PrimateAI-3D entries with a score and neither a percentile nor a class are those of insertions and deletions.
+- An amino-acid conservation list has one score for nearly all transcripts that have one, two for a few, and at most
+  five.
 
 ### A variant by its rsID
 
@@ -1524,6 +1541,11 @@ the father carries on his X.
 In a pseudoautosomal region a male is called diploid, and his alleles there show as `het` or `hom_alt` like any
 autosome's. The VCF filter for the genotypes is `bcftools view -r chrX -i 'GT[2]="A" && GT[0]="R"'`, where `A` and `R`
 match a haploid call of the allele and of the reference.
+
+gnomAD's count of an allele in its male samples is `gnomad_genomes_groups.male.ac` for the genomes and
+`gnomad_exomes_groups.male.ac` for the exomes. On chrX outside the pseudoautosomal regions it is the number of
+hemizygous males, and `male.hom` is 0 there
+([gnomAD by group, missense scores and ClinVar at the position](#gnomad-by-group-missense-scores-and-clinvar-at-the-position)).
 
 ### Rare variants in every affected member
 
