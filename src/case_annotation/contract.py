@@ -24,6 +24,7 @@ from case_annotation import (
     family_tables,
     joined_values,
     pedigree,
+    roh_upd,
     strchive,
 )
 
@@ -44,6 +45,9 @@ TABLE_COLUMNS: Mapping[str, tuple[str, ...]] = {
     'sv_transcripts': ('sv_vcf', 'cnv_vcf'),
     'repeats': ('repeat_vcfs',),
 }
+# The table that a family gets by its pedigree and not by its row: the family has it where a sample of its VCF is a
+# child, by its PED file, of two other samples of the VCF.
+TRIO_TABLE = family_tables.TRIO_TABLE
 
 # The folder of the Annotator's output with one catalog. The output does not change with the tables' version, so the
 # folder does not name it: a run of any version of the tables can reuse what the folder holds.
@@ -180,13 +184,18 @@ def _family_tables_workflow() -> dict[str, Any]:
             'family': {
                 'folder': f'annotations/{{family}}/{_TABLES_FOLDER}',
                 'files': [
-                    *({'name': f'{table}.parquet'} for table in family_tables.TABLES if table not in TABLE_COLUMNS),
+                    *(
+                        {'name': f'{table}.parquet'}
+                        for table in family_tables.TABLES
+                        if table not in TABLE_COLUMNS and table != TRIO_TABLE
+                    ),
                     {'name': 'manifest.json'},
                     {'name': family_tables.NOTES},
                     *(
                         {'name': f'{table}.parquet', 'row_names_any_of': list(columns)}
                         for table, columns in TABLE_COLUMNS.items()
                     ),
+                    {'name': f'{TRIO_TABLE}.parquet', 'some_child_has_both_parents_sequenced': True},
                 ],
             },
             'union': {'folder': f'{_GROUP_FOLDER}/{_TABLES_FOLDER}'},
@@ -245,7 +254,10 @@ def workflows() -> dict[str, Any]:
 
     A param is `required` where the workflow declares it without a default, and has a `default` where it declares one.
     A folder is relative to `output_dir`, with the run's values in braces: its params, a family's id from the sheet,
-    the tables' version, and the date on which a listing run started.
+    the tables' version, and the date on which a listing run started. A file of a family's folder with
+    `row_names_any_of` is there where the family's row names a VCF in one of those columns, and one with
+    `some_child_has_both_parents_sequenced` where a sample of the family's VCF is the child, by its PED file, of two
+    others. A manifest lists the tables that its folder holds.
     """
     return {
         'pipeline_version': family_tables.PIPELINE_VERSION,
@@ -408,7 +420,15 @@ def example_manifest() -> family_tables.FamilyManifest:
         )
 
     father, mother, child = _EXAMPLE_SAMPLES
-    sizes = {'variants': 5_000_000, 'transcripts': 55_000_000, 'sv': 12_000, 'sv_transcripts': 30_000, 'repeats': 60}
+    sizes = {
+        'variants': 5_000_000,
+        'transcripts': 55_000_000,
+        'sv': 12_000,
+        'sv_transcripts': 30_000,
+        'repeats': 60,
+        'roh': 18_000,
+        'upd': 80,
+    }
     annotation = _example_annotation()
     return family_tables.FamilyManifest(
         schema_version=family_tables.SCHEMA_VERSION,
@@ -481,6 +501,42 @@ def example_manifest() -> family_tables.FamilyManifest:
             unmatched_repeats=sizes['repeats'] - 45,
         ),
         repeats_omitted_columns=(),
+        roh_upd=roh_upd.RohUpdInfo(
+            bcftools_version='1.21',
+            upd_version='0.1',
+            upd_commit='0' * 40,
+            preparation=(
+                f'bcftools view -f PASS,. --trim-alt-alleles -t {",".join(roh_upd.AUTOSOMES)}',
+                'bcftools view -m2 -M2 -v snps',
+                'bcftools annotate -x INFO',
+                'bcftools +setGT -- -t a -n u',
+                'echtvar anno',
+            ),
+            roh_command='bcftools roh --AF-tag gnomad_AF -G30 -O r',
+            upd_command='upd --af-tag gnomad_AF --min-af 0.05 --min-gq 30 regions',
+            frequency_archive=roh_upd.FrequencyArchive(
+                archive='gnomad-joint.invented.zip',
+                bytes=1_000_000,
+                sha256='a' * 64,
+                echtvar_version='0.2.4',
+                field=next(
+                    echtvar_values.ArchiveField(
+                        field=field,
+                        alias=alias,
+                        ftype=ftype,
+                        multiplier=multiplier,
+                        missing_value=missing_value,
+                        missing_string='MISSING',
+                    )
+                    for field, alias, ftype, multiplier, missing_value in _EXAMPLE_ARCHIVE
+                    if field == 'AF_joint'
+                ),
+            ),
+            sites=4_000_000,
+            roh_members=_EXAMPLE_SAMPLES,
+            upd_children=(roh_upd.Trio(child=child, mother=mother, father=father),),
+            upd_not_assessed=(),
+        ),
     )
 
 

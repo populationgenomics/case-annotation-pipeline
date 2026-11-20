@@ -167,17 +167,22 @@ jobs:
           # Published files are symlinks into the container's work directory, so their names are checked. The union,
           # its tables and its values from the echtvar archives and from the joined files go under annotation-unions/
           # into a folder that names the tables' version, the Annotator's output into one beside it that names the
-          # catalog alone, and each family's tables under annotations/<family>/. tests/test_contract.py holds the three
-          # folders to the contract's.
+          # catalog alone, and each family's tables under annotations/<family>/, with the table of its runs of
+          # homozygosity among them. tests/test_contract.py holds the three folders to the contract's.
           results=results
           union=annotation-unions/stub-group/tables-0.5.0-illumina-202610
           annotation=annotation-unions/stub-group/illumina-202610
           for f in "${union}"/{stub-group.vcf.gz,stub-group.vcf.gz.tbi,tables,echtvar_values,joined_values} \
             "${annotation}"/{run.json,stub-group.annotate.log,out/stub-group.json.gz} \
-            annotations/fam-{a,b}/tables-0.5.0-illumina-202610/{variants,transcripts}.parquet \
+            annotations/fam-{a,b}/tables-0.5.0-illumina-202610/{variants,transcripts,roh}.parquet \
             annotations/fam-{a,b}/tables-0.5.0-illumina-202610/manifest.json; do
             test -L "${results}/${f}" || { echo "not published: ${f}" >&2; exit 1; }
           done
+          # A stub reads no pedigree, so no family of a stub run gets the table of the regions of uniparental disomy.
+          if find "${results}/annotations" -name upd.parquet | grep -q .; then
+            echo 'a stub run published upd.parquet' >&2
+            exit 1
+          fi
           # Every family's folder holds the notes on its tables beside the manifest.
           for family in fam-a fam-b; do
             test -L "${results}/annotations/${family}/tables-0.5.0-illumina-202610/tables.md" ||
@@ -216,6 +221,11 @@ jobs:
             cat reuse.log
             exit 1
           fi
+          # Each family's runs of homozygosity and regions of uniparental disomy are found in every run.
+          for family in fam-a fam-b; do
+            grep -qF "ANNOTATE_FAMILIES:ROH_UPD (${family})" reuse.log ||
+              { echo "did not run: ROH_UPD (${family})" >&2; cat reuse.log; exit 1; }
+          done
           # No family of the sheet names a VCF of structural variants, so nothing of their union runs.
           if grep -qE '(SV_SITES|SV_UNION|SV_ANNOTATION_TABLES) \(' reuse.log; then
             cat reuse.log
@@ -272,7 +282,7 @@ jobs:
             cat larger.log
             exit 1
           fi
-          for table in variants transcripts sv sv_transcripts repeats; do
+          for table in variants transcripts roh sv sv_transcripts repeats; do
             test -L "stub/larger/annotations/fam-a/tables-0.5.0-illumina-202610/${table}.parquet" ||
               { echo "not published: ${table}" >&2; exit 1; }
           done
@@ -393,7 +403,8 @@ jobs:
           # Each of the workflow's processes runs under the workflow's name, and the including pipeline's under its own.
           for task in 'Submitted process > MADE_FAMILY' 'ANNOTATE_FAMILIES:FAMILY_CHECK (fam-c)' \
             'ANNOTATE_FAMILIES:SV_UNION (stub-group)' 'ANNOTATE_FAMILIES:ECHTVAR_VALUES (stub-group)' \
-            'ANNOTATE_FAMILIES:JOINED_VALUES (stub-group)' 'ANNOTATE_FAMILIES:FAMILY_TABLES (fam-c)'; do
+            'ANNOTATE_FAMILIES:JOINED_VALUES (stub-group)' 'ANNOTATE_FAMILIES:ROH_UPD (fam-c)' \
+            'ANNOTATE_FAMILIES:FAMILY_TABLES (fam-c)'; do
             grep -qF "${task}" included.log || { echo "did not run: ${task}" >&2; cat included.log; exit 1; }
           done
           if grep -q ILLUMINA_ANNOTATE included.log; then
@@ -404,7 +415,7 @@ jobs:
           union=annotation-unions/stub-group/tables-0.5.0-illumina-202610
           for f in "${union}"/{stub-group.vcf.gz,stub-group.vcf.gz.tbi,tables,echtvar_values,joined_values} \
             "${union}"/{stub-group.sv.vcf.gz,stub-group.sv.map.parquet,sv_annotation} \
-            annotations/fam-c/tables-0.5.0-illumina-202610/{variants,transcripts,sv,sv_transcripts}.parquet \
+            annotations/fam-c/tables-0.5.0-illumina-202610/{variants,transcripts,roh,sv,sv_transcripts}.parquet \
             annotations/fam-c/tables-0.5.0-illumina-202610/{manifest.json,tables.md}; do
             test -L "stub/included/${f}" || { echo "not published: ${f}" >&2; exit 1; }
           done
@@ -447,8 +458,8 @@ jobs:
 
   family-tables:
     # Runs the family tables' processes for real on invented families, wired as family_tables.nf wires them, and checks
-    # their output (tests/workflows/family_tables.nf). The case-annotation and echtvar steps run in the tools image,
-    # built from this commit.
+    # their output (tests/workflows/family_tables.nf). The case-annotation, echtvar and upd steps run in the tools
+    # image, built from this commit.
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -2,8 +2,9 @@
 
 The input is the family's normalised VCF (one allele per record, primary chromosomes only, each allele carried by some
 member), its PED file, the proband that the run's sheet names for it, if any, and the tables and the values from the
-echtvar archives and from the joined files of the union that its alleles were annotated in. The output folder holds two
-Parquet files, a manifest and the notes on the tables:
+echtvar archives and from the joined files of the union that its alleles were annotated in, and the runs of
+homozygosity and regions of uniparental disomy that two tools found in its own VCF (roh_upd). The output folder holds
+three Parquet files, a manifest and the notes on the tables:
 
 - `variants.parquet`: one row per allele. It holds the union's `variants` row of the allele, less the columns of the
   dated sources the run did not name, its values from the archives that the run read (gnomAD's joint values, and
@@ -12,8 +13,10 @@ Parquet files, a manifest and the notes on the tables:
   member's sample in the VCF and in the VCF's order, with that member's own call of the allele;
 - `transcripts.parquet`: the union's `transcripts` rows of the family's alleles, each with the values that the joined
   files give for its allele and its transcript;
-- `manifest.json`: the tables, the pedigree with the roles of the named proband and its parents, and what annotated the
-  alleles: the Annotator's run, each echtvar archive that the run read and each file that it joined;
+- `roh.parquet`: one row per run of homozygosity of a sequenced member, on the autosomes;
+- `manifest.json`: the tables, the pedigree with the roles of the named proband and its parents, what annotated the
+  alleles (the Annotator's run, each echtvar archive that the run read and each file that it joined), and what found
+  the runs and the regions;
 - `tables.md`: a copy of the notes on the tables in this package (NOTES), which the manifest names.
 
 A family whose sheet row also names VCFs of its structural variants, its copy-number segments or its members' repeats
@@ -28,6 +31,10 @@ A family whose sheet row also names VCFs of its structural variants, its copy-nu
 - `repeats.parquet`: one row per repeat of the repeat genotyper's catalogue, with STRchive's size ranges of the repeat
   where the run gives a release of STRchive (strchive), and one column per sequenced member that holds the member's
   genotype of it (repeat_tables).
+
+A family with a child whose parents are both sequenced gets one more:
+
+- `upd.parquet`: one row per region in which such a child shows the alleles of one parent alone, on the autosomes.
 
 Each table is sorted by chromosome (1 to 22, X, Y, M), then position, and written with zstd in row groups of 100,000
 rows, with Bloom filters on the columns that look up a variant, a gene or a transcript. The columns whose values rarely
@@ -57,6 +64,7 @@ from case_annotation import (
     joined_values,
     pedigree,
     repeat_tables,
+    roh_upd,
     strchive,
     sv_annotation,
     sv_tables,
@@ -239,7 +247,11 @@ TABLES: Mapping[str, Table] = {
     'sv': Table(sv_schema(()), sv_tables.CALL, sv_annotation.SOURCE_COLUMNS),
     'sv_transcripts': Table(sv_tables.transcripts_schema(sv_annotation.TRANSCRIPT_COLUMNS), None, {}),
     'repeats': Table(REPEAT, repeat_tables.CALL, REPEAT_SOURCES),
+    'roh': Table(roh_upd.ROH, None, {}),
+    'upd': Table(roh_upd.UPD, None, {}),
 }
+# The table that only a family with a child whose parents are both sequenced has (roh_upd.trios).
+TRIO_TABLE = 'upd'
 
 
 def check_column_names(samples: Sequence[str]) -> None:
@@ -285,6 +297,8 @@ _BLOOM: Mapping[str, Mapping[str, int]] = {
         'hgnc_id': 5_000,
     },
     'repeats': {'repeat_id': 1_000},
+    'roh': {},
+    'upd': {},
 }
 # The columns each table writes without a dictionary, each by its path in the file, and the encoding of its values. A
 # row group holds few repeated values of each, so a dictionary would hold nearly every value once and add an index per
@@ -299,6 +313,7 @@ _BLOOM: Mapping[str, Mapping[str, int]] = {
 # half of what a dictionary of the ends does. A record id and an allele's sequence hardly ever repeat, and are plain.
 # The annotation's columns of sv follow the same two rules: the interval the Annotator annotated and the intervals of
 # the gnomAD matches rise as pos does, and the ids, frequencies, counts and overlaps of the matches hardly repeat.
+# roh and upd hold a few thousand rows at most, and every column of theirs keeps its dictionary.
 _ENCODINGS: Mapping[str, Mapping[str, str]] = {
     'variants': {
         'pos': 'DELTA_BINARY_PACKED',
@@ -333,6 +348,8 @@ _ENCODINGS: Mapping[str, Mapping[str, str]] = {
     },
     'sv_transcripts': {'pos': 'DELTA_BINARY_PACKED', 'end_pos': 'DELTA_BINARY_PACKED'},
     'repeats': {'pos': 'DELTA_BINARY_PACKED', 'end_pos': 'DELTA_BINARY_PACKED'},
+    'roh': {},
+    'upd': {},
 }
 
 
@@ -372,7 +389,8 @@ class FamilyManifest(pydantic.BaseModel, frozen=True, extra='forbid'):
     pipeline_version: str
     family: str
     members: tuple[FamilyMember, ...]
-    # variants and transcripts, then sv, sv_transcripts and repeats where the family has them
+    # variants and transcripts, then sv, sv_transcripts and repeats where the family has them, then roh, and upd
+    # where the family has it
     tables: tuple[TableFile, ...]
     # The notes on the tables (NOTES), which every folder holds beside its manifest.
     notes: NotesFile
@@ -403,6 +421,10 @@ class FamilyManifest(pydantic.BaseModel, frozen=True, extra='forbid'):
     # without one left out; None and no columns in a family without the repeats table.
     strchive: strchive.StrchiveFile | None
     repeats_omitted_columns: tuple[str, ...]
+    # What found the runs of roh and the regions of upd, with the members and the children it read, and the children
+    # that upd could not assess. A family whose record names no child in either list has no upd table. An upd table
+    # has no row of an assessed child without a region, and none of a child that was not assessed.
+    roh_upd: roh_upd.RohUpdInfo
 
 
 @dataclasses.dataclass(frozen=True)
@@ -827,6 +849,7 @@ def assemble(
     output: pathlib.Path,
     proband: str | None,
     structural: Structural,
+    segments: pathlib.Path,
     *,
     sv_alleles: pathlib.Path | None = None,
     sv_annotated: SvAnnotation | None = None,
@@ -843,7 +866,8 @@ def assemble(
     of the group's structural variants where it names a caller's VCF (SvAnnotation). That annotation must be of the
     same catalog and sources as the union's, since one run makes both. `ranges` is the release of STRchive that the
     run gives, whose file is read and checked for every family, and matched with the repeats of a family that has
-    them.
+    them. `segments` is the folder of the family's runs of homozygosity and regions of uniparental disomy
+    (roh_upd.convert's output folder), which must be of this family's samples and pedigree.
     """
     ped = pedigree.read(ped_path)
     if ped.family != family:
@@ -861,11 +885,13 @@ def assemble(
         )
     archives = echtvar_values.read_info(archive_values)
     joined_files = joined_values.read_info(joined)
+    segment_info = roh_upd.read_info(segments)
     loci = None if ranges is None else strchive.read(ranges.file)
     output.mkdir(parents=True)
     with tempfile.TemporaryDirectory(dir=scratch) as tmp:
         work = pathlib.Path(tmp)
         samples = read_calls(vcf_path, ped, work / 'records.parquet')
+        roh_upd.check(segment_info, ped, samples)
         con = duckdb.connect(config={'temp_directory': str(work / 'duckdb')})
         rank = ' '.join(f"WHEN '{c}' THEN {i}" for c, i in _CHROM_RANK.items())
         con.execute(f'CREATE MACRO chrom_rank(c) AS CASE c {rank} END')
@@ -970,6 +996,16 @@ def assemble(
         for table, (query, schema) in larger.items():
             queries[table], declared[table] = query, schema
             metadata[table] = sv_metadata if table in ('sv', 'sv_transcripts') else repeats_metadata
+        # The runs and the regions as the step wrote them, sorted as the other tables are. The file of the regions is
+        # there where the family has a child with both parents sequenced, whether or not upd could assess it.
+        segment_tables = {'roh': (roh_upd.ROH_NAME, roh_upd.ROH)}
+        if segment_info.upd_children or segment_info.upd_not_assessed:
+            segment_tables[TRIO_TABLE] = (roh_upd.UPD_NAME, roh_upd.UPD)
+        for table, (name, schema) in segment_tables.items():
+            con.read_parquet(str(segments / name)).create_view(f'{table}_rows')
+            queries[table] = f'SELECT * FROM {table}_rows ORDER BY chrom_rank(chrom), pos, end_pos, member'  # noqa: S608 (a table name of this package's own)
+            declared[table] = schema
+            metadata[table] = {**own, 'roh_upd': segment_info.model_dump_json()}
         files = []
         for table, query in queries.items():
             path = output / f'{table}.parquet'
@@ -977,6 +1013,8 @@ def assemble(
                 'sv': sv_omitted,
                 'transcripts': transcripts_omitted,
                 'repeats': repeats_omitted,
+                'roh': (),
+                'upd': (),
             }.get(table, omitted)
             rows = _write(con, query, path, table, metadata[table], _encodings(table, left_out), declared.get(table))
             files.append(
@@ -1016,6 +1054,7 @@ def assemble(
         sv_omitted_columns=sv_omitted,
         strchive=ranges_record,
         repeats_omitted_columns=repeats_omitted,
+        roh_upd=segment_info,
     )
     (output / 'manifest.json').write_text(manifest.model_dump_json(indent=2) + '\n')
     return manifest

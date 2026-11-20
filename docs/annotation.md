@@ -286,8 +286,9 @@ one core, too slow for a reader such as an AI agent, whose commands are bounded 
 annotation into tables for each family in Parquet, a columnar file format, which the database engine DuckDB or any
 Parquet reader queries by region, gene or variant in well under a second.
 
-The [family tables](glossary.md#family-tables) of one family are a folder of three files, and of up to three more for a
-family that also brings the calls of its [larger variants](glossary.md#larger-variants).
+The [family tables](glossary.md#family-tables) of one family are a folder of five files, of up to three more for a
+family that also brings the calls of its [larger variants](glossary.md#larger-variants), and of one more for a family
+with a child whose parents are both sequenced.
 
 | File                     | Holds                                                                                                                                                                                                                                   |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -296,6 +297,8 @@ family that also brings the calls of its [larger variants](glossary.md#larger-va
 | `sv.parquet`             | optional: the structural variants and the copy-number variants, one row per record of the two callers, told apart by `caller`, with its annotation, and one column per sequenced member that holds the member's call of it              |
 | `sv_transcripts.parquet` | optional: one row per structural variant or copy number segment and transcript that the Annotator lists for it                                                                                                                          |
 | `repeats.parquet`        | optional: one row per tandem repeat that a repeat genotyper sized, and one column per sequenced member that holds the sizes of the member's alleles, and STRchive's size ranges of the repeat in a run that gives a release of STRchive |
+| `roh.parquet`            | one row per run of homozygosity of a sequenced member, on chr1 to chr22                                                                                                                                                                 |
+| `upd.parquet`            | for a family with a child whose parents are both sequenced: one row per region in which such a child shows the alleles of one parent alone, on chr1 to chr22                                                                            |
 | `tables.md`              | the notes on the tables: what a table does not show and a query gets wrong without an error                                                                                                                                             |
 | `manifest.json`          | the tables the folder holds with their sizes and checksums, the pedigree with each member's role, and what annotated the tables                                                                                                         |
 
@@ -429,9 +432,11 @@ flowchart LR
         NORMALISE["NORMALISE_FAMILY<br/>split, left-align,<br/>keep carried alleles"]
         SV["NORMALISE_SV<br/>structural variants<br/>written as a sequence"]
         SVSITES["SV_SITES<br/>both callers' records<br/>without samples"]
+        ROHUPD["ROH_UPD<br/>bcftools roh, upd"]
         CHECK --> NORMALISE
         CHECK --> SV
         CHECK --> SVSITES
+        CHECK --> ROHUPD
     end
 
     subgraph UNION["the union of the group's families"]
@@ -456,13 +461,14 @@ flowchart LR
 
     subgraph CUT["each family again"]
         direction TB
-        FAMILY["FAMILY_TABLES<br/>both unions cut to<br/>the family, with<br/>its members' calls;<br/>the repeats"]
+        FAMILY["FAMILY_TABLES<br/>both unions cut to<br/>the family, with<br/>its members' calls;<br/>the repeats;<br/>roh and upd"]
     end
 
-    OUT[("annotations/family-a/<br/>tables-0.5.0-<br/>illumina-202610/<br/>2 to 5 Parquet tables,<br/>manifest.json")]
+    OUT[("annotations/family-a/<br/>tables-0.5.0-<br/>illumina-202610/<br/>3 to 7 Parquet tables,<br/>manifest.json")]
 
     IN --> EACH --> UNION --> CUT --> OUT
     EACH --> SVUNION --> CUT
+    EACH --> CUT
 
     classDef default fill:#8888881a,stroke:#888888
     style EACH fill:#8888881a,stroke:#888888
@@ -484,6 +490,10 @@ flowchart LR
    allele of the family's `variants`.
 1. `SV_SITES` runs for a family with a structural-variant or a copy-number VCF. It writes the records of each as sites:
    without samples, QUAL and FILTER, under the caller's IDs, and with INFO cut down to six fields.
+1. `ROH_UPD` runs `bcftools roh` and `upd` on each family's VCF as the sheet names it, for the runs of homozygosity of
+   every sequenced member and the regions of uniparental disomy of each child whose parents are both sequenced
+   ([Runs of homozygosity and uniparental disomy](#runs-of-homozygosity-and-uniparental-disomy)). It reads gnomAD's
+   frequencies from the archive that `gnomad_joint` names, and runs in every run.
 1. `UNION_SITES` takes the union of the families' sites, each allele once.
 1. `SV_UNION` takes the union of the families' sites of structural variants: one record per allele, each site once under
    an id of its content, and a map from each family's records to the sites.
@@ -510,7 +520,8 @@ flowchart LR
    value of an allele and a transcript goes on that transcript's row of `transcripts`. For a family that brings them, it
    also reads the VCFs of the larger variants into `sv` and `repeats`, gives each record of `sv` the annotation of its
    site, and writes `sv_transcripts`. In a run that gives a release of STRchive it gives each repeat the values of its
-   locus there.
+   locus there. It writes what `ROH_UPD` found as `roh`, and as `upd` for a family with a child whose parents are both
+   sequenced.
 
 The four steps of the structural variants run only in a group with a family that names `sv_vcf` or `cnv_vcf`. The
 repeats take no part in either union: the Annotator does not read them, so they go from the members' VCFs straight into
@@ -666,7 +677,8 @@ Annotator's output has a folder of its own, which the catalog names without the 
 `group` names the run's families together ([Groups](#groups)).
 
 A family's folder also holds `sv.parquet` and `sv_transcripts.parquet`, `repeats.parquet`, or all three, where its row
-names their VCFs. Nothing of the repeats goes into the union's folder.
+names their VCFs, and `upd.parquet` where a sample of its VCF is the child of two others. Nothing of the repeats goes
+into the union's folder, and nothing of `ROH_UPD`, which reads one family alone.
 
 The two Annotator runs publish into one folder: the JSON of the alleles as `out/<group>.json.gz`, that of the structural
 variants as `out/<group>.sv.json.gz`, a log each, and one `run.json`, since both runs have the same catalog and sources.
@@ -969,7 +981,7 @@ the header of each VCF that it annotates with the archive.
 for each: `alphagenome-vcf` writes a table's rows as that VCF, with one INFO field per value column under the column's
 name, and `alphagenome-config` writes the table's configuration, which is one of three files in
 [`src/case_annotation/echtvar/`](../src/case_annotation/echtvar). All the commands below run in the tools image, which
-holds `case-annotation`, bcftools and echtvar 0.2.4.
+holds `case-annotation`, bcftools, echtvar 0.2.4 and upd.
 
 ```sh
 set -euo pipefail
@@ -1365,6 +1377,59 @@ The tables carry the rest of the output as it was observed:
 - A record of two alleles has the matches of both alleles in its lists, each with its type, and no best match or highest
   frequency, since either would be that of one allele and a member may carry the other.
 
+### Runs of homozygosity and uniparental disomy
+
+`ROH_UPD` finds two kinds of segment in a family's own calls, with two published tools that it runs as they are, and
+`FAMILY_TABLES` writes what they report as the tables `roh` and `upd`
+([Reading the family tables](family-tables.md#runs-of-homozygosity-and-uniparental-disomy)).
+
+| Tool                                                                    | Version in the tools image                                   | Licence   | Runs for                                    | Command                                                                        |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------ | --------- | ------------------------------------------- | ------------------------------------------------------------------------------ |
+| [`bcftools roh`](https://samtools.github.io/bcftools/bcftools.html#roh) | bcftools 1.21                                                | MIT/Expat | every sequenced member, in one call         | `bcftools roh --AF-tag <tag> -G30 -O r`                                        |
+| [`upd`](https://github.com/bjhall/upd)                                  | tag 0.1.1, commit `fbf67d2dd1c87003c79ed7130ae4c3bf105b4e67` | MIT       | each child whose parents are both sequenced | `upd --af-tag <tag> --min-af 0.05 --min-gq 30 regions`, with the three samples |
+
+`-G30` makes `bcftools roh` read the genotypes and not their likelihoods, with a phred-scaled likelihood of 30 for the
+genotypes that were not called. On one caller's calls the likelihoods broke a single run into 24. `upd` runs with its
+own thresholds, which the step gives it as they are: a site counts where its frequency is at least 0.05 and its GQ is at
+least 30 in every sample of the VCF, and a region has more than 3 informative sites in a row and spans at least 1,000
+bases. The code of upd at its tag 0.1.1 states its version as 0.1, which is what a manifest records beside the commit.
+
+Both tools read one VCF that the step prepares from the family's VCF as the sheet names it:
+
+1. `bcftools view -f PASS,. --trim-alt-alleles` keeps the PASS records on chr1 to chr22 and removes each alternate
+   allele that no member of the family carries, as a family's VCF cut from a larger call set has them.
+1. `bcftools view -m2 -M2 -v snps` keeps the sites that then have one alternate allele of one base. This is a call of
+   its own, because one call of `bcftools view` counts a site's alleles before it removes any.
+1. `bcftools annotate -x INFO` removes the INFO fields, and `bcftools +setGT -- -t a -n u` writes every genotype
+   unphased.
+1. `echtvar anno` adds gnomAD's frequency of each allele from the archive that `gnomad_joint` names. The tools read the
+   INFO field that the archive gives gnomAD's `AF_joint`, which is `<tag>` above.
+
+Each part of the preparation is there for a way in which a tool fails or misreads other input. `upd` stops at a site of
+several alleles, at an INFO header line with a key beside `ID`, `Number`, `Type` and `Description`, and at a frequency
+of `.`, and it reads a phased genotype as no call. echtvar gives an allele that the archive lacks the frequency that the
+archive's configuration names as its stand-in. The step refuses an archive whose stand-in is not 0, because both tools
+leave out a site of frequency 0: `upd` by its threshold and `bcftools roh` as a site without a frequency. X, Y and M are
+left out because a haploid call is no genotype that `upd` reads.
+
+`upd` fails, with a `TypeError`, on a VCF of which it keeps no site. A call set of a few regions can be such a VCF, and
+so is one that leaves no record after the preparation, as a call set of X alone does. The step therefore asks first:
+`case-annotation roh-upd-sites` reads the prepared VCF as `upd` reads it, line by line, and says whether a record has a
+frequency and GQs at or above the two thresholds. `upd` never reads the last record of a file, so that record does not
+count. Where no record does, `upd` is not run, and the manifest lists each child with both parents sequenced under
+`upd_not_assessed` with the reason `no informative site`, and none under `upd_children`. The family gets its tables,
+with an `upd` without rows. `bcftools roh` runs on such a VCF and reports no run, so `roh` is then empty too, and the
+manifest's `sites` is the number of records that the tools were given.
+
+The step still fails, and the family gets no tables, for a family with a child whose parents are both sequenced and no
+`GQ` in its VCF, and where a tool fails for another reason. A tool that fails stops the step, so a region that it wrote
+before it failed is never read. On a laptop the step took about two and a half minutes for a whole genome of a trio.
+
+The tools image installs `upd` from the commit of its tag, through `uv.lock` like the package's own dependencies
+([the tools image](../containers/tools/README.md)). PyPI has a package named `upd` that is another project, so
+`case-annotation` reads where the installed `upd` came from and refuses one that was not installed from a commit of
+upd's repository.
+
 ### STRchive's ranges of the repeats
 
 A repeat VCF gives each member's sizes of a repeat and nothing about which sizes cause disease.
@@ -1641,6 +1706,8 @@ annotation-unions/g1/illumina-202610/
 annotations/family-a/tables-0.5.0-illumina-202610/
     variants.parquet
     transcripts.parquet
+    roh.parquet
+    upd.parquet                  where a sample of the family's VCF is the child of two others
     sv.parquet, sv_transcripts.parquet
                                where the sheet names sv_vcf or cnv_vcf for the family
     repeats.parquet              where the sheet names repeat_vcfs for the family
@@ -1662,6 +1729,7 @@ process has the rest, such as the form of a name, a run config of another catalo
 | `SV_UNION`             | a record has no ID, or two records of a family's callers share one; a record that is not a breakend has no INFO `END`, or a breakend has one; a record has no `SVTYPE`, or one that is none of `DEL`, `INS`, `DUP`, `INV`, `BND` and `CNV`, or a copy-number segment has an allele other than `<DEL>` and `<DUP>`; a record's `END` lies before its position; a record has another number of `SVLEN` values than of alleles; the families' files declare a contig with two lengths; no record is left on the primary chromosomes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `ECHTVAR_VALUES`       | the alleles of its table are not exactly the union's; two archives add a field of the same name; an archive lacks a field that its columns come from, or holds one as another type; an archive marks an allele that it lacks with a value that the field could hold; an allele has some of the scores of one of AlphaGenome's archives and not others; an archive of the breakdown or of the splicing scores has a field without the notice in its description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `JOINED_VALUES`        | a REF of gnomAD's mitochondrial VCF is not the reference's sequence; that VCF has samples, lacks one of the INFO fields that the columns come from or declares it with another type or number, or has a record that is off chrM, holds several alleles, lacks a field that every record of gnomAD's file has, or holds an allele that another record holds; a line of GENCODE's file is not the nine fields of a GTF, a feature is none of `polyA_signal`, `polyA_site` and `pseudo_polyA`, a feature has no start and end as positions in that order, or the file has no `polyA_signal` on a primary chromosome; the header of APARENT2's table is not its 15 columns, or a row has another number of fields or lacks a chromosome, a GRCh38 position, a base as its reference or its changed nucleotide, or a finite number as its usage or its change of the log odds; the header of MitoTIP's table is not its 8 columns, or a row lacks a position, a base as its reference, another base or `:` as its change, a finite score or one of `Q1` to `Q4`, or two rows hold one change of a position; the header of gnomAD's table of windows is not its 9 columns, or a row lacks a primary chromosome, a start that is a multiple of 1,000, an end after it and at most 1,000 bases on, or a finite z score, or two rows hold one window; the header of gnomAD's table of regions is not its 11 columns, or a row lacks an Ensembl transcript id without a version, a number of regions, a primary chromosome, a start and an end in that order, a finite ratio of 0 or more, a p-value from 0 to 1, or `true` or `false` as its coverage, or two regions of one transcript overlap or lie on two chromosomes, or a transcript has another number of regions than its rows say; the header of gnomAD's table of MPC scores is not its 4 columns, or a row lacks a locus on a primary chromosome, a list of two alleles of bases, an Ensembl transcript id without a version or a finite score, or two rows hold one allele of the union and one transcript; a row of one of these tables has another number of fields than its header; a gzipped file is cut off; the alleles of its table are not exactly the union's |
+| `ROH_UPD`              | a family with a child whose parents are both sequenced has no `GQ` in its VCF; the archive of gnomAD's joint release writes another stand-in than 0 for the frequency of an allele it lacks; `bcftools roh` or `upd` fails; a tool's output is not what the tool writes, or the installed `upd` did not come from a commit of upd's repository                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `ILLUMINA_ANNOTATE`    | the bundle lacks a source named or is of another catalog; the licence is invalid for a source                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `ANNOTATION_TABLES`    | the JSON's alleles are not exactly the union's; the JSON holds ClinVar or dbSNP records, or a dated source's entry in its header, that the run did not name; the genes section holds a record without a symbol, an HGNC id that is not a positive integer or two HGNC ids for one symbol, or lacks the symbol of a transcript; the JSON lists a transcript twice for one allele; a SpliceAI entry has a key the conversion does not know, or a score without its distance, or a distance without its score; a PromoterAI entry lacks its score or its distance from the TSS; a regulatory feature lacks its id or its type; a gnomAD entry lacks its coverage, has a key the conversion does not know, or has some of a group's four values and not the others; an amino-acid conservation entry lacks its scores; a ClinVar record of the allele lacks the date of its last update, or a record of another allele lacks its accession or one of its alleles; a transcript's `hgvsc` has a position of a form that the conversion reads no intron offset from                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `SV_ANNOTATION_TABLES` | a record of the union has an ID that is not the id of its content; the JSON's positions are not exactly the union's sites, each once and with its site's place and alleles; a structural record has no `svEnd`, or does not end at its `END`; the Annotator gives a record a type that its `SVTYPE` cannot have, or a term outside the severity order; a position or a variant has a key the conversion does not know; the JSON holds ClinVar, ClinGen, MITOMAP or dbSNP records, or a dated source's entry in its header, that the run did not name; an entry of gnomAD, 1000 Genomes or ClinVar has a reciprocal overlap below 0.5, or none on a record with an extent, or is a loss on a gain; the genes section fails as for `ANNOTATION_TABLES`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |

@@ -66,7 +66,13 @@
 //   docker build -f containers/tools/Dockerfile -t case-annotation-tools-test .
 //   nextflow -C tests/workflows/nextflow.config run tests/workflows/family_tables.nf
 
-include { FAMILY_CHECK ; NORMALISE_FAMILY ; NORMALISE_SV ; UNION_SITES ; SV_SITES ; SV_UNION ; ECHTVAR_VALUES ; JOINED_VALUES ; ANNOTATION_TABLES ; SV_ANNOTATION_TABLES ; FAMILY_TABLES ; groupAnnotation ; svName ; svGroup ; archivesDisk } from '../../modules/family_tables'
+include { FAMILY_CHECK ; NORMALISE_FAMILY ; NORMALISE_SV ; UNION_SITES ; SV_SITES ; SV_UNION ; ECHTVAR_VALUES ; JOINED_VALUES ; ANNOTATION_TABLES ; SV_ANNOTATION_TABLES ; ROH_UPD ; FAMILY_TABLES ; groupAnnotation ; svName ; svGroup ; archivesDisk } from '../../modules/family_tables'
+include { ROH_UPD as ROH_UPD_TRIO } from '../../modules/family_tables'
+include { ROH_UPD as ROH_UPD_DUO } from '../../modules/family_tables'
+include { ROH_UPD as ROH_UPD_NO_GQ_REFUSED } from '../../modules/family_tables'
+include { ROH_UPD as ROH_UPD_NO_SITE } from '../../modules/family_tables'
+include { ROH_UPD as ROH_UPD_NO_KEPT_SITE } from '../../modules/family_tables'
+include { ROH_UPD as ROH_UPD_FAILING_UPD_REFUSED } from '../../modules/family_tables'
 include { ECHTVAR_VALUES as ECHTVAR_VALUES_GNOMAD_ALONE } from '../../modules/family_tables'
 include { JOINED_VALUES as JOINED_VALUES_MITO } from '../../modules/family_tables'
 include { SV_SITES as SV_SITES_NO_END } from '../../modules/family_tables'
@@ -132,7 +138,14 @@ workflow {
         file("${fixture}/bundle.json"),
         '209901',
     ).first()
-    archive = INVENTED_ARCHIVE(file("${fixture}/gnomad-joint.vcf"), file("${fixture}/echtvar-config.json"))
+    // An archive of each of the two invented VCFs of gnomAD's joint values: the one the families' alleles are read
+    // from, and the frequencies of the sites of the trio that ROH_UPD is tested on.
+    archives = INVENTED_ARCHIVE(
+        channel.of(['invented', 'gnomad-joint.vcf'], ['frequencies', 'roh-upd-gnomad.vcf']).map { name, vcf -> tuple(name, file("${fixture}/${vcf}")) },
+        file("${fixture}/echtvar-config.json"),
+    )
+    archive = archives.filter { name, _zip -> name == 'invented' }.map { _name, zip -> zip }.first()
+    frequencies = archives.filter { name, _zip -> name == 'frequencies' }.map { _name, zip -> zip }.first()
     // An archive of each of the three invented tables of AlphaGenome's scores, built and checked.
     scores = INVENTED_ALPHAGENOME_ARCHIVE(
         channel.of('alphagenome_avi', 'alphagenome_avi_breakdown', 'alphagenome_splicing').map { table -> tuple(table, file("${fixture}/${table}.tsv")) },
@@ -189,10 +202,15 @@ workflow {
         file("${fixture}/bundle.json"),
         '209901',
     ).first()
+    // Each family's runs of homozygosity and regions of uniparental disomy, from its VCF as the sheet names it.
+    segments = ROH_UPD(
+        families.join(checked.map { f -> [f] }).map { f, vcf, ped, _proband -> tuple(f, vcf, ped) },
+        archive,
+    )
     written = FAMILY_TABLES(
         normalised.family.join(families.map { f, _vcf, ped, proband -> [f, ped, proband] }).join(structural).join(sv_alleles, remainder: true).map { f, vcf, index, ped, proband, sv, cnv, repeats, alleles ->
             tuple(f, vcf, index, ped, proband, sv, cnv, repeats, alleles ?: [])
-        },
+        }.join(segments),
         tables,
         joint,
         joined,
@@ -204,22 +222,46 @@ workflow {
         '0.5.0',
         '0.3.1',
     )
-    CHECK_TABLES(written.filter { w -> w[0] == 'family-a' }.map { w -> w[0..4] }, archive)
-    CHECK_NO_ROLES(written.filter { w -> w[0] == 'family-b' }.map { w -> w[3] })
-    CHECK_JOINED(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[1], w[2], w[3]) }, polya, effects, windows, regions, scores)
-    CHECK_LARGER(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[1], w[3], w[5]) })
-    // A family whose row names no such VCF gets no table of them.
+    // What FAMILY_TABLES gives of a family: its id, variants, transcripts, roh, the manifest, the notes, and the
+    // tables that only some families have.
+    CHECK_TABLES(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[0], w[1], w[2], w[4], w[5]) }, archive)
+    CHECK_NO_ROLES(written.filter { w -> w[0] == 'family-b' }.map { w -> w[4] })
+    CHECK_JOINED(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[1], w[2], w[4]) }, polya, effects, windows, regions, scores)
+    CHECK_LARGER(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[1], w[4], w[6]) })
+    CHECK_SEGMENTS(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[3], w[4], w[6]) }, archive)
+    // A family whose row names no such VCF gets no table of them. Family B's son has both parents sequenced, so it
+    // gets the table of his regions of uniparental disomy.
     written
         .filter { w -> w[0] == 'family-b' }
         .map { w ->
-            if (w[5]) {
-                error("family B brought no VCF of its larger variants, and has the tables ${w[5]}")
+            def others = [w[6]].flatten().collect { f -> f.name }
+            if (others != ['upd.parquet']) {
+                error("family B brought no VCF of its larger variants and has a child with both parents, and has the tables ${others}")
             }
         }
+
+    // ROH_UPD on an invented trio whose child has a region of each kind, and on the mother and the child alone.
+    trio = file("${fixture}/roh-upd-trio.vcf")
+    trio_ped = file("${fixture}/roh-upd-trio.ped")
+    derived = DERIVED(
+        channel.of(['duo', 'view -s T2,T3'], ['no-gq', 'annotate -x FORMAT/GQ'], ['only-x', 'view -t chrX']).map { name, command -> tuple(name, command, trio) }
+    )
+    CHECK_ROH_UPD(
+        ROH_UPD_TRIO(channel.of(tuple('trio-t', trio, trio_ped)), frequencies).map { _f, folder -> folder },
+        ROH_UPD_DUO(derived.filter { name, _vcf -> name == 'duo' }.map { _name, vcf -> tuple('trio-t', vcf, trio_ped) }, frequencies).map { _f, folder -> folder },
+    )
 
     // A REF of N is normalised where the reference has an N or an IUPAC code.
     ref_n = NORMALISE_REF_N(channel.of(tuple('ref-n', file("${fixture}/ref-n.vcf"))), reference)
     CHECK_REF_N(ref_n.family.map { _f, vcf, index -> tuple(vcf, index) })
+
+    // Where upd would keep no site it is not run, and the family gets its tables: the trio with the archive of the
+    // families' alleles, which gives none of its sites a frequency that upd keeps, and the trio's record on X alone,
+    // which leaves no site on chr1 to chr22.
+    CHECK_NOT_ASSESSED(
+        ROH_UPD_NO_KEPT_SITE(channel.of(tuple('trio-t', trio, trio_ped)), archive).map { _f, folder -> folder },
+        ROH_UPD_NO_SITE(derived.filter { name, _vcf -> name == 'only-x' }.map { _name, vcf -> tuple('trio-t', vcf, trio_ped) }, frequencies).map { _f, folder -> folder },
+    )
 
     // The group's annotation is the Annotator's output named after the group, alone or among others; outputs without
     // it are refused with the group's name.
@@ -244,7 +286,8 @@ workflow {
     // where it has an IUPAC code that the base fits; a proband that is not an individual of the family's PED file;
     // repeat VCFs of two of the family's three members; a structural-variant VCF whose samples are another family's; a
     // structural variant written as a sequence whose REF is not the reference's; a union of sites with a deletion that
-    // has no INFO END, which the Annotator would annotate as a single base.
+    // has no INFO END, which the Annotator would annotate as a single base; for ROH_UPD, a trio whose VCF has no GQ,
+    // and an upd that fails after it has written a region, which failing-upd stands in for (nextflow.config).
     unprefixed = NORMALISE_UNPREFIXED_REFUSED(channel.of(tuple('unprefixed', file("${fixture}/unprefixed.vcf"))), reference)
     mismatch = NORMALISE_REF_MISMATCH_REFUSED(channel.of(tuple('mismatch', file("${fixture}/ref-mismatch.vcf"))), reference)
     repeated = NORMALISE_REPEATED_REFUSED(channel.of(tuple('repeated', file("${fixture}/repeated.vcf"))), reference)
@@ -284,9 +327,16 @@ workflow {
         no_end.map { f, sites -> svGroup([[f, sites]]).families },
         no_end.map { f, sites -> svGroup([[f, sites]]).sites },
     )
+    no_gq = ROH_UPD_NO_GQ_REFUSED(
+        derived.filter { name, _vcf -> name == 'no-gq' }.map { _name, vcf -> tuple('trio-t', vcf, trio_ped) },
+        frequencies,
+    )
+    failing_upd = ROH_UPD_FAILING_UPD_REFUSED(channel.of(tuple('trio-t', trio, trio_ped)), frequencies)
     unprefixed.sites
         .map { _s -> 'unprefixed contigs' }
         .mix(
+            no_gq.map { _f, _folder -> 'a trio without GQ' },
+            failing_upd.map { _f, _folder -> 'an upd that fails' },
             no_end_union.map.map { _m -> 'a deletion without END' },
             two_repeats.map { _f -> "repeat VCFs of two of three members" },
             other_samples.map { _f -> "a structural-variant VCF of another family's samples" },
@@ -304,6 +354,22 @@ workflow {
                 error("should have been refused, but were accepted: ${accepted}")
             }
         }
+}
+
+// A VCF made from another with one bcftools command.
+process DERIVED {
+    tag "${name}"
+
+    input:
+    tuple val(name), val(command), path(vcf)
+
+    output:
+    tuple val(name), path("${name}.vcf")
+
+    script:
+    """
+    bcftools ${command} --no-version -o ${name}.vcf ${vcf}
+    """
 }
 
 // A VCF bgzipped, with its index beside it.
@@ -489,16 +555,18 @@ EOF
 
 // An echtvar archive of the invented gnomAD VCF, with the fields of the public archive.
 process INVENTED_ARCHIVE {
+    tag "${name}"
+
     input:
-    path vcf
+    tuple val(name), path(vcf)
     path config
 
     output:
-    path 'invented.zip'
+    tuple val(name), path("${name}.zip")
 
     script:
     """
-    echtvar encode invented.zip ${config} ${vcf}
+    echtvar encode ${name}.zip ${config} ${vcf}
     """
 }
 
@@ -528,7 +596,7 @@ process INVENTED_ALPHAGENOME_ARCHIVE {
     """
 }
 
-// Family A's tables: its ten alleles, each with its invented transcript, its gene's HGNC id, the entry of that gene
+// Family A's tables: its eleven alleles, each with its invented transcript, its gene's HGNC id, the entry of that gene
 // and, after the allele's columns of variants, a call column per member in the VCF's order, which says that the member
 // carries the allele where its genotype holds a copy of it, that it does not where every allele is called and none is
 // the allele, and neither for the mother's missing call; the manifest gives the daughter, whom the sheet names, the
@@ -576,14 +644,14 @@ assert manifest['notes'] == {
     'path': 'tables.md', 'bytes': len(notes), 'sha256': hashlib.sha256(notes).hexdigest()}, manifest
 assert manifest['pipeline_version'] == importlib.metadata.version('case-annotation-tools'), manifest
 rows = {t['table']: t['rows'] for t in manifest['tables']}
-assert {t: rows[t] for t in ('variants', 'transcripts')} == {'variants': 10, 'transcripts': 10}, rows
+assert {t: rows[t] for t in ('variants', 'transcripts')} == {'variants': 11, 'transcripts': 11}, rows
 assert manifest['family'] == '${family}', manifest
 roles = {m['sample_id']: m['role'] for m in manifest['members']}
 assert roles == {'A1': 'father', 'A2': 'mother', 'A3': 'proband'}, roles
 variants = pq.read_table('${variants}')
 assert variants.column_names[:5] == ['chrom', 'pos', 'ref', 'alt', 'variant_id'], variants.column_names
 assert variants.column_names[-5:] == ['qual', 'filters', 'A1', 'A2', 'A3'], variants.column_names
-assert variants.num_rows == 10, variants.num_rows
+assert variants.num_rows == 11, variants.num_rows
 pl = {(r['variant_id'], s): (r[s]['gt'], r[s]['pl']) for r in variants.to_pylist() for s in ('A1', 'A2', 'A3')}
 carries = {key: r[key[1]]['carries'] for r in variants.to_pylist() for key in pl if key[0] == r['variant_id']}
 zygosity = {key: r[key[1]]['zygosity'] for r in variants.to_pylist() for key in pl if key[0] == r['variant_id']}
@@ -615,15 +683,15 @@ assert pl[('chrX-100-T-C', 'A2')] == ('0/0', [70, 71, 72]), pl
 assert pl[('chrX-100-T-C', 'A3')] == ('0/1', [73, 51, 52]), pl
 assert pl[('chr2-60-C-A', 'A1')] == ('0/1', None), pl
 assert variants.schema.field('hgnc_ids').type == pa.list_(pa.int32()), variants.schema
-assert variants.column('hgnc_ids').to_pylist() == [[90001]] * 10, variants.column('hgnc_ids')
+assert variants.column('hgnc_ids').to_pylist() == [[90001]] * 11, variants.column('hgnc_ids')
 genes = [[(g['gene_symbol'], g['ensembl_gene_id'], g['hgnc_id'], g['worst_consequence'], g['worst_transcript_id'],
            g['mane_select_transcript_id']) for g in entries]
          for entries in variants.column('genes').to_pylist()]
-assert genes == [[('GENEA', 'ENSG01', 90001, 'intron_variant', 'ENST01.1', None)]] * 10, genes
+assert genes == [[('GENEA', 'ENSG01', 90001, 'intron_variant', 'ENST01.1', None)]] * 11, genes
 assert not {'gene_symbol', 'ensembl_gene_id', 'worst_transcript_id'} & set(variants.column_names), variants.column_names
 transcripts = pq.read_table('${transcripts}')
 assert transcripts.schema.field('hgnc_id').type == pa.int32(), transcripts.schema
-assert transcripts.column('hgnc_id').to_pylist() == [90001] * 10, transcripts.column('hgnc_id')
+assert transcripts.column('hgnc_id').to_pylist() == [90001] * 11, transcripts.column('hgnc_id')
 columns = ('gnomad_joint_af', 'gnomad_joint_ac', 'gnomad_joint_hom', 'gnomad_joint_faf95_max')
 kinds = [variants.schema.field(c).type for c in columns]
 assert kinds == [pa.float32(), pa.int32(), pa.int32(), pa.float32()], kinds
@@ -635,6 +703,7 @@ assert joint == {
     'chr1-200-G-A': (0.0, 0, 0, 0.0),
     'chr1-300-T-A': absent,
     'chr1-400-TCA-T': (float32(0.074321), 120000, 4500, float32(0.0625015)),
+    'chr2-40-C-T': (0.25, 250000, 30000, 0.25),
     'chr2-60-C-A': absent,
     'chr2-80-C-T': absent,
     'chr2-90-GCGTAAA-G': (float32(4e-06), 7, 0, float32(1e-06)),
@@ -662,6 +731,7 @@ expected = {
     'chr1-200-G-A': (97.31337, 2.44971, None, None, None),
     'chr1-300-T-A': none,
     'chr1-400-TCA-T': none,
+    'chr2-40-C-T': none,
     'chr2-60-C-A': (48.90215, 2.75691, 0.003406, 0.007602, 1.207),
     'chr2-80-C-T': none,
     'chr2-90-GCGTAAA-G': none,
@@ -750,6 +820,7 @@ assert rows == {
     'chr1-200-G-A': (False, None, None, None, 2.5, 0.75, None),
     'chr1-300-T-A': (True, None, None, None, 2.5, 0.75, None),
     'chr1-400-TCA-T': (True, None, None, None, 2.5, None, None),
+    'chr2-40-C-T': (False, None, None, None, -1.25, None, None),
     'chr2-60-C-A': (False, -0.5, -0.5, 0.25, -1.25, 0.125, None),
     'chr2-80-C-T': (True, None, None, None, -1.25, 0.125, None),
     'chr2-90-GCGTAAA-G': (False, None, None, None, -1.25, None, None),
@@ -769,6 +840,7 @@ assert held == {
     ('chr1-200-G-A', 'ENST01.1'): (0.75, 2, 0.125, False, None),
     ('chr1-300-T-A', 'ENST01.1'): (0.75, 2, 0.125, False, None),
     ('chr1-400-TCA-T', 'ENST01.1'): nothing,
+    ('chr2-40-C-T', 'ENST01.1'): nothing,
     ('chr2-60-C-A', 'ENST01.1'): nothing,
     ('chr2-80-C-T', 'ENST01.1'): nothing,
     ('chr2-90-GCGTAAA-G', 'ENST01.1'): nothing,
@@ -924,7 +996,7 @@ def float32(value):
 
 manifest = json.load(open('${manifest}'))
 rows = {t['table']: t['rows'] for t in manifest['tables']}
-assert rows == {'variants': 10, 'transcripts': 10, 'sv': 10, 'sv_transcripts': 11, 'repeats': 2}, rows
+assert rows == {'variants': 11, 'transcripts': 11, 'sv': 10, 'sv_transcripts': 11, 'repeats': 2, 'roh': 0, 'upd': 0}, rows
 assert manifest['sv_callers'] == ['sv', 'cnv'], manifest
 assert manifest['schema_version'] == '0.5.0', manifest
 assert manifest['sv_annotation']['sources'] == manifest['annotation']['sources'] == ['Ensembl', 'gnomad'], manifest
@@ -1025,6 +1097,153 @@ sizes = {s: repeats['RPTX_CGG'][s]['repcn'] for s in ('A1', 'A2', 'A3')}
 assert sizes == {'A1': [23], 'A2': [23, 30], 'A3': [23, 23]}, sizes
 assert repeats['RPTA']['A3']['repci_upper'] == [12, 58], repeats
 assert repeats['RPTA']['A3']['so'] == ['SPANNING', 'INREPEAT'], repeats
+EOF
+    """
+}
+
+// Family A's runs of homozygosity and regions of uniparental disomy, as its folder holds them. The family's VCF has
+// four sites that both tools read, one of them with a frequency that they keep, so both tables are there without a
+// row: roh as a table of every family, and upd because the daughter has both parents sequenced. The manifest lists
+// both after the other tables and records what ran: the versions of bcftools, echtvar and upd, the commit that upd was
+// installed from, the commands, the archive with the field of the frequency, the members and the assessed child. Each
+// table carries the same record.
+process CHECK_SEGMENTS {
+    input:
+    tuple path(roh), path(manifest), path(larger)
+    path archive
+
+    script:
+    """
+    python3 - <<'EOF'
+import hashlib
+import json
+import re
+
+import pyarrow.parquet as pq
+
+manifest = json.load(open('${manifest}'))
+assert [t['table'] for t in manifest['tables']][-2:] == ['roh', 'upd'], manifest
+roh, upd = pq.read_table('${roh}'), pq.read_table('upd.parquet')
+assert roh.column_names == ['member', 'chrom', 'pos', 'end_pos', 'length', 'markers', 'quality'], roh.column_names
+assert upd.column_names == ['member', 'chrom', 'pos', 'end_pos', 'outer_pos', 'outer_end_pos', 'origin',
+                            'informative_sites', 'snps', 'opposite_sites'], upd.column_names
+assert (roh.num_rows, upd.num_rows) == (0, 0), (roh, upd)
+record = manifest['roh_upd']
+assert (record['bcftools_version'], record['upd_version']) == ('1.21', '0.1'), record
+assert re.fullmatch('[0-9a-f]{40}', record['upd_commit']), record
+assert record['preparation'] == [
+    'bcftools view -f PASS,. --trim-alt-alleles -t ' + ','.join(f'chr{n}' for n in range(1, 23)),
+    'bcftools view -m2 -M2 -v snps', 'bcftools annotate -x INFO', 'bcftools +setGT -- -t a -n u', 'echtvar anno'], record
+assert record['roh_command'] == 'bcftools roh --AF-tag gnomad_AF -G30 -O r', record
+assert record['upd_command'] == 'upd --af-tag gnomad_AF --min-af 0.05 --min-gq 30 regions', record
+archive = open('${archive}', 'rb').read()
+used = record['frequency_archive']
+assert (used['archive'], used['bytes'], used['sha256']) == (
+    'invented.zip', len(archive), hashlib.sha256(archive).hexdigest()), used
+assert (used['echtvar_version'], used['field']['field'], used['field']['alias']) == (
+    '0.2.4', 'AF_joint', 'gnomad_AF'), used
+# The site with an allele that nobody carries, two sites of one allele and the site that the father has a call of
+# ./1 at; the indels, the sites of two carried alleles and the site on X are left out.
+assert record['sites'] == 4, record
+assert record['roh_members'] == ['A1', 'A2', 'A3'], record
+assert record['upd_children'] == [{'child': 'A3', 'mother': 'A2', 'father': 'A1'}], record
+assert record['upd_not_assessed'] == [], record
+for table in (roh, upd):
+    assert json.loads(table.schema.metadata[b'roh_upd']) == record, table.schema.metadata
+EOF
+    """
+}
+
+// What ROH_UPD writes for the invented trio (roh-upd-trio.vcf, with the frequencies of roh-upd-gnomad.vcf) and for its
+// mother and child alone. On chr1 the child has the mother's allele twice at 22 sites from 1000 to 3000, between two
+// sites that show both parents' alleles: upd reports the region with its outer bounds, and bcftools roh a run of the
+// child over it. On chr2 the child has both of the mother's alleles at 16 sites from 1000 to 2500: upd reports the
+// region up to its last site that shows the mother's alleles alone, and no run of the child lies over it. Read
+// together, the first region is an isodisomy or a deletion and the second a heterodisomy. The regions are whole
+// although sites inside them show both parents' alleles: a site that the archive lacks, one with a frequency below
+// 0.05, one that failed a filter, an insertion, a site of three carried alleles and one with a GQ below 30 are not
+// read. The sites of the trio's VCF with phased genotypes, with an allele that nobody carries and with an INFO value
+// count among the 22, and the VCF's INFO header line with keys of its own does not stop upd. The mother and the child
+// alone have the child's run and no table of regions.
+process CHECK_ROH_UPD {
+    input:
+    path trio, stageAs: 'trio/*'
+    path duo, stageAs: 'duo/*'
+
+    script:
+    """
+    python3 - <<'EOF'
+import json
+import os
+
+import duckdb
+import pyarrow.parquet as pq
+
+assert sorted(os.listdir('trio/roh_upd')) == ['roh.parquet', 'roh_upd.json', 'upd.parquet']
+roh = pq.read_table('trio/roh_upd/roh.parquet').to_pylist()
+assert all(r['length'] == r['end_pos'] - r['pos'] + 1 for r in roh), roh
+(run,) = [r for r in roh if r['member'] == 'T3']
+assert run['chrom'] == 'chr1' and run['pos'] <= 1000 and run['end_pos'] >= 3000 and run['markers'] >= 22, run
+regions = pq.read_table('trio/roh_upd/upd.parquet').to_pylist()
+assert regions == [
+    {'member': 'T3', 'chrom': 'chr1', 'pos': 1000, 'end_pos': 3000, 'outer_pos': 900, 'outer_end_pos': 3099,
+     'origin': 'maternal', 'informative_sites': 22, 'snps': 29, 'opposite_sites': 0},
+    {'member': 'T3', 'chrom': 'chr2', 'pos': 1000, 'end_pos': 2400, 'outer_pos': 900, 'outer_end_pos': 2599,
+     'origin': 'maternal', 'informative_sites': 8, 'snps': 21, 'opposite_sites': 0},
+], regions
+record = json.load(open('trio/roh_upd/roh_upd.json'))
+assert record['roh_members'] == ['T1', 'T2', 'T3'], record
+assert record['upd_children'] == [{'child': 'T3', 'mother': 'T2', 'father': 'T1'}], record
+assert record['upd_not_assessed'] == [], record
+# The share of each region that a run of the same member covers.
+query = (
+    'SELECT u.chrom, coalesce(sum(least(u.end_pos, r.end_pos) - greatest(u.pos, r.pos) + 1) '
+    'FILTER (WHERE r.pos IS NOT NULL), 0) / (u.end_pos - u.pos + 1) '
+    "FROM 'trio/roh_upd/upd.parquet' u LEFT JOIN 'trio/roh_upd/roh.parquet' r "
+    'ON r.member = u.member AND r.chrom = u.chrom AND r.pos <= u.end_pos AND r.end_pos >= u.pos '
+    'GROUP BY u.member, u.chrom, u.pos, u.end_pos ORDER BY u.chrom')
+covered = duckdb.sql(query).fetchall()
+assert covered == [('chr1', 1.0), ('chr2', 0.0)], covered
+assert sorted(os.listdir('duo/roh_upd')) == ['roh.parquet', 'roh_upd.json']
+alone = json.load(open('duo/roh_upd/roh_upd.json'))
+assert (alone['roh_members'], alone['upd_children']) == (['T2', 'T3'], []), alone
+runs = [r for r in pq.read_table('duo/roh_upd/roh.parquet').to_pylist() if r['member'] == 'T3']
+assert [(r['chrom'], r['pos'] <= 1000, r['end_pos'] >= 3000) for r in runs] == [('chr1', True, True)], runs
+EOF
+    """
+}
+
+// What ROH_UPD writes where upd would keep no site, in which case upd is not run. The invented trio with the archive of
+// the families' alleles has 74 sites, none of them with a frequency that upd keeps: with its own frequencies the same
+// trio is assessed (CHECK_ROH_UPD). The trio's record on X alone leaves no site at all. In both the child is recorded
+// as not assessed, with the reason, and not as assessed, and the family has the table of the regions without a row.
+// Neither has a run of homozygosity, which bcftools roh needs a frequency for.
+process CHECK_NOT_ASSESSED {
+    input:
+    path rare, stageAs: 'rare/*'
+    path empty, stageAs: 'empty/*'
+
+    script:
+    """
+    python3 - <<'EOF'
+import json
+import os
+
+import pyarrow.parquet as pq
+
+sites = {}
+for name in ('rare', 'empty'):
+    folder = f'{name}/roh_upd'
+    assert sorted(os.listdir(folder)) == ['roh.parquet', 'roh_upd.json', 'upd.parquet'], os.listdir(folder)
+    record = json.load(open(f'{folder}/roh_upd.json'))
+    assert record['upd_children'] == [], record
+    assert record['upd_not_assessed'] == [
+        {'child': 'T3', 'mother': 'T2', 'father': 'T1', 'reason': 'no informative site'}], record
+    assert record['roh_members'] == ['T1', 'T2', 'T3'], record
+    assert pq.read_table(f'{folder}/upd.parquet').num_rows == 0
+    assert pq.read_table(f'{folder}/roh.parquet').num_rows == 0
+    sites[name] = record['sites']
+assert sites == {'rare': 74, 'empty': 0}, sites
 EOF
     """
 }

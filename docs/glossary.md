@@ -83,6 +83,20 @@ A short unit of sequence, such as `CAG`, repeated end to end. Some diseases come
 size, a repeat expansion. A repeat genotyper sizes a catalogue of known repeats in one sample, in repeat units for each
 of the sample's alleles.
 
+### Run of homozygosity
+
+A stretch of a chromosome in which a person's two copies are the same, so that every site in it is homozygous. A long
+one arises where both copies come from one ancestor, as in the child of related parents, where one copy is deleted, and
+in an isodisomy ([Uniparental disomy](#uniparental-disomy)). The table `roh` holds the runs that `bcftools roh` reports
+([Runs of homozygosity and uniparental disomy](family-tables.md#runs-of-homozygosity-and-uniparental-disomy)).
+
+### Uniparental disomy
+
+Both copies of a chromosome, or of a part of one, from the same parent, and none from the other. In a heterodisomy the
+child has both of that parent's copies, and in an isodisomy one of them twice, which is then a run of homozygosity. A
+deletion of one parent's copy looks the same in the genotypes as an isodisomy of the other parent's. The table `upd`
+holds the regions that the tool `upd` reports for a child whose parents are both sequenced.
+
 ### Pseudoautosomal regions
 
 The two stretches at the ends of chrX and chrY that are alike on both, written PARs. Inside them every person has two
@@ -175,7 +189,9 @@ up to three more tables. `sv` holds the structural variants and the copy-number 
 told apart by its `caller` column; `sv_transcripts` holds the transcripts that those records hit; and `repeats` holds
 the tandem repeats. `sv` and `repeats` have a column for every sequenced member as well. A copy-number row of `sv` is a
 segment whose copy number differs from the expected one. A member carries it by copy number, a gain with no zygosity,
-and one event can have a row from each caller.
+and one event can have a row from each caller. Every family also has `roh`, with each sequenced member's runs of
+homozygosity, and a family with a child whose parents are both sequenced has `upd`, with that child's regions of
+uniparental disomy.
 
 ### Manifest
 

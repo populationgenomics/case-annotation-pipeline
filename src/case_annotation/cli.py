@@ -15,6 +15,7 @@ from case_annotation import (
     echtvar_values,
     family_tables,
     joined_values,
+    roh_upd,
     strchive,
     sv_annotation,
     sv_sites,
@@ -330,6 +331,12 @@ def _family_tables_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--echtvar-values', type=path, required=True, help="echtvar-values' output folder of the union")
     parser.add_argument('--joined-values', type=path, required=True, help="joined-values' output folder of the union")
     parser.add_argument(
+        '--roh-upd',
+        type=path,
+        required=True,
+        help="roh-upd's output folder of the family, which holds its runs of homozygosity and regions of disomy",
+    )
+    parser.add_argument(
         '--strchive',
         type=path,
         help=(
@@ -380,10 +387,135 @@ def _family_tables(args: argparse.Namespace) -> None:
         args.output,
         proband=args.proband,
         structural=_structural(args),
+        segments=args.roh_upd,
         sv_alleles=args.sv_alleles,
         sv_annotated=sv_annotated,
         ranges=ranges,
         scratch=args.scratch,
+    )
+
+
+def _roh_upd_family_arguments(parser: argparse.ArgumentParser) -> None:
+    path = pathlib.Path
+    parser.add_argument('--family', required=True, help="the family's id, which its PED file must hold")
+    parser.add_argument('--ped', type=path, required=True, help="the family's PED file")
+    parser.add_argument(
+        '--archive',
+        type=path,
+        required=True,
+        help=f"the echtvar archive of {echtvar_values.REQUIRED.name}, which gives each site gnomAD's frequency",
+    )
+
+
+def _roh_upd_plan_arguments(parser: argparse.ArgumentParser) -> None:
+    path = pathlib.Path
+    _roh_upd_family_arguments(parser)
+    parser.add_argument('--vcf', type=path, required=True, help="the family's VCF, as the run's sheet names it")
+    parser.add_argument(
+        '--trios',
+        type=path,
+        required=True,
+        help=(
+            'the file to write the children that upd assesses into: a line for each child whose parents are both '
+            'samples of the VCF, with the child, its mother and its father, separated by tabs'
+        ),
+    )
+
+
+def _roh_upd_plan(args: argparse.Namespace) -> None:
+    planned = roh_upd.plan(args.family, args.ped, args.vcf, args.archive)
+    args.trios.write_text(''.join(f'{trio.child}\t{trio.mother}\t{trio.father}\n' for trio in planned.trios))
+    print(planned.frequency.alias)
+
+
+def _roh_upd_sites_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        '--prepared', type=pathlib.Path, required=True, help='the VCF that the step prepared for both tools, bgzipped'
+    )
+    parser.add_argument(
+        '--af-tag', required=True, help='the INFO field of the frequency, as upd is given it and roh-upd-plan prints it'
+    )
+    parser.add_argument('--min-af', type=float, required=True, help="upd's lowest frequency of a site, as upd is given")
+    parser.add_argument('--min-gq', type=int, required=True, help="upd's lowest GQ of a call, as upd is given it")
+
+
+def _roh_upd_sites(args: argparse.Namespace) -> None:
+    kept = roh_upd.keeps_a_site(args.prepared, args.af_tag, args.min_af, args.min_gq)
+    print('kept' if kept else 'none')
+
+
+def _roh_upd_arguments(parser: argparse.ArgumentParser) -> None:
+    path = pathlib.Path
+    _roh_upd_family_arguments(parser)
+    parser.add_argument(
+        '--prepared',
+        type=path,
+        required=True,
+        help='the VCF that both tools read: the one the step prepared and echtvar annotated with the archive',
+    )
+    parser.add_argument('--sites', type=int, required=True, help='the number of records of the prepared VCF')
+    parser.add_argument('--roh', type=path, required=True, help='the output of `bcftools roh -O r` on the prepared VCF')
+    parser.add_argument(
+        '--regions',
+        nargs=2,
+        action='append',
+        default=[],
+        metavar=('CHILD', 'BED'),
+        help=(
+            "a child's sample and the output of `upd regions` for it and its parents; given once for each child "
+            'that roh-upd-plan lists and upd ran for'
+        ),
+    )
+    parser.add_argument(
+        '--not-assessed',
+        action='append',
+        default=[],
+        metavar='CHILD',
+        help=(
+            'a child that roh-upd-plan lists and upd was not run for, because roh-upd-sites found no site that upd '
+            'keeps; given once for each such child'
+        ),
+    )
+    parser.add_argument('--bcftools-version', required=True, help='the version of the bcftools that ran')
+    parser.add_argument('--echtvar-version', required=True, help='the version of the echtvar that annotated the VCF')
+    parser.add_argument(
+        '--preparation',
+        action='append',
+        required=True,
+        help='a command that prepared the VCF, without its files; given once for each, in the order they ran',
+    )
+    parser.add_argument('--roh-command', required=True, help='the bcftools roh command that ran, without its files')
+    parser.add_argument(
+        '--upd-command', required=True, help='the upd command that ran, without its files and its three samples'
+    )
+    parser.add_argument(
+        '--output',
+        type=path,
+        required=True,
+        help=(
+            f'the folder to write {roh_upd.ROH_NAME}, {roh_upd.UPD_NAME} for a family with a child of two samples, and '
+            f'{roh_upd.INFO_NAME} into; it must not exist'
+        ),
+    )
+
+
+def _roh_upd(args: argparse.Namespace) -> None:
+    roh_upd.convert(
+        args.family,
+        args.ped,
+        args.prepared,
+        args.archive,
+        args.roh,
+        _by_source('--regions', args.regions),
+        args.output,
+        not_assessed=args.not_assessed,
+        sites=args.sites,
+        bcftools_version=args.bcftools_version,
+        echtvar_version=args.echtvar_version,
+        upd=roh_upd.installed_upd(),
+        preparation=args.preparation,
+        roh_command=args.roh_command,
+        upd_command=args.upd_command,
     )
 
 
@@ -514,14 +646,43 @@ _SUBCOMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Ca
         _joined_values_arguments,
         _joined_values,
     ),
+    'roh-upd-plan': (
+        (
+            'says what bcftools roh and upd are given for a family: prints the INFO field that holds the frequency '
+            'of an allele once echtvar has annotated a VCF with the archive, and lists the children whose parents '
+            'are both sequenced; fails for an archive that writes another stand-in than 0 for the frequency of an '
+            'allele it lacks, and for a family with such a child whose VCF has no GQ'
+        ),
+        _roh_upd_plan_arguments,
+        _roh_upd_plan,
+    ),
+    'roh-upd-sites': (
+        (
+            'says whether upd would keep a site of the prepared VCF, by the rule of its code: prints `kept` where a '
+            'record that is not the last has a frequency of at least --min-af and a GQ of at least --min-gq in every '
+            'sample, and `none` otherwise, where upd would fail'
+        ),
+        _roh_upd_sites_arguments,
+        _roh_upd_sites,
+    ),
+    'roh-upd': (
+        (
+            "writes a family's runs of homozygosity and regions of uniparental disomy as tables, from the output of "
+            'bcftools roh and of upd regions on the VCF that the step prepared, with a record of what ran; fails on '
+            'output that is not what the tools write'
+        ),
+        _roh_upd_arguments,
+        _roh_upd,
+    ),
     'family-tables': (
         (
             "writes a family's variants table, with a column of each member's calls, and its transcripts table from "
             "its VCF and the union's tables, its sv, sv_transcripts and repeats tables from the VCFs of its "
             "structural variants, copy numbers and repeats where it has them, with the annotation of the group's "
             "structural variants and, where the run gives a release of STRchive, STRchive's size ranges of the "
-            'repeats, its manifest with the roles of the proband the run names and of its parents, and a copy of the '
-            'notes on the tables (tables.md)'
+            'repeats, its roh table and, for a family with a child whose parents are both sequenced, its upd table '
+            "from roh-upd's output, its manifest with the roles of the proband the run names and of its parents, and "
+            'a copy of the notes on the tables (tables.md)'
         ),
         _family_tables_arguments,
         _family_tables,

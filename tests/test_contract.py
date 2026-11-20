@@ -240,7 +240,7 @@ def test_an_empty_proband_reaches_the_tools_as_no_proband() -> None:
         assert f'case-annotation {stated}' in FAMILY_MODULES
         options = ['--family', 'f', '--ped', 'p', '--vcf', 'v', '--no-proband', '--pipeline-version', 'p']
         if command == 'family-tables':
-            options += ['--annotation', 'a', '--echtvar-values', 'e', '--joined-values', 'j']
+            options += ['--annotation', 'a', '--echtvar-values', 'e', '--joined-values', 'j', '--roh-upd', 'r']
             options += ['--schema-version', 's', '--output', 'o']
         assert cli.parser().parse_args([command, *options]).proband is None
 
@@ -582,25 +582,43 @@ def test_the_stub_runs_look_for_the_folders_that_the_contract_gives() -> None:
     assert set(re.findall(r'annotations/fam-[^/\s"]+/([^/\s"]+)', STUB_RUNS)) == {family.rpartition('/')[2]}
 
 
-def _folder(named: Sequence[str]) -> set[str]:
-    """The files of a family's folder by the contract, for a row that names a VCF in the columns given."""
+# The key of a file that a family has by its pedigree: a child whose parents are both samples of its VCF.
+BY_PEDIGREE = 'some_child_has_both_parents_sequenced'
+
+
+def _folder(named: Sequence[str], child: bool = True) -> set[str]:
+    """The files of a family's folder by the contract, for a row that names a VCF in the columns given.
+
+    `child` says whether a sample of the family's VCF is the child of two others.
+    """
     return {
         file['name']
         for file in FAMILY_FILES
-        if 'row_names_any_of' not in file or set(file['row_names_any_of']) & set(named)
+        if (
+            child
+            if BY_PEDIGREE in file
+            else 'row_names_any_of' not in file or set(file['row_names_any_of']) & set(named)
+        )
     }
 
 
 def test_the_files_of_a_familys_folder_are_the_ones_the_workflow_publishes() -> None:
-    always = [file['name'] for file in FAMILY_FILES if 'row_names_any_of' not in file]
+    always = [file['name'] for file in FAMILY_FILES if file.keys() == {'name'}]
     larger = [file for file in FAMILY_FILES if 'row_names_any_of' in file]
-    assert [*({'name': name} for name in always), *larger] == FAMILY_FILES
-    stems = [file['name'].removesuffix('.parquet') for file in larger]
+    trio = [file for file in FAMILY_FILES if BY_PEDIGREE in file]
+    assert [*({'name': name} for name in always), *larger, *trio] == FAMILY_FILES
+    assert trio == [{'name': f'{contract.TRIO_TABLE}.parquet', BY_PEDIGREE: True}]
+    stems = [file['name'].removesuffix('.parquet') for file in (*larger, *trio)]
     assert (
         f'{", ".join(f"path({name!r})" for name in always)}, '
-        f"path('{{{','.join(stems)}}}.parquet', arity: '0..{len(larger)}')"
+        f"path('{{{','.join(stems)}}}.parquet', arity: '0..{len(stems)}')"
     ) in FAMILY_MODULES
-    assert '[family: family, files: [variants, transcripts, manifest, notes] + larger]' in FAMILY_TABLES
+    names = {'manifest.json': 'manifest', family_tables.NOTES: 'notes'}
+    published = ', '.join(names.get(name) or name.removesuffix('.parquet') for name in always)
+    assert f'[family: family, files: [{published}] + larger]' in FAMILY_TABLES
+    # The stub knows no pedigree, so it gives the table of none.
+    (stub,) = re.findall(r'\n    touch variants\.parquet [^\n]*\n', FAMILY_MODULES)
+    assert stub == f"\n    touch {' '.join(always)} ${{larger.join(' ')}}\n"
     # The task's inputs by the sheet's columns, and the tables that the stub gives for them.
     inputs = {'sv_vcf': 'sv', 'cnv_vcf': 'cnv', 'repeat_vcfs': 'repeats'}
     by_columns: dict[tuple[str, ...], list[str]] = {}
@@ -616,13 +634,18 @@ def test_the_files_of_a_familys_folder_are_the_ones_the_workflow_publishes() -> 
     )
 
 
+# A row by the columns in which it names a VCF, and whether the family's child has both parents sequenced.
 FOLDERS = {
-    'a row that names no VCF of the larger variants': (),
-    'a structural-variant VCF': ('sv_vcf',),
-    'a copy-number VCF': ('cnv_vcf',),
-    'repeat VCFs': ('repeat_vcfs',),
-    'every VCF of the larger variants': ('sv_vcf', 'cnv_vcf', 'repeat_vcfs'),
+    'a row that names no VCF of the larger variants': ((), True),
+    'a structural-variant VCF': (('sv_vcf',), True),
+    'a copy-number VCF': (('cnv_vcf',), True),
+    'repeat VCFs': (('repeat_vcfs',), True),
+    'every VCF of the larger variants': (('sv_vcf', 'cnv_vcf', 'repeat_vcfs'), True),
+    'a child whose father is not sequenced': ((), False),
+    'such a child with every VCF of the larger variants': (('sv_vcf', 'cnv_vcf', 'repeat_vcfs'), False),
 }
+# The invented trio's PED file with the father as an individual who is no parent of the child.
+_NO_FATHER = 'fam-1\tS1\t0\t0\t1\t1\nfam-1\tS2\t0\t0\t2\t1\nfam-1\tS3\t0\tS2\t2\t2\n'
 
 
 def _assemble(
@@ -632,11 +655,12 @@ def _assemble(
     scores: Sequence[echtvar_values.Source] = test_family_tables._SCORE_SOURCES,
     joined: Sequence[joined_values.Source] = test_family_tables._JOINED_SOURCES,
     ranges: bool = True,
+    child: bool = True,
 ) -> family_tables.FamilyManifest:
     """Writes the folder of the invented family of test_family_tables, for a row that names the columns given.
 
     Its run named the sources given, read the archives of the scores given, joined the files given and, unless `ranges`
-    is false, gave a release of STRchive.
+    is false, gave a release of STRchive. Unless `child` is false, its child has both parents sequenced.
     """
     larger = test_family_tables._larger(
         tmp_path,
@@ -647,14 +671,22 @@ def _assemble(
         sources=sources,
         ranges=ranges,
     )
-    inputs = test_family_tables._inputs(tmp_path, info=test_family_tables._info(*sources), scores=scores, joined=joined)
+    inputs = test_family_tables._inputs(
+        tmp_path,
+        info=test_family_tables._info(*sources),
+        scores=scores,
+        joined=joined,
+        ped=test_family_tables._PED if child else _NO_FATHER,
+    )
     return family_tables.assemble(**{**inputs, **larger})
 
 
 @pytest.mark.parametrize('case', FOLDERS)
 def test_a_familys_folder_holds_the_files_the_contract_gives_for_its_row(tmp_path: pathlib.Path, case: str) -> None:
-    manifest = _assemble(tmp_path, FOLDERS[case])
-    assert {path.name for path in (tmp_path / 'out').iterdir()} == _folder(FOLDERS[case])
+    named, child = FOLDERS[case]
+    manifest = _assemble(tmp_path, named, child=child)
+    assert {path.name for path in (tmp_path / 'out').iterdir()} == _folder(named, child)
+    assert (f'{contract.TRIO_TABLE}.parquet' in _folder(named, child)) == child == bool(manifest.roh_upd.upd_children)
     assert [f'{table.table}.parquet' for table in manifest.tables] == [table.path for table in manifest.tables]
 
 
@@ -753,7 +785,7 @@ RUNS = {
 @pytest.mark.parametrize('case', RUNS)
 def test_the_columns_of_each_table_are_the_ones_its_file_declares(tmp_path: pathlib.Path, case: str) -> None:
     sources, scores, joined, ranges = RUNS[case]
-    manifest = _assemble(tmp_path, FOLDERS['every VCF of the larger variants'], sources, scores, joined, ranges)
+    manifest = _assemble(tmp_path, FOLDERS['every VCF of the larger variants'][0], sources, scores, joined, ranges)
     assert [table.table for table in manifest.tables] == list(TABLES)
     samples = [member.sample_id for member in manifest.members if member.sequenced]
     # A run names a dated source of the annotation in its sources, and an archive, a joined file or a release of

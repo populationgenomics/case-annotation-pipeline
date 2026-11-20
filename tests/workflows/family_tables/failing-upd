@@ -1,0 +1,11 @@
+#!/bin/sh
+# Stands in for an upd that fails after it has written part of its output, in the test of ROH_UPD
+# (tests/workflows/family_tables.nf). It writes one invented region to the file after --out and fails.
+while [ "$#" -gt 1 ]; do
+    if [ "$1" = --out ]; then
+        printf 'chr1\t999\t3000\tORIGIN=MATERNAL;TYPE=HETERODISOMY;LOW_SIZE=2000;INF_SITES=21;SNPS=21;HET_HOM=0/21;OPP_SITES=0;START_LOW=900;END_HIGH=3099;HIGH_SIZE=2199\n' > "$2"
+    fi
+    shift
+done
+echo "invented failure of upd" >&2
+exit 1

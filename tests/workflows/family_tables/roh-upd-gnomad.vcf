@@ -1,0 +1,84 @@
+##fileformat=VCFv4.2
+##contig=<ID=chr1,length=10000>
+##contig=<ID=chr2,length=10000>
+##contig=<ID=chrX,length=10000>
+##INFO=<ID=AC_joint,Number=A,Type=Integer,Description="Invented allele count">
+##INFO=<ID=AF_joint,Number=A,Type=Float,Description="Invented allele frequency">
+##INFO=<ID=nhomalt_joint,Number=A,Type=Integer,Description="Invented count of homozygous individuals">
+##INFO=<ID=fafmax_faf95_max_joint,Number=A,Type=Float,Description="Invented filtering allele frequency">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+chr1	900	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	950	.	T	A	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	1000	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	1100	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	1200	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	1250	.	C	G	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	1300	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	1400	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	1500	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	1540	.	G	T	.	.	AC_joint=1000;AF_joint=0.01;nhomalt_joint=100;fafmax_faf95_max_joint=0.01
+chr1	1550	.	T	A	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	1560	.	T	A	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	1600	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	1700	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	1800	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	1850	.	C	G	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	1900	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	2000	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	2050	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	2100	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	2150	.	T	A	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	2200	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	2300	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	2400	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	2450	.	C	G	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	2500	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	2600	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	2700	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	2750	.	T	A	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	2800	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	2900	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	3000	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	3050	.	C	G	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	3100	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	3200	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	3300	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	3350	.	T	A	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	3400	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	3500	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	3600	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	3650	.	C	G	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	3700	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	3800	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	3900	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	3950	.	T	A	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr1	4000	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	900	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	950	.	T	A	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	1000	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	1100	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	1200	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	1250	.	C	G	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	1300	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	1400	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	1500	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	1550	.	T	A	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	1600	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	1700	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	1750	.	T	A	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	1800	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	1850	.	C	G	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	1900	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	2000	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	2100	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	2150	.	T	A	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	2200	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	2300	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	2400	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	2450	.	C	G	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	2500	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	2600	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	2700	.	G	T	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	2750	.	T	A	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chr2	2800	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1
+chrX	500	.	A	C	.	.	AC_joint=10000;AF_joint=0.1;nhomalt_joint=1000;fafmax_faf95_max_joint=0.1

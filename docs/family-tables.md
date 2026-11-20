@@ -3,9 +3,11 @@
 The family tables are two Parquet tables and a manifest that hold one family's annotated variants with each member's
 calls, with up to three more tables for its structural variants, copy number segments and tandem repeats. One of those,
 `sv`, holds the structural variants and the copy-number variants together: the records of two callers, told apart by its
-`caller` column. This page is for an analyst who queries them, and for someone who writes an agent that does: it follows
-one record of a joint VCF into the rows it becomes, shows how to ask the usual rare-disease questions with DuckDB from
-Python, and ends with the folder's files and its manifest. It lists no columns: `DESCRIBE` shows them, and
+`caller` column. Every family also has `roh`, the runs of homozygosity of its members, and a family with a child whose
+parents are both sequenced has `upd`, the regions in which that child shows the alleles of one parent alone. This page
+is for an analyst who queries them, and for someone who writes an agent that does: it follows one record of a joint VCF
+into the rows it becomes, shows how to ask the usual rare-disease questions with DuckDB from Python, and ends with the
+folder's files and its manifest. It lists no columns: `DESCRIBE` shows them, and
 [`tables.md`](../src/case_annotation/tables.md), which every family's folder holds, has what a table does not show.
 
 ```mermaid
@@ -13,7 +15,7 @@ flowchart LR
     SHEET[("families sheet<br/>family-a: joint VCF,<br/>PED, proband S0103;<br/>optional SV, CNV<br/>and repeat VCFs")]
     ANNOTATE{{"Illumina's Annotator<br/>annotates the union<br/>of the families' alleles<br/>and of their<br/>structural variants"}}
     UNION["the union's tables"]
-    OUT[("one folder for<br/>each family<br/>family-a/<br/>2 to 5 Parquet tables,<br/>manifest.json")]
+    OUT[("one folder for<br/>each family<br/>family-a/<br/>3 to 7 Parquet tables,<br/>manifest.json")]
     READ(["an analyst or an agent<br/>queries the tables"])
 
     SHEET --> ANNOTATE --> UNION --> OUT --> READ
@@ -806,6 +808,72 @@ gene_fusions = con.sql(
 It returns two rows: `EX:BND:3:0` with `EXMPL3` and the partner `EXMPL4`, and `EX:BND:3:1` with the two the other way
 round, each with one pair of transcripts and `in_frame` false.
 
+## Runs of homozygosity and uniparental disomy
+
+Two more tables come from the family's own VCF and from no annotation. `roh` has one row for each run of homozygosity of
+a sequenced member, and every family has it. `upd` has one row for each region in which a child shows the alleles of one
+parent alone, and a family has it where a sample of its VCF is the child, by the PED file, of two other samples. Each
+table comes from a published tool that runs as it is: `bcftools roh` writes the runs, and
+[`upd`](https://github.com/bjhall/upd) the regions
+([Annotation](annotation.md#runs-of-homozygosity-and-uniparental-disomy) has the commands). The tables hold the tools'
+own fields, and nothing in them is classified by the pipeline.
+
+| Table | One row per                                                   | Holds                                                                                                                                                                                                                   |
+| ----- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `roh` | run of homozygosity of one member                             | the member's sample name as `member`, the run's first and last position, its `length` in bases, the number of sites in it as `markers`, and `quality`, the average phred score of those sites                           |
+| `upd` | region of one child that shows the alleles of one parent only | the child's sample name as `member`, the first and the last site that show one parent's alleles alone, the outer bounds, the parent as `origin` (`maternal` or `paternal`), and three counts of the sites in the region |
+
+In both tables `pos` and `end_pos` are positions as a VCF counts them, from 1, and both belong to the run or the region:
+`pos` is its first site and `end_pos` its last, so `length` in `roh` is `end_pos - pos + 1`. A row of `variants` lies
+inside where its `pos` is between the two, and a deletion of `sv`, whose bases run from `pos + 1` to `end_pos`, overlaps
+where `sv.pos < end_pos` and `sv.end_pos >= pos`. In `upd`, `outer_pos` is the position of the last site before the
+region that shows both parents' alleles, and `outer_end_pos` the position before the next such site, so the region may
+reach as far as from `outer_pos + 1` to `outer_end_pos`. `informative_sites` counts the sites that show one parent's
+alleles alone, `snps` all the sites that the tool read from `pos` to `outer_end_pos`, and `opposite_sites` the sites
+among them that point to the other parent. Where a region begins at the first site that the tool read on a chromosome,
+the tool gives an `outer_pos` from the chromosome before, or 0 on the first one, so an `outer_pos` above `pos` is no
+bound.
+
+The manifest's `roh_upd` says what ran, and which members the tables are of: `roh_members` are the sequenced members,
+and `upd_children` the children that `upd` assessed, each with its mother and father. A family has `upd` where it has a
+child with both parents sequenced, and the table can be without a row for two reasons, which only the manifest tells
+apart:
+
+- a child in `upd_children` was assessed and has no region;
+- a child in `upd_not_assessed` could not be assessed, because the family's VCF has no site that `upd` keeps, as a call
+  set of a few regions can be. `upd` was not run for it, and its entry gives `no informative site` as the `reason`.
+
+A family without the table has no child with both parents sequenced, and both lists are empty. `roh` is in every folder.
+It has no row where the family's VCF has no site that `bcftools roh` reads, and `sites`, the number of sites that the
+tools were given, is then low or 0.
+
+The rows of the two tables do not show the following.
+
+- Both tools read the autosomes alone, so neither table has a row on chrX, chrY or chrM. A male's calls on X are
+  haploid, which `upd` does not read as genotypes, and written as diploid calls they make a son's whole X a region of
+  maternal disomy.
+- Both tools read the family's PASS sites with one alternate allele of one base and a frequency in gnomAD's joint
+  release above 0. `upd` keeps the sites with a frequency of at least 0.05 and a GQ of at least 30 in every sample of
+  the family's VCF, and reports a region of more than 3 informative sites in a row that spans at least 1,000 bases.
+- `upd` reports small regions in every trio. On one whole genome of an ordinary trio it reported 84, of 3.1 Mb together:
+  80 were shorter than 100 kb and the longest was 1.4 Mb, and several lay on a deletion that the child carries. No
+  threshold is applied to the table, so a reader weighs a region by its size and its `informative_sites`. In the same
+  trial a disomy of a whole chromosome had over 20,000 informative sites, and one of 5 Mb over 1,000.
+- A long run of `roh` with few `markers` spans a gap in the sequence, as at a centromere: the trial's longest such run
+  was 18 Mb with 188 sites, where a run of that length over ordinary sequence has tens of thousands.
+
+`upd` also gives each region a type, heterodisomy or isodisomy, and counts of the child's heterozygous and homozygous
+sites. The tables leave both out. The tool counts those sites up to the next site that shows both parents' alleles,
+which lies beyond the region, so for a region that covers part of a chromosome the counts include sites outside it. In
+the trial it typed a deletion of one parent's copy and, on a second caller's calls, an isodisomy as heterodisomy. The
+tool's own documentation says to read the type from the runs of homozygosity instead, which the two tables allow
+([Isodisomy, heterodisomy or a deletion](#isodisomy-heterodisomy-or-a-deletion)):
+
+- a region that runs of the same child in `roh` cover from end to end is an isodisomy or a deletion of the other
+  parent's copy, and `sv` says which, where the family has it: a deletion that the child carries over the region;
+- a region that such runs cover in small parts or not at all is a heterodisomy, in which the child has both of one
+  parent's copies.
+
 ## Querying the tables from Python
 
 DuckDB reads Parquet in place, without loading it into a database first, and answers lookups by region or variant id in
@@ -867,9 +935,9 @@ members = manifest['members']
 member_columns = ', '.join(f'"{m["sample_id"]}"' for m in members if m['sequenced'])
 ```
 
-Every family has the views `variants` and `transcripts`. A family with the tables of its larger variants also has `sv`
-and `sv_transcripts`, `repeats`, or all three, and a query on a table that the family lacks fails instead of returning
-nothing.
+Every family has the views `variants`, `transcripts` and `roh`. A family with the tables of its larger variants also has
+`sv` and `sv_transcripts`, `repeats`, or all three, and a family with a child whose parents are both sequenced has
+`upd`. A query on a table that the family lacks fails instead of returning nothing.
 
 `SET parquet_metadata_cache = true` keeps each file's footer in memory once it has been read. Without it DuckDB reads
 the footer again for every query, which adds about 0.01 s to a lookup in `variants` and 0.04 s to one in `transcripts`
@@ -2492,6 +2560,84 @@ len(list_filter(strchive_pathogenic_motif_reference_orientation,
                 lambda motif: len(motif) = len(repeat_unit) AND contains(repeat_unit || repeat_unit, motif))) > 0
 ```
 
+### Variants inside a region of uniparental disomy or a long run of homozygosity
+
+`roh` and `upd` hold a handful of rows for a member, so a question about the variants inside them is a join of
+`variants` against those rows, and no column of `variants` says that an allele lies in one. This returns the alleles
+that a child carries inside its regions of `upd`, each with the region:
+
+```python
+child = manifest['roh_upd']['upd_children'][0]['child']
+in_regions = con.sql(
+    f"""
+    SELECT v.variant_id, v."{child}".zygosity, v.worst_consequence, u.origin,
+           u.pos AS region_pos, u.end_pos AS region_end_pos, u.informative_sites
+    FROM upd u
+    JOIN variants v ON v.chrom = u.chrom AND v.pos BETWEEN u.pos AND u.end_pos
+    WHERE u.member = $child AND v."{child}".carries
+      AND u.end_pos - u.pos + 1 >= $min_length
+    ORDER BY u.chrom, u.pos, v.pos
+    """,
+    params={'child': child, 'min_length': 1_000_000},
+).to_arrow_table()
+```
+
+The first line fails with an `IndexError` in a family without an assessed child. The same join against `roh` returns the
+alleles inside a member's long runs, where an allele that both copies share is homozygous:
+
+```python
+in_runs = con.sql(
+    f"""
+    SELECT v.variant_id, v."{child}".zygosity, v.worst_consequence, r.pos AS run_pos, r.end_pos AS run_end_pos
+    FROM roh r
+    JOIN variants v ON v.chrom = r.chrom AND v.pos BETWEEN r.pos AND r.end_pos
+    WHERE r.member = $member AND r.length >= $min_length AND r.markers >= $min_markers
+      AND v."{child}".zygosity = 'hom_alt'
+    ORDER BY r.chrom, r.pos, v.pos
+    """,
+    params={'member': child, 'min_length': 1_000_000, 'min_markers': 1_000},
+).to_arrow_table()
+```
+
+`min_length` and `min_markers` are the reader's own choice and not values that the tables apply: the floor on `markers`
+leaves out the runs across a centromere
+([Runs of homozygosity and uniparental disomy](#runs-of-homozygosity-and-uniparental-disomy)). Both joins put the
+segment's few rows first and read `variants` by chromosome and position, which its row groups are sorted by.
+
+### Isodisomy, heterodisomy or a deletion
+
+This gives each region of `upd` the share of its positions that a run of the same member in `roh` covers:
+
+```python
+region_types = con.sql(
+    """
+    SELECT u.member, u.chrom, u.pos, u.end_pos, u.origin, u.informative_sites,
+           coalesce(sum(least(u.end_pos, r.end_pos) - greatest(u.pos, r.pos) + 1)
+                        FILTER (WHERE r.pos IS NOT NULL), 0)
+               / (u.end_pos - u.pos + 1) AS homozygous_fraction
+    FROM upd u
+    LEFT JOIN roh r
+      ON r.member = u.member AND r.chrom = u.chrom AND r.pos <= u.end_pos AND r.end_pos >= u.pos
+    GROUP BY u.member, u.chrom, u.pos, u.end_pos, u.origin, u.informative_sites
+    ORDER BY u.end_pos - u.pos DESC
+    """
+).to_arrow_table()
+```
+
+A region with a fraction near 1 is an isodisomy or a deletion of the other parent's copy, and one with a low fraction a
+heterodisomy. The fraction of a heterodisomy is above 0 in a real genome, which has short runs everywhere: in the trial
+the runs of the child covered 0.14 of a heterodisomy of a whole chromosome, and all of each isodisomy and of a deleted
+copy. A fraction well in between is a region that is homozygous in part, as a disomy is that changes from two different
+copies to two identical ones along the chromosome. On an invented trio with a region of each kind, which the pipeline's
+tests run the two tools on, the query returns 1 for the region that the child has one of the mother's alleles twice in,
+and 0 for the region in which the child has both of her alleles. The `FILTER` matters: DuckDB's `least` and `greatest`
+skip a null, so without it a region without a run would get 1.
+
+Whether a region with a fraction near 1 is a deletion is a question to `sv`, in a family that has it: a deletion that
+the child carries, of about the region's size, with `pos < u.end_pos` and `end_pos >= u.pos`
+([A deletion in a region that neither parent carries](#a-deletion-in-a-region-that-neither-parent-carries) has the form
+of that query).
+
 ## How fast
 
 The times below come from one family, a whole-genome trio with about 9 million alleles, on an Apple M4 Max laptop:
@@ -2720,10 +2866,11 @@ so a reader of a folder has the notes on the tables it reads.
 
 ### The folder and its files
 
-A family's folder holds `variants.parquet`, `transcripts.parquet`, `manifest.json` and `tables.md`, the notes on the
-tables. A family whose VCFs of larger variants were given to the workflow also has `sv.parquet` and
-`sv_transcripts.parquet`, `repeats.parquet`, or all three, and the manifest's `tables` lists the tables that are there.
-`family_tables.nf` publishes the folder as `annotations/<family>/tables-<version>-illumina-<catalog>/`, such as
+A family's folder holds `variants.parquet`, `transcripts.parquet`, `roh.parquet`, `manifest.json` and `tables.md`, the
+notes on the tables. A family whose VCFs of larger variants were given to the workflow also has `sv.parquet` and
+`sv_transcripts.parquet`, `repeats.parquet`, or all three, and a family with a child whose parents are both sequenced
+has `upd.parquet`. The manifest's `tables` lists the tables that are there. `family_tables.nf` publishes the folder as
+`annotations/<family>/tables-<version>-illumina-<catalog>/`, such as
 `annotations/family-a/tables-0.5.0-illumina-202610/` ([What a run publishes](annotation.md#what-a-run-publishes)).
 
 The tables' version, `0.5.0` here, changes when a column of a table is renamed, retyped or removed, or when its meaning
@@ -2736,9 +2883,9 @@ The tables share these properties:
 
 | Property           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| order of the rows  | sorted by chromosome (1 to 22, X, Y, M) and position; `sv` and `repeats` then by `end_pos` and their key, and `sv_transcripts` then by `end_pos`, `sv_id`, `variant_type` and `transcript_id`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| order of the rows  | sorted by chromosome (1 to 22, X, Y, M) and position; `sv` and `repeats` then by `end_pos` and their key, `sv_transcripts` then by `end_pos`, `sv_id`, `variant_type` and `transcript_id`, and `roh` and `upd` then by `end_pos` and `member`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | compression        | zstd, in row groups of 100,000 rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| Bloom filters      | on the columns a lookup uses: in `variants` the variant id and the values of `hgnc_ids`; in `transcripts` the variant id, the transcript id, the gene symbol and id and the HGNC id; `sv_id` in `sv` and in `sv_transcripts`, which also has them on its transcript id, its gene symbol and id and its HGNC id; and `repeat_id` in `repeats`. DuckDB 2.0 does not use the one of `hgnc_ids` ([Variants in a gene](#variants-in-a-gene)), and a reader that tests a list's values against a filter can                                                                                                                                                                                                                                 |
+| Bloom filters      | on the columns a lookup uses: in `variants` the variant id and the values of `hgnc_ids`; in `transcripts` the variant id, the transcript id, the gene symbol and id and the HGNC id; `sv_id` in `sv` and in `sv_transcripts`, which also has them on its transcript id, its gene symbol and id and its HGNC id; and `repeat_id` in `repeats`; `roh` and `upd` have none. DuckDB 2.0 does not use the one of `hgnc_ids` ([Variants in a gene](#variants-in-a-gene)), and a reader that tests a list's values against a filter can                                                                                                                                                                                                      |
 | key-value metadata | the tables' version (`schema_version`), the table's name, the family, and the annotation's provenance (`annotation`, `gnomad_joint`, the three `alphagenome_` keys and `joined_files`, as in the manifest); `sv` and `sv_transcripts` carry the provenance of the annotation of the structural variants instead (`annotation`, which is the manifest's `sv_annotation`), and `repeats` the release of STRchive that its ranges come from (`strchive`, as in the manifest, and a JSON null in a run without one)                                                                                                                                                                                                                       |
 | variant id         | `<chrom>-<pos>-<ref>-<alt>` with the VCF's contig name, such as `chr2-1234567-C-T`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | shared columns     | a column that means the same thing has the same name and type in every table ([Shared column names](#shared-column-names))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
@@ -2755,28 +2902,29 @@ that STRchive links to a disease and STRchive's level of evidence for that link.
 `manifest.json` describes the folder: its tables, the family and what annotated the alleles and the structural variants.
 Every manifest holds every key below, also the manifest of a family without the optional tables.
 
-| Key                           | Holds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema_version`              | the tables' version, such as `0.5.0`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `pipeline_version`            | the release of the pipeline that wrote the folder, such as `0.3.0`: the version of the workflow and of the tools image at once, because the workflow gives its own version to the step that writes the folder, which refuses to write with tools of another. It is the same in every run of one release                                                                                                                                                                                                                                |
-| `family`                      | the family's id                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `members`                     | the pedigree: each member with its `sample_id`, `father`, `mother`, `sex`, `affected` (empty where the PED file gives the phenotype as unknown), `sequenced` (whether `variants` has its column, and `sv` and `repeats` where the family has them) and `role`                                                                                                                                                                                                                                                                          |
-| `notes`                       | the notes on the tables in the folder: the `path`, which is `tables.md`, with the file's size in `bytes` and its `sha256`, as an entry of `tables` gives a table's                                                                                                                                                                                                                                                                                                                                                                     |
-| `tables`                      | each table the folder holds, with its rows, size and SHA-256: `variants` and `transcripts`, then `sv`, `sv_transcripts` and `repeats` where the family has them                                                                                                                                                                                                                                                                                                                                                                        |
-| `sv_callers`                  | the callers whose records `sv` holds: `sv`, `cnv` or both, and an empty list in a family without the table. A named caller with no row of `sv` reported nothing                                                                                                                                                                                                                                                                                                                                                                        |
-| `alleles`                     | the number of alleles, which is the number of rows of `variants`                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `annotation`                  | what annotated the alleles: the Annotator, the catalog, the sources named and the versions they pinned, the data sources the JSON header records, and the bundle's sources the run left out, each with its reason: `dated`, `not_applicable`, `current` or `unplaced`                                                                                                                                                                                                                                                                  |
-| `gnomad_joint`                | the archive of gnomAD's joint values: its file name, its size and SHA-256 as the run read it, echtvar's version, and each field the archive's embedded configuration declares, with gnomAD's name for it, the archive's alias, its type, its multiplier and the value that stands for a missing one                                                                                                                                                                                                                                    |
-| `alphagenome_avi`             | the archive of AlphaGenome's AVI scores, which `avi_phred` and `avi_raw` come from, in the form of `gnomad_joint`; null in a run that was not given it                                                                                                                                                                                                                                                                                                                                                                                 |
-| `alphagenome_avi_breakdown`   | the archive of the breakdown of the AVI score, which the `avi_shap_` columns come from, in the same form, with the notice that DeepMind's terms ask for as `terms`; null in a run that was not given it                                                                                                                                                                                                                                                                                                                                |
-| `alphagenome_splicing`        | the archive of AlphaGenome's splicing scores, which `alphagenome_splicing` comes from, in the form of `alphagenome_avi_breakdown`; null in a run that was not given it                                                                                                                                                                                                                                                                                                                                                                 |
-| `joined_files`                | the public files that the run joined to the alleles ([Joined files](annotation.md#joined-files)): an entry for each, with the name of its param as `source`, its `file` name, and its size in `bytes` and its `sha256` as the run read it, in the order of their columns; an empty list in a run that was given none                                                                                                                                                                                                                   |
-| `omitted_columns`             | the columns of `variants` that the run left out because it did not name their source: those of its dated sources, then those of the archives of AlphaGenome's scores that it was not given, then those of the joined files that it was not given                                                                                                                                                                                                                                                                                       |
-| `transcripts_omitted_columns` | the columns of `transcripts` that the run left out because it was not given the joined file that they come from                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `sv_annotation`               | what annotated the structural variants and copy number segments, in the form of `annotation`: the second Annotator run, which has the catalog and the sources of the first; null in a family without `sv`                                                                                                                                                                                                                                                                                                                              |
-| `sv_omitted_columns`          | the columns of `sv` that the run left out because it did not name their dated source; an empty list in a family without `sv`                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `strchive`                    | the release of STRchive that the `strchive_` columns of `repeats` come from ([STRchive's ranges of the repeats](annotation.md#strchives-ranges-of-the-repeats)): its `file` name, its size in `bytes` and its `sha256` as the run read it, the `release` and its `release_date` as the run stated them, since the file holds neither, and the rows of `repeats` with a locus of STRchive as `matched_repeats` and those without one as `unmatched_repeats`; null in a run that was given no release, and in a family without `repeats` |
-| `repeats_omitted_columns`     | the columns of `repeats` that the run left out because it was given no release of STRchive; an empty list in a family without `repeats`                                                                                                                                                                                                                                                                                                                                                                                                |
+| Key                           | Holds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `schema_version`              | the tables' version, such as `0.5.0`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `pipeline_version`            | the release of the pipeline that wrote the folder, such as `0.3.0`: the version of the workflow and of the tools image at once, because the workflow gives its own version to the step that writes the folder, which refuses to write with tools of another. It is the same in every run of one release                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `family`                      | the family's id                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `members`                     | the pedigree: each member with its `sample_id`, `father`, `mother`, `sex`, `affected` (empty where the PED file gives the phenotype as unknown), `sequenced` (whether `variants` has its column, and `sv` and `repeats` where the family has them) and `role`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `notes`                       | the notes on the tables in the folder: the `path`, which is `tables.md`, with the file's size in `bytes` and its `sha256`, as an entry of `tables` gives a table's                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `tables`                      | each table the folder holds, with its rows, size and SHA-256: `variants` and `transcripts`, then `sv`, `sv_transcripts` and `repeats` where the family has them, then `roh`, and `upd` where the family has it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `sv_callers`                  | the callers whose records `sv` holds: `sv`, `cnv` or both, and an empty list in a family without the table. A named caller with no row of `sv` reported nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `alleles`                     | the number of alleles, which is the number of rows of `variants`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `annotation`                  | what annotated the alleles: the Annotator, the catalog, the sources named and the versions they pinned, the data sources the JSON header records, and the bundle's sources the run left out, each with its reason: `dated`, `not_applicable`, `current` or `unplaced`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `gnomad_joint`                | the archive of gnomAD's joint values: its file name, its size and SHA-256 as the run read it, echtvar's version, and each field the archive's embedded configuration declares, with gnomAD's name for it, the archive's alias, its type, its multiplier and the value that stands for a missing one                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `alphagenome_avi`             | the archive of AlphaGenome's AVI scores, which `avi_phred` and `avi_raw` come from, in the form of `gnomad_joint`; null in a run that was not given it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `alphagenome_avi_breakdown`   | the archive of the breakdown of the AVI score, which the `avi_shap_` columns come from, in the same form, with the notice that DeepMind's terms ask for as `terms`; null in a run that was not given it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `alphagenome_splicing`        | the archive of AlphaGenome's splicing scores, which `alphagenome_splicing` comes from, in the form of `alphagenome_avi_breakdown`; null in a run that was not given it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `joined_files`                | the public files that the run joined to the alleles ([Joined files](annotation.md#joined-files)): an entry for each, with the name of its param as `source`, its `file` name, and its size in `bytes` and its `sha256` as the run read it, in the order of their columns; an empty list in a run that was given none                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `omitted_columns`             | the columns of `variants` that the run left out because it did not name their source: those of its dated sources, then those of the archives of AlphaGenome's scores that it was not given, then those of the joined files that it was not given                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `transcripts_omitted_columns` | the columns of `transcripts` that the run left out because it was not given the joined file that they come from                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `sv_annotation`               | what annotated the structural variants and copy number segments, in the form of `annotation`: the second Annotator run, which has the catalog and the sources of the first; null in a family without `sv`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `sv_omitted_columns`          | the columns of `sv` that the run left out because it did not name their dated source; an empty list in a family without `sv`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `strchive`                    | the release of STRchive that the `strchive_` columns of `repeats` come from ([STRchive's ranges of the repeats](annotation.md#strchives-ranges-of-the-repeats)): its `file` name, its size in `bytes` and its `sha256` as the run read it, the `release` and its `release_date` as the run stated them, since the file holds neither, and the rows of `repeats` with a locus of STRchive as `matched_repeats` and those without one as `unmatched_repeats`; null in a run that was given no release, and in a family without `repeats`                                                                                                                                                                                                                                                                                                                             |
+| `roh_upd`                     | what found the rows of `roh` and `upd` ([Runs of homozygosity and uniparental disomy](annotation.md#runs-of-homozygosity-and-uniparental-disomy)): the versions of bcftools and of upd, the commit of upd's repository that upd was installed from, the commands that prepared the VCF both tools read and the two tools' own commands, the archive that gave each site its frequency, in the form of `gnomad_joint` with the one field that was read, the number of `sites` in the prepared VCF, the members that `roh` is of as `roh_members`, the children that upd assessed as `upd_children`, each with its mother and father, and as `upd_not_assessed` the children with both parents sequenced that upd was not run for, each with its mother, its father and the `reason`, which is `no informative site`; both lists are empty in a family without `upd` |
+| `repeats_omitted_columns`     | the columns of `repeats` that the run left out because it was given no release of STRchive; an empty list in a family without `repeats`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 The reasons, under `annotation.omitted`, follow the groups of sources in [Dated sources](annotation.md#dated-sources):
 `dated` for a dated source, `not_applicable` for one that does not apply to germline small variants, `current` for a
@@ -2813,7 +2961,7 @@ one, because the dictionary would hold nearly every value once and add an index 
   values. With the encodings of the record's columns they make `sv` about 15% smaller.
 
 Every other column keeps its dictionary, among them the fields of the members' calls and the HGNC ids, whose values
-repeat from row to row.
+repeat from row to row. So does every column of `roh` and `upd`, which hold a few thousand rows at most.
 
 These columns keep their row-group statistics, page indexes and Bloom filters, so a lookup skips row groups as before.
 

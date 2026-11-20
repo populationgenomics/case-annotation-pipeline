@@ -12,6 +12,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 import duckdb
+import invented_roh_upd
 import invented_strchive
 import invented_sv_annotation
 import pyarrow as pa
@@ -30,6 +31,7 @@ from case_annotation import (
     joined_values,
     pedigree,
     repeat_tables,
+    roh_upd,
     strchive,
     sv_annotation,
     sv_sites,
@@ -62,6 +64,20 @@ _RECORDS: list[tuple[str, int, str, str, tuple[Call, Call, Call]]] = [
     ),
 ]
 _ALLELES = [annotation_tables.variant_id(c, p, r, a) for c, p, r, a, _ in _RECORDS]
+
+
+_SAMPLES = ('S1', 'S2', 'S3')
+
+
+def _assessed(ped: str, samples: Sequence[str]) -> list[roh_upd.Trio]:
+    """The children with both parents among the samples, from the lines of a PED file that nothing has checked."""
+    lines = [line.split() for line in ped.splitlines()]
+    return [
+        roh_upd.Trio(child=line[1], mother=line[3], father=line[2])
+        for sample in samples
+        for line in lines
+        if len(line) == 6 and line[1] == sample and line[2] in samples and line[3] in samples
+    ]
 
 
 def _write_vcf(path: pathlib.Path, records: Sequence[tuple[str, int, str, str, tuple[Call, ...]]]) -> None:
@@ -437,6 +453,9 @@ def _write_joined(path: pathlib.Path, alleles: Sequence[str], sources: Sequence[
 
 # The tables of a family's alleles, which every family has.
 _ALLELE_TABLES = ('variants', 'transcripts')
+# The tables of the runs of homozygosity, which every family has, and of the regions of uniparental disomy, which the
+# invented trio has for its child. They come after every other table.
+_SEGMENT_TABLES = ('roh', 'upd')
 # A family whose sheet row names no VCF of its larger variants.
 _NO_STRUCTURAL = family_tables.Structural(sv_vcf=None, cnv_vcf=None, repeat_vcfs=())
 
@@ -452,9 +471,20 @@ def _inputs(
     scores: Sequence[echtvar_values.Source] = _SCORE_SOURCES,
     joined: Sequence[joined_values.Source] = _JOINED_SOURCES,
     joined_alleles: Sequence[str] = (*_ALLELES, 'chr2-500-C-A'),
+    *,
+    runs: Sequence[Mapping[str, Any]] = (),
+    regions: Sequence[Mapping[str, Any]] = (),
+    samples: Sequence[str] = _SAMPLES,
+    assessed: bool = True,
 ) -> dict[str, Any]:
     _write_vcf(tmp_path / 'family.vcf.gz', records)
     (tmp_path / 'family.ped').write_text(ped)
+    # A folder of its own for each call, since a test can write a family's inputs twice.
+    segments = tmp_path / f'segments-{len(list(tmp_path.glob("segments-*")))}'
+    children = _assessed(ped, samples)
+    invented_roh_upd.written(
+        segments, samples, children if assessed else (), runs, regions, not_assessed=() if assessed else children
+    )
     _write_union(tmp_path / 'union', _ALLELES, info or _info('Ensembl', 'dbSNP', 'clinvar'))
     _write_joint(tmp_path / 'joint', joint, scores)
     _write_joined(tmp_path / 'joined', joined_alleles, joined)
@@ -468,6 +498,7 @@ def _inputs(
         'output': tmp_path / 'out',
         'proband': proband,
         'structural': structural or _NO_STRUCTURAL,
+        'segments': segments,
     }
 
 
@@ -486,17 +517,25 @@ def test_a_familys_tables_hold_its_alleles_sorted_in_chromosome_order(tmp_path: 
     assert (variants[0]['qual'], variants[0]['filters']) == (50.0, ['PASS'])
     assert [t['variant_id'] for t in _rows(out / 'transcripts.parquet')] == _ALLELES
     assert manifest.alleles == len(_ALLELES)
-    assert {t.table: t.rows for t in manifest.tables} == {'variants': len(_ALLELES), 'transcripts': len(_ALLELES)}
-    # The folder holds the two tables, the manifest and the notes on the tables, and each table as the manifest
-    # records it.
+    assert {t.table: t.rows for t in manifest.tables} == {
+        'variants': len(_ALLELES),
+        'transcripts': len(_ALLELES),
+        'roh': 0,
+        'upd': 0,
+    }
+    # The folder holds the tables, the manifest and the notes on the tables, and each table as the manifest records
+    # it.
     assert sorted(f.name for f in out.iterdir()) == [
         'manifest.json',
+        'roh.parquet',
         'tables.md',
         'transcripts.parquet',
+        'upd.parquet',
         'variants.parquet',
     ]
     assert {t.table: (t.path, t.bytes) for t in manifest.tables} == {
-        table: (f'{table}.parquet', (out / f'{table}.parquet').stat().st_size) for table in ('variants', 'transcripts')
+        table: (f'{table}.parquet', (out / f'{table}.parquet').stat().st_size)
+        for table in (*_ALLELE_TABLES, *_SEGMENT_TABLES)
     }
     on_disk = json.loads((out / 'manifest.json').read_text())
     assert on_disk['family'] == 'fam-1'
@@ -528,7 +567,7 @@ def test_each_members_column_holds_its_own_call_with_its_likelihoods(tmp_path: p
 
 
 def test_the_call_columns_follow_the_vcfs_sample_order(tmp_path: pathlib.Path) -> None:
-    inputs = _inputs(tmp_path)
+    inputs = _inputs(tmp_path, samples=('S3', 'S1', 'S2'))
     vcf = _text_vcf(tmp_path / 'call.vcf', _GT_AD, ('0/1:5,5', '0/0:9,0', '0/0:9,0'), 'GT:AD', ('S3', 'S1', 'S2'))
     family_tables.assemble(**{**inputs, 'vcf_path': vcf})
     assert pq.read_schema(tmp_path / 'out' / 'variants.parquet').names[-3:] == ['S3', 'S1', 'S2']
@@ -901,7 +940,7 @@ def _tables_command(
     """The family-tables command of the inputs, without its proband."""
     args = ['family-tables', '--family', 'fam-1', '--ped', str(inputs['ped_path']), '--vcf', str(inputs['vcf_path'])]
     args += ['--annotation', str(inputs['annotation']), '--echtvar-values', str(inputs['archive_values'])]
-    args += ['--joined-values', str(inputs['joined'])]
+    args += ['--joined-values', str(inputs['joined']), '--roh-upd', str(inputs['segments'])]
     args += ['--output', str(output or inputs['output'])]
     return [*args, '--schema-version', version, '--pipeline-version', pipeline]
 
@@ -1425,6 +1464,8 @@ def test_a_family_with_the_vcfs_of_its_larger_variants_gets_their_tables(tmp_pat
         # One invented transcript for each allele: the segment that one member loses and another gains has two.
         'sv_transcripts': len(_SV_ROWS) + 1,
         'repeats': len(structural_vcfs.REPEAT_IDS),
+        'roh': 0,
+        'upd': 0,
     }
     assert manifest.sv_callers == ('sv', 'cnv')
     assert manifest.alleles == len(_ALLELES)
@@ -1449,14 +1490,16 @@ def test_a_family_with_the_vcfs_of_its_larger_variants_gets_their_tables(tmp_pat
 
 def test_a_family_without_such_vcfs_has_no_table_of_them(tmp_path: pathlib.Path) -> None:
     manifest = family_tables.assemble(**_inputs(tmp_path))
-    assert [t.table for t in manifest.tables] == list(_ALLELE_TABLES)
+    assert [t.table for t in manifest.tables] == [*_ALLELE_TABLES, *_SEGMENT_TABLES]
     assert manifest.sv_callers == ()
     assert (manifest.sv_annotation, manifest.sv_omitted_columns) == (None, ())
     assert (manifest.strchive, manifest.repeats_omitted_columns) == (None, ())
     assert sorted(f.name for f in (tmp_path / 'out').iterdir()) == [
         'manifest.json',
+        'roh.parquet',
         'tables.md',
         'transcripts.parquet',
+        'upd.parquet',
         'variants.parquet',
     ]
 
@@ -1526,7 +1569,7 @@ TABLES_BY_INPUT = {
 def test_a_family_gets_the_tables_of_the_vcfs_it_brings(tmp_path: pathlib.Path, case: str) -> None:
     given, tables, callers = TABLES_BY_INPUT[case]
     manifest = family_tables.assemble(**{**_inputs(tmp_path), **_larger(tmp_path, **given)})
-    assert [t.table for t in manifest.tables] == [*_ALLELE_TABLES, *tables]
+    assert [t.table for t in manifest.tables] == [*_ALLELE_TABLES, *tables, *_SEGMENT_TABLES]
     assert manifest.sv_callers == callers
     if callers:
         assert {r['caller'] for r in _rows(tmp_path / 'out' / 'sv.parquet')} == set(callers)
@@ -1554,7 +1597,7 @@ def test_an_allele_that_the_familys_variants_lack_links_nothing(tmp_path: pathli
 
 
 def test_the_member_columns_of_the_larger_variants_follow_the_familys_vcf(tmp_path: pathlib.Path) -> None:
-    inputs = _inputs(tmp_path)
+    inputs = _inputs(tmp_path, samples=('S3', 'S1', 'S2'))
     vcf = _text_vcf(tmp_path / 'call.vcf', _GT_AD, ('0/1:5,5', '0/0:9,0', '0/0:9,0'), 'GT:AD', ('S3', 'S1', 'S2'))
     family_tables.assemble(**{**inputs, **_larger(tmp_path), 'vcf_path': vcf})
     out = tmp_path / 'out'
@@ -1802,7 +1845,7 @@ def test_the_commands_take_the_vcfs_of_the_larger_variants(tmp_path: pathlib.Pat
         [*_tables_command(inputs, output=tmp_path / 'written'), *command[len(_tables_command(inputs)) :], *annotation]
     )
     manifest = json.loads((tmp_path / 'written' / 'manifest.json').read_text())
-    assert [t['table'] for t in manifest['tables']] == [*_ALLELE_TABLES, *_SV_TABLES, 'repeats']
+    assert [t['table'] for t in manifest['tables']] == [*_ALLELE_TABLES, *_SV_TABLES, 'repeats', *_SEGMENT_TABLES]
     assert manifest['schema_version'] == family_tables.SCHEMA_VERSION
 
 
@@ -2328,3 +2371,179 @@ def test_a_sample_cannot_take_the_name_of_a_joined_column_whatever_the_run_joins
     for column in ('gnomad_mito_af_hom', 'GENCODE_POLYA_SIGNAL', 'aparent2_min', 'mcr_oe_min', 'MPC_MAX'):
         with pytest.raises(ValueError, match=f'the VCF sample {column!r} would share the column name'):
             family_tables.check_column_names(['S1', column])
+
+
+def _run(member: str, chrom: str, pos: int, end_pos: int, markers: int = 40) -> dict[str, Any]:
+    """An invented run of homozygosity, as a row of the step's folder."""
+    return {
+        'member': member,
+        'chrom': chrom,
+        'pos': pos,
+        'end_pos': end_pos,
+        'length': end_pos - pos + 1,
+        'markers': markers,
+        'quality': 62.5,
+    }
+
+
+def _region(chrom: str, pos: int, end_pos: int, origin: str = 'maternal', sites: int = 12) -> dict[str, Any]:
+    """An invented region of uniparental disomy of the child, as a row of the step's folder."""
+    return {
+        'member': 'S3',
+        'chrom': chrom,
+        'pos': pos,
+        'end_pos': end_pos,
+        'outer_pos': pos - 50,
+        'outer_end_pos': end_pos + 50,
+        'origin': origin,
+        'informative_sites': sites,
+        'snps': sites * 9,
+        'opposite_sites': 0,
+    }
+
+
+# Runs and regions in another order than the tables': chr10 before chr2, as a sort by name has them.
+_RUNS = (
+    _run('S3', 'chr10', 1, 900),
+    _run('S3', 'chr2', 50, 4_000),
+    _run('S1', 'chr2', 50, 60, markers=3),
+    _run('S2', 'chr1', 7, 80),
+    _run('S3', 'chr2', 9_000, 9_400),
+)
+_REGIONS = (
+    _region('chr10', 1, 1_500, origin='paternal'),
+    _region('chr2', 80, 3_900),
+    _region('chr1', 2, 900),
+)
+
+
+def test_a_familys_runs_and_regions_are_tables_in_the_order_of_the_others(tmp_path: pathlib.Path) -> None:
+    manifest = family_tables.assemble(**_inputs(tmp_path, runs=_RUNS, regions=_REGIONS))
+    out = tmp_path / 'out'
+    assert {t.table: t.rows for t in manifest.tables if t.table in _SEGMENT_TABLES} == {'roh': 5, 'upd': 3}
+    roh, upd = pq.read_table(out / 'roh.parquet'), pq.read_table(out / 'upd.parquet')
+    assert roh.schema.equals(roh_upd.ROH, check_metadata=False)
+    assert upd.schema.equals(roh_upd.UPD, check_metadata=False)
+    assert [(r['chrom'], r['pos'], r['member']) for r in roh.to_pylist()] == [
+        ('chr1', 7, 'S2'),
+        ('chr2', 50, 'S1'),
+        ('chr2', 50, 'S3'),
+        ('chr2', 9_000, 'S3'),
+        ('chr10', 1, 'S3'),
+    ]
+    assert [(r['chrom'], r['origin']) for r in upd.to_pylist()] == [
+        ('chr1', 'maternal'),
+        ('chr2', 'maternal'),
+        ('chr10', 'paternal'),
+    ]
+    assert roh.to_pylist()[2] == _RUNS[1]
+    assert upd.to_pylist()[1] == _REGIONS[1]
+    # Each table and the manifest carry the record of what found the rows.
+    on_disk = json.loads((out / 'manifest.json').read_text())['roh_upd']
+    assert roh_upd.RohUpdInfo.model_validate(on_disk) == manifest.roh_upd
+    assert manifest.roh_upd.roh_members == _SAMPLES
+    assert manifest.roh_upd.upd_children == (roh_upd.Trio(child='S3', mother='S2', father='S1'),)
+    for table in (roh, upd):
+        assert json.loads(table.schema.metadata[b'roh_upd']) == on_disk
+        assert table.schema.metadata[b'schema_version'] == family_tables.SCHEMA_VERSION.encode()
+    assert (roh.schema.metadata[b'table'], upd.schema.metadata[b'table']) == (b'roh', b'upd')
+
+
+def test_a_family_without_a_child_of_two_sequenced_parents_has_no_table_of_regions(tmp_path: pathlib.Path) -> None:
+    mother_alone = 'fam-1\tS1\t0\t0\t1\t1\nfam-1\tS2\t0\t0\t2\t1\nfam-1\tS3\t0\tS2\t2\t2\n'
+    manifest = family_tables.assemble(**_inputs(tmp_path, ped=mother_alone, runs=_RUNS))
+    assert [t.table for t in manifest.tables] == [*_ALLELE_TABLES, 'roh']
+    assert not (tmp_path / 'out' / 'upd.parquet').exists()
+    assert manifest.roh_upd.upd_children == ()
+    assert len(_rows(tmp_path / 'out' / 'roh.parquet')) == len(_RUNS)
+
+
+def test_a_child_that_upd_could_not_assess_has_a_table_without_rows_and_an_entry_in_the_manifest(
+    tmp_path: pathlib.Path,
+) -> None:
+    manifest = family_tables.assemble(**_inputs(tmp_path, runs=_RUNS, assessed=False))
+    # The table is there as for an assessed child without a region, and only the manifest tells the two apart.
+    assert [t.table for t in manifest.tables] == [*_ALLELE_TABLES, *_SEGMENT_TABLES]
+    assert _rows(tmp_path / 'out' / 'upd.parquet') == []
+    written = json.loads((tmp_path / 'out' / 'manifest.json').read_text())['roh_upd']
+    assert written['upd_children'] == []
+    assert written['upd_not_assessed'] == [
+        {'child': 'S3', 'mother': 'S2', 'father': 'S1', 'reason': 'no informative site'}
+    ]
+    (tmp_path / 'again').mkdir()
+    assessed = family_tables.assemble(**_inputs(tmp_path / 'again', runs=_RUNS))
+    assert (assessed.roh_upd.upd_not_assessed, len(assessed.roh_upd.upd_children)) == ((), 1)
+
+
+def test_runs_and_regions_of_another_family_are_refused(tmp_path: pathlib.Path) -> None:
+    inputs = _inputs(tmp_path)
+    others = invented_roh_upd.written(tmp_path / 'others', ('S1', 'S2'), [])
+    with pytest.raises(ValueError, match=r"runs of homozygosity are of \['S1', 'S2'\], and the samples of 'fam-1'"):
+        family_tables.assemble(**{**inputs, 'segments': others})
+    # A folder whose record says that upd assessed nobody, for a family with a child of two sequenced parents.
+    unassessed = invented_roh_upd.written(tmp_path / 'unassessed', _SAMPLES, [])
+    with pytest.raises(
+        ValueError, match=r"upd assessed \[\] and did not assess \[\], and the children of 'fam-1' .* are \['S3'\]"
+    ):
+        family_tables.assemble(**{**inputs, 'output': tmp_path / 'second', 'segments': unassessed})
+
+
+def test_the_variants_inside_a_region_or_a_long_run_are_found_by_a_join_with_its_rows(tmp_path: pathlib.Path) -> None:
+    # The invented child has alleles at chr1:5, chr2:100 and chr10:7 on the autosomes.
+    family_tables.assemble(**_inputs(tmp_path, runs=_RUNS, regions=_REGIONS))
+    con = duckdb.connect()
+    for table in ('variants', 'roh', 'upd'):
+        con.read_parquet(str(tmp_path / 'out' / f'{table}.parquet')).create_view(table)
+    in_regions = con.sql(
+        """
+        SELECT v.variant_id, u.origin, u.pos AS region_pos, u.end_pos AS region_end_pos
+        FROM upd u JOIN variants v ON v.chrom = u.chrom AND v.pos BETWEEN u.pos AND u.end_pos
+        WHERE u.member = 'S3' AND v.S3.carries
+        ORDER BY v.variant_id
+        """
+    ).fetchall()
+    assert in_regions == [
+        ('chr1-5-C-T', 'maternal', 2, 900),
+        ('chr10-7-G-GA', 'paternal', 1, 1_500),
+        ('chr2-100-A-G', 'maternal', 80, 3_900),
+    ]
+    in_runs = con.sql(
+        """
+        SELECT v.variant_id, r.length
+        FROM roh r JOIN variants v ON v.chrom = r.chrom AND v.pos BETWEEN r.pos AND r.end_pos
+        WHERE r.member = 'S3' AND r.length >= $min_length AND v.S3.carries
+        ORDER BY v.variant_id
+        """,
+        params={'min_length': 1_000},
+    ).fetchall()
+    assert in_runs == [('chr2-100-A-G', 3_951)]
+
+
+def test_a_region_with_a_run_of_the_same_child_over_it_reads_as_an_isodisomy_or_a_deletion(
+    tmp_path: pathlib.Path,
+) -> None:
+    family_tables.assemble(**_inputs(tmp_path, runs=_RUNS, regions=_REGIONS))
+    con = duckdb.connect()
+    for table in ('roh', 'upd'):
+        con.read_parquet(str(tmp_path / 'out' / f'{table}.parquet')).create_view(table)
+    covered = con.sql(
+        """
+        SELECT u.chrom, u.pos, u.end_pos, u.origin,
+               coalesce(sum(least(u.end_pos, r.end_pos) - greatest(u.pos, r.pos) + 1)
+                            FILTER (WHERE r.pos IS NOT NULL), 0)
+                   / (u.end_pos - u.pos + 1) AS homozygous_fraction
+        FROM upd u
+        LEFT JOIN roh r
+          ON r.member = u.member AND r.chrom = u.chrom AND r.pos <= u.end_pos AND r.end_pos >= u.pos
+        GROUP BY u.member, u.chrom, u.pos, u.end_pos, u.origin
+        ORDER BY u.chrom
+        """
+    ).fetchall()
+    # The run on chr2 covers its whole region, and that on chr10 the first 900 of 1,500 positions. The region on chr1
+    # has a run of the mother over it and none of the child, so nothing of it is homozygous: a heterodisomy. The
+    # filter keeps such a region at 0: DuckDB's least and greatest skip a null, and would give it 1.
+    assert covered == [
+        ('chr1', 2, 900, 'maternal', 0.0),
+        ('chr10', 1, 1_500, 'paternal', 0.6),
+        ('chr2', 80, 3_900, 'maternal', 1.0),
+    ]
