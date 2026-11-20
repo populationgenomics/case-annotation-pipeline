@@ -1,0 +1,10 @@
+##description: invented polyadenylation features, in the layout of GENCODE's polyAs GTF
+##provider: invented
+##format: gtf
+chr1	HAVANA	polyA_signal	296	301	.	+	.	gene_id "900001"; transcript_id "900001"; gene_type "polya_signal"; gene_name "900001"; transcript_type "polya_signal"; transcript_name "900001"; level 2;
+chr1	HAVANA	polyA_site	320	321	.	+	.	gene_id "900002"; transcript_id "900002"; gene_type "polya_site"; gene_name "900002"; transcript_type "polya_site"; transcript_name "900002"; level 2;
+chr1	HAVANA	polyA_signal	402	407	.	-	.	gene_id "900003"; transcript_id "900003"; gene_type "polya_signal"; gene_name "900003"; transcript_type "polya_signal"; transcript_name "900003"; level 2;
+chr2	HAVANA	pseudo_polyA	58	63	.	+	.	gene_id "900004"; transcript_id "900004"; gene_type "pseudo_polya"; gene_name "900004"; transcript_type "pseudo_polya"; transcript_name "900004"; level 2;
+chr2	HAVANA	polyA_signal	76	81	.	-	.	gene_id "900005"; transcript_id "900005"; gene_type "polya_signal"; gene_name "900005"; transcript_type "polya_signal"; transcript_name "900005"; level 2;
+chrUn_test	HAVANA	polyA_signal	8	13	.	+	.	gene_id "900006"; transcript_id "900006"; gene_type "polya_signal"; gene_name "900006"; transcript_type "polya_signal"; transcript_name "900006"; level 2;
+chrX	HAVANA	polyA_site	100	101	.	+	.	gene_id "900007"; transcript_id "900007"; gene_type "polya_site"; gene_name "900007"; transcript_type "polya_site"; transcript_name "900007"; level 2;

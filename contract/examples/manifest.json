@@ -225,6 +225,20 @@
     ],
     "terms": "By using this information, you agree to AlphaGenome Output Terms of Use found at https://deepmind.google.com/science/alphagenome/output-terms"
   },
+  "joined_files": [
+    {
+      "source": "gnomad_mito",
+      "file": "gnomad-mito.invented.vcf.bgz",
+      "bytes": 5000000,
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "source": "gencode_polya",
+      "file": "gencode-polya.invented.gtf.gz",
+      "bytes": 2000000,
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }
+  ],
   "omitted_columns": [
     "rsids",
     "avi_shap_splicing",
@@ -242,7 +256,10 @@
     "avi_shap_protein_termination",
     "avi_shap_start_lost",
     "avi_shap_stop_lost",
-    "avi_shap_phastcons_470way"
+    "avi_shap_phastcons_470way",
+    "aparent2_min",
+    "aparent2_max",
+    "aparent2_ref_usage"
   ],
   "sv_annotation": {
     "annotator": "Invented Annotator 1.0",

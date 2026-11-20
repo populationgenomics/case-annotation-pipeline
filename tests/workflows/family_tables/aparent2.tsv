@@ -1,0 +1,7 @@
+chrom	strand	gene	var_position_hg19	var_position_hg38	ref_nucleotide	var_nucleotide	pas_type	pas_position_hg19	pas_position_hg38	ref_usage	delta_logodds_narrow	delta_usage_narrow	delta_logodds	delta_usage
+chr1	+	GENEA	1100	100	G	A	3_most_exon	1150	150	0.5	-2.25	0.001	-2.25	0.001
+chr1	-	GENEB	1100	100	G	A	3_most_exon	1060	60	0.125	0.75	0.001	0.75	0.001
+chr1	+	GENEA	1100	100	G	C	3_most_exon	1150	150	0.5	0.03125	0.001	0.03125	0.001
+chr1	+	GENEA	1200	200	G	T	3_most_exon	1150	150	0.5	-4.0	0.001	-4.0	0.001
+chr2	+	GENEA	1060	60	C	A	3_most_exon	1110	110	0.25	-0.5	0.001	-0.5	0.001
+chrX	+	GENEA	1100	100	T	C	3_most_exon	1140	140	0.0625	1.5	0.001	1.5	0.001

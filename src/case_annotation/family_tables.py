@@ -2,17 +2,17 @@
 
 The input is the family's normalised VCF (one allele per record, primary chromosomes only, each allele carried by some
 member), its PED file, the proband that the run's sheet names for it, if any, and the tables and the values from the
-echtvar archives of the union that its alleles were annotated in. The output folder holds two Parquet files, a manifest
-and the notes on the tables:
+echtvar archives and from the joined files of the union that its alleles were annotated in. The output folder holds two
+Parquet files, a manifest and the notes on the tables:
 
 - `variants.parquet`: one row per allele. It holds the union's `variants` row of the allele, less the columns of the
   dated sources the run did not name, its values from the archives that the run read (gnomAD's joint values, and
-  AlphaGenome's scores where the run names their archives), the family's own QUAL and FILTER and, as in a VCF, one
-  column per sequenced member, named as the member's sample in the VCF and in the VCF's order, with that member's own
-  call of the allele;
+  AlphaGenome's scores where the run names their archives), its values from the public files that the run joined
+  (joined_values), the family's own QUAL and FILTER and, as in a VCF, one column per sequenced member, named as the
+  member's sample in the VCF and in the VCF's order, with that member's own call of the allele;
 - `transcripts.parquet`: the union's `transcripts` rows of the family's alleles;
 - `manifest.json`: the tables, the pedigree with the roles of the named proband and its parents, and what annotated the
-  alleles: the Annotator's run and each echtvar archive that the run read;
+  alleles: the Annotator's run, each echtvar archive that the run read and each file that it joined;
 - `tables.md`: a copy of the notes on the tables in this package (NOTES), which the manifest names.
 
 A family whose sheet row also names VCFs of its structural variants, its copy-number segments or its members' repeats
@@ -52,6 +52,7 @@ import pysam
 from case_annotation import (
     annotation_tables,
     echtvar_values,
+    joined_values,
     pedigree,
     repeat_tables,
     sv_annotation,
@@ -105,16 +106,19 @@ CALL = pa.struct(
 # The family's own record of an allele: the QUAL and FILTER of its record of the VCF.
 _RECORD = (pa.field('qual', pa.float64()), pa.field('filters', pa.list_(_STRING)))
 # The columns of the variants table that describe the allele, in the table's order: the union's annotation of it,
-# its values from each echtvar archive and the family's record. The members' columns follow them.
+# its values from each echtvar archive and from each joined file, and the family's record. The members' columns follow
+# them.
 ALLELE = pa.schema(
     [
         *annotation_tables.VARIANTS,
         *(field for source in echtvar_values.SOURCES.values() for field in source.fields),
+        *(field for source in joined_values.SOURCES.values() for field in source.fields),
         *_RECORD,
     ]
 )
 # The columns of the variants table that a run can leave out, by the source that it then did not name: a dated source
-# of the annotation, by its name in a run config, or an echtvar archive that a run need not read, by its param's name.
+# of the annotation, by its name in a run config, or an echtvar archive or a joined file that a run need not read, by
+# its param's name.
 VARIANT_SOURCES: Mapping[str, tuple[str, ...]] = {
     **annotation_tables.SOURCE_COLUMNS,
     **{
@@ -122,6 +126,7 @@ VARIANT_SOURCES: Mapping[str, tuple[str, ...]] = {
         for source in echtvar_values.SOURCES.values()
         if source is not echtvar_values.REQUIRED
     },
+    **{source.name: source.columns for source in joined_values.SOURCES.values()},
 }
 
 
@@ -179,8 +184,9 @@ class Table:
     `columns` are the columns that say what a row is of, in the file's order. In a table that holds the members' calls
     a column of each sequenced member follows them, named as the member's sample, in the order of the family's VCF and
     never null, and `member` is the type of each. `sources` gives the columns that hold the data of a source that a
-    run can leave out, by the source's name: a dated source by its name in a run config, and an echtvar archive that a
-    run need not read by its param's name. The table of a run that did not name the source lacks them.
+    run can leave out, by the source's name: a dated source by its name in a run config, and an echtvar archive or a
+    joined file that a run need not read by its param's name. The table of a run that did not name the source lacks
+    them.
     """
 
     columns: pa.Schema
@@ -345,7 +351,11 @@ class FamilyManifest(pydantic.BaseModel, frozen=True, extra='forbid'):
     alphagenome_avi: echtvar_values.ArchiveInfo | None
     alphagenome_avi_breakdown: echtvar_values.NoticedArchiveInfo | None
     alphagenome_splicing: echtvar_values.NoticedArchiveInfo | None
-    # The variants columns of the sources the run did not name: its dated sources, then the archives it need not read.
+    # The public files that the run joined to the alleles, each with the name of its source, in the order of their
+    # columns in variants; none in a run that was given none.
+    joined_files: tuple[joined_values.JoinedFile, ...]
+    # The variants columns of the sources the run did not name: its dated sources, then the archives it need not read,
+    # then the files it need not join.
     omitted_columns: tuple[str, ...]
     # What annotated the family's structural variants and copy-number segments, and the sv columns of the dated
     # sources that run did not name; None and no columns in a family without the sv table.
@@ -763,6 +773,7 @@ def assemble(
     ped_path: pathlib.Path,
     annotation: pathlib.Path,
     archive_values: pathlib.Path,
+    joined: pathlib.Path,
     output: pathlib.Path,
     proband: str | None,
     structural: Structural,
@@ -774,11 +785,12 @@ def assemble(
     """Writes the family's tables and manifest into the output folder.
 
     The inputs are its normalised VCF, its PED file, the union's tables (annotation_tables.convert's output folder),
-    the union's values from the echtvar archives (echtvar_values.convert's output folder), the sample id of the proband
-    that the run's sheet names, or None for a family in which it designates none (member_roles), and the VCFs of its
-    larger variants that the sheet names, with the normalised sequences of its structural variants where it names their
-    VCF (read_sv_alleles) and the annotation of the group's structural variants where it names a caller's VCF
-    (SvAnnotation). That annotation must be of the same catalog and sources as the union's, since one run makes both.
+    the union's values from the echtvar archives (echtvar_values.convert's output folder), its values from the joined
+    files (joined_values.convert's output folder), the sample id of the proband that the run's sheet names, or None for
+    a family in which it designates none (member_roles), and the VCFs of its larger variants that the sheet names, with
+    the normalised sequences of its structural variants where it names their VCF (read_sv_alleles) and the annotation
+    of the group's structural variants where it names a caller's VCF (SvAnnotation). That annotation must be of the
+    same catalog and sources as the union's, since one run makes both.
     """
     ped = pedigree.read(ped_path)
     if ped.family != family:
@@ -795,6 +807,7 @@ def assemble(
             f'{list(sv_info.sources)}, and its alleles with catalog {info.catalog} and {list(info.sources)}'
         )
     archives = echtvar_values.read_info(archive_values)
+    joined_files = joined_values.read_info(joined)
     output.mkdir(parents=True)
     with tempfile.TemporaryDirectory(dir=scratch) as tmp:
         work = pathlib.Path(tmp)
@@ -806,6 +819,7 @@ def assemble(
         con.read_parquet(str(annotation / 'variants' / '*.parquet')).create_view('union_variants')
         con.read_parquet(str(annotation / 'transcripts' / '*.parquet')).create_view('union_transcripts')
         con.read_parquet(str(archive_values / echtvar_values.TABLE_NAME)).create_view('union_archives')
+        con.read_parquet(str(joined / joined_values.TABLE_NAME)).create_view('union_joined')
         for problem, query in {
             'the VCF repeats alleles': 'SELECT variant_id FROM records GROUP BY 1 HAVING count(*) > 1',
             "alleles the union's annotation lacks": (
@@ -814,22 +828,30 @@ def assemble(
             "alleles the union's values from the echtvar archives lack": (
                 'SELECT variant_id FROM records ANTI JOIN union_archives USING (variant_id)'
             ),
+            "alleles the union's values from the joined files lack": (
+                'SELECT variant_id FROM records ANTI JOIN union_joined USING (variant_id)'
+            ),
         }.items():
             if found := [r[0] for r in con.sql(f'{query} ORDER BY 1 LIMIT 5').fetchall()]:
                 raise ValueError(f'{vcf_path}: {problem}, such as {found}')
-        named = {*info.sources, *(source.name for source in archives.given())}
+        named = {
+            *info.sources,
+            *(source.name for source in archives.given()),
+            *(source.name for source in joined_files.given()),
+        }
         omitted = tuple(
             column for source, columns in VARIANT_SOURCES.items() if source not in named for column in columns
         )
-        from_archives = [column for source in archives.given() for column in source.columns]
+        from_archives = [f'a.{column}' for source in archives.given() for column in source.columns]
+        from_files = [f'j.{column}' for source in joined_files.given() for column in source.columns]
         sv_omitted = tuple(
             column
             for source, columns in sv_annotation.SOURCE_COLUMNS.items()
             if sv_info is not None and source not in sv_info.sources
             for column in columns
         )
-        # The union's variants hold the columns of every dated source, and its values from the archives only the
-        # columns of the archives that the run read.
+        # The union's variants hold the columns of every dated source, and its values from the archives and from the
+        # joined files only the columns of the archives and files that the run read.
         dated = [column for column in omitted if column in annotation_tables.VARIANTS.names]
         exclude = f' EXCLUDE ({", ".join(dated)})' if dated else ''
         own = {'schema_version': SCHEMA_VERSION, 'family': family}
@@ -837,13 +859,15 @@ def assemble(
         records = {
             name: 'null' if record is None else record.model_dump_json() for name, record in archives.records().items()
         }
-        annotated = {**own, 'annotation': info.model_dump_json(), **records}
+        # The joined files' records as in the manifest: a JSON list, empty for a run that joined none.
+        joined_record = '[' + ','.join(file.model_dump_json() for file in joined_files.files) + ']'
+        annotated = {**own, 'annotation': info.model_dump_json(), **records, 'joined_files': joined_record}
         # A record's columns after its id are the family's QUAL and FILTER and the members' calls, as variants ends.
         queries = {
             'variants': (
-                f'SELECT v.*{exclude}, {", ".join(f"a.{c}" for c in from_archives)}, r.* EXCLUDE (variant_id) '  # noqa: S608 (column names of this package's own)
+                f'SELECT v.*{exclude}, {", ".join([*from_archives, *from_files])}, r.* EXCLUDE (variant_id) '  # noqa: S608 (column names of this package's own)
                 'FROM union_variants v JOIN records r USING (variant_id) JOIN union_archives a USING (variant_id) '
-                'ORDER BY chrom_rank(v.chrom), v.pos, v.ref, v.alt'
+                'JOIN union_joined j USING (variant_id) ORDER BY chrom_rank(v.chrom), v.pos, v.ref, v.alt'
             ),
             'transcripts': (
                 'SELECT t.* FROM union_transcripts t SEMI JOIN records USING (variant_id) '
@@ -894,6 +918,7 @@ def assemble(
         alphagenome_avi=archives.alphagenome_avi,
         alphagenome_avi_breakdown=archives.alphagenome_avi_breakdown,
         alphagenome_splicing=archives.alphagenome_splicing,
+        joined_files=joined_files.files,
         omitted_columns=omitted,
         sv_annotation=sv_info,
         sv_omitted_columns=sv_omitted,

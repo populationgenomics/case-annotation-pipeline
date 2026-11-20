@@ -1239,6 +1239,124 @@
           "source": "alphagenome_splicing"
         },
         {
+          "name": "gnomad_mito_ac_hom",
+          "type": "int32",
+          "nullable": true,
+          "source": "gnomad_mito"
+        },
+        {
+          "name": "gnomad_mito_ac_het",
+          "type": "int32",
+          "nullable": true,
+          "source": "gnomad_mito"
+        },
+        {
+          "name": "gnomad_mito_af_hom",
+          "type": "float32",
+          "nullable": true,
+          "source": "gnomad_mito"
+        },
+        {
+          "name": "gnomad_mito_af_het",
+          "type": "float32",
+          "nullable": true,
+          "source": "gnomad_mito"
+        },
+        {
+          "name": "gnomad_mito_an",
+          "type": "int32",
+          "nullable": true,
+          "source": "gnomad_mito"
+        },
+        {
+          "name": "gnomad_mito_max_heteroplasmy",
+          "type": "float32",
+          "nullable": true,
+          "source": "gnomad_mito"
+        },
+        {
+          "name": "gnomad_mito_hapmax_af_hom",
+          "type": "float32",
+          "nullable": true,
+          "source": "gnomad_mito"
+        },
+        {
+          "name": "gnomad_mito_hapmax_af_het",
+          "type": "float32",
+          "nullable": true,
+          "source": "gnomad_mito"
+        },
+        {
+          "name": "gnomad_mito_hapmax_hom_haplogroup",
+          "type": "string",
+          "nullable": true,
+          "source": "gnomad_mito"
+        },
+        {
+          "name": "gnomad_mito_hapmax_het_haplogroup",
+          "type": "string",
+          "nullable": true,
+          "source": "gnomad_mito"
+        },
+        {
+          "name": "gnomad_mito_faf_hapmax_hom",
+          "type": "float32",
+          "nullable": true,
+          "source": "gnomad_mito"
+        },
+        {
+          "name": "gnomad_mito_filters",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "string",
+            "nullable": true
+          },
+          "source": "gnomad_mito"
+        },
+        {
+          "name": "gnomad_mito_hap_defining",
+          "type": "bool",
+          "nullable": true,
+          "source": "gnomad_mito"
+        },
+        {
+          "name": "gnomad_mito_mitotip_score",
+          "type": "float32",
+          "nullable": true,
+          "source": "gnomad_mito"
+        },
+        {
+          "name": "gnomad_mito_mitotip_prediction",
+          "type": "string",
+          "nullable": true,
+          "source": "gnomad_mito"
+        },
+        {
+          "name": "gencode_polya_signal",
+          "type": "bool",
+          "nullable": false,
+          "source": "gencode_polya"
+        },
+        {
+          "name": "aparent2_min",
+          "type": "float32",
+          "nullable": true,
+          "source": "aparent2"
+        },
+        {
+          "name": "aparent2_max",
+          "type": "float32",
+          "nullable": true,
+          "source": "aparent2"
+        },
+        {
+          "name": "aparent2_ref_usage",
+          "type": "float32",
+          "nullable": true,
+          "source": "aparent2"
+        },
+        {
           "name": "qual",
           "type": "float64",
           "nullable": true

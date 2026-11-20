@@ -252,6 +252,35 @@
       "title": "FamilyMember",
       "type": "object"
     },
+    "JoinedFile": {
+      "description": "A file that a run joined to the union's alleles, as the run read it.",
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "file",
+        "bytes",
+        "sha256"
+      ],
+      "title": "JoinedFile",
+      "type": "object"
+    },
     "NotesFile": {
       "description": "The notes on the tables in a family's folder, named as a table's file is (TableFile).",
       "properties": {
@@ -497,6 +526,13 @@
         }
       ]
     },
+    "joined_files": {
+      "items": {
+        "$ref": "#/$defs/JoinedFile"
+      },
+      "title": "Joined Files",
+      "type": "array"
+    },
     "omitted_columns": {
       "items": {
         "type": "string"
@@ -536,6 +572,7 @@
     "alphagenome_avi",
     "alphagenome_avi_breakdown",
     "alphagenome_splicing",
+    "joined_files",
     "omitted_columns",
     "sv_annotation",
     "sv_omitted_columns"

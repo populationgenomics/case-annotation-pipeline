@@ -49,9 +49,9 @@ In `tables.json`, a `type` is the name of an Arrow type, `list` with its `elemen
 tables `variants`, `sv` and `repeats` end with one column for each sequenced member, named as the member's sample, and
 `member` gives the type of that column once. A column with a `source` holds the data of a source that a run can leave
 out, and the table of a run that did not name the source lacks the column. The source is a dated source, under its name
-in a run config, or an echtvar archive of AlphaGenome's scores, under the name of its param. The manifest lists the
-columns that a run left out. The file of `transcripts` declares every column nullable, also the columns that hold a
-value in every row.
+in a run config, or an echtvar archive of AlphaGenome's scores or a joined public file, under the name of its param. The
+manifest lists the columns that a run left out. The file of `transcripts` declares every column nullable, also the
+columns that hold a value in every row.
 
 ## When the contract changes
 

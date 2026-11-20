@@ -1,0 +1,22 @@
+##fileformat=VCFv4.2
+##FILTER=<ID=npg,Description="Invented filter">
+##INFO=<ID=filters,Number=.,Type=String,Description="Invented site-level filters">
+##INFO=<ID=hap_defining_variant,Number=0,Type=Flag,Description="Invented flag of a variant that defines a haplogroup">
+##INFO=<ID=mitotip_score,Number=1,Type=Float,Description="Invented score">
+##INFO=<ID=mitotip_trna_prediction,Number=1,Type=String,Description="Invented reading of the score">
+##INFO=<ID=AN,Number=1,Type=Integer,Description="Invented allele number">
+##INFO=<ID=AC_hom,Number=1,Type=Integer,Description="Invented homoplasmic allele count">
+##INFO=<ID=AC_het,Number=1,Type=Integer,Description="Invented heteroplasmic allele count">
+##INFO=<ID=AF_hom,Number=1,Type=Float,Description="Invented homoplasmic allele frequency">
+##INFO=<ID=AF_het,Number=1,Type=Float,Description="Invented heteroplasmic allele frequency">
+##INFO=<ID=max_hl,Number=1,Type=Float,Description="Invented highest heteroplasmy level">
+##INFO=<ID=hap_AF_hom,Number=1,Type=String,Description="Invented AF_hom of each haplogroup, haplogroup order: ['A', 'B', 'C']">
+##INFO=<ID=hap_AF_het,Number=1,Type=String,Description="Invented AF_het of each haplogroup, haplogroup order: ['A', 'B', 'C']">
+##INFO=<ID=hapmax_AF_hom,Number=1,Type=String,Description="Invented haplogroup with the highest AF_hom">
+##INFO=<ID=hapmax_AF_het,Number=1,Type=String,Description="Invented haplogroup with the highest AF_het">
+##INFO=<ID=faf_hapmax_hom,Number=1,Type=Float,Description="Invented filtering allele frequency">
+##contig=<ID=chrM,length=120>
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+chrM	10	.	A	C	.	PASS	hap_defining_variant;mitotip_score=12.5;mitotip_trna_prediction=possibly_benign;AN=4000;AC_hom=8;AC_het=2;AF_hom=0.002;AF_het=0.0005;max_hl=0.5;hap_AF_hom=0.00000e+00|1.25000e-01|NaN;hap_AF_het=0.00000e+00|3.12500e-02|NaN;hapmax_AF_hom=B;hapmax_AF_het=B;faf_hapmax_hom=0.0625
+chrM	36	.	ACA	A	.	npg	filters=npg;AN=4000;AC_hom=0;AC_het=0;AF_hom=0.00000;AF_het=0.00000;max_hl=0.00000;hap_AF_hom=0.00000e+00|0.00000e+00|NaN;hap_AF_het=0.00000e+00|0.00000e+00|NaN;faf_hapmax_hom=0.00000
+chrM	50	.	C	T	.	PASS	AN=3996;AC_hom=1;AC_het=0;AF_hom=0.00025;AF_het=0.00000;max_hl=1.00000;hap_AF_hom=2.50000e-04|0.00000e+00|NaN;hap_AF_het=0.00000e+00|0.00000e+00|NaN;hapmax_AF_hom=A;faf_hapmax_hom=0.00000

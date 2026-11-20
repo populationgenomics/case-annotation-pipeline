@@ -135,7 +135,8 @@ sources, not annotation types, so a source is included or left out whole. The wo
   missing rather than as an empty result: `rsids` for `dbSNP`, and the `clinvar_` columns of `variants` and of `sv` for
   `clinvar`. The manifest lists them as `omitted_columns` and `sv_omitted_columns`. The same holds for the columns of an
   echtvar archive that a run can leave out ([AlphaGenome's scores](#alphagenomes-scores)), which is no dated source:
-  `omitted_columns` lists them after those of the dated sources.
+  `omitted_columns` lists them after those of the dated sources, and then the columns of a public file that a run can
+  leave out ([Joined files](#joined-files)).
 - The conversion refuses an annotation that holds a dated source's data which the run did not name ([Steps](#steps)).
 - A family's manifest records each source the run named with the version it pinned (`annotation.source_versions`), and
   each source of the bundle that the run left out with its reason (`annotation.omitted`).
@@ -418,9 +419,11 @@ flowchart LR
         direction TB
         SITES["UNION_SITES<br/>each allele once"]
         VALUES["ECHTVAR_VALUES<br/>echtvar archives"]
+        JOINED["JOINED_VALUES<br/>public files"]
         ANNOTATE{{"ILLUMINA_ANNOTATE<br/>or an earlier<br/>run's annotation"}}
         TABLES["ANNOTATION_TABLES<br/>variants,<br/>transcripts"]
         SITES --> VALUES
+        SITES --> JOINED
         SITES --> ANNOTATE --> TABLES
     end
 
@@ -470,6 +473,10 @@ flowchart LR
    names ([gnomAD's joint values](#gnomads-joint-values)). AlphaGenome's scores come from up to three archives that a
    run can leave out ([AlphaGenome's scores](#alphagenomes-scores)). It runs in every run, also in one that reuses an
    annotation.
+1. `JOINED_VALUES` reads the values of the union's alleles that come from public files, each of which a run can leave
+   out: gnomAD's frequencies of the alleles on chrM, GENCODE's polyadenylation signals and APARENT2's effects on
+   polyadenylation ([Joined files](#joined-files)). It runs in every run too, and writes a table of the alleles alone in
+   a run without a file.
 1. `ILLUMINA_ANNOTATE`, the process of the `annotate` mode above, annotates the union with the sources named. A run
    given `annotated`, the folder an earlier run published the union's annotation in, reuses that annotation instead.
 1. `ANNOTATION_TABLES` reads the Annotator's JSON line by line and writes the union's `variants` and `transcripts`
@@ -478,10 +485,10 @@ flowchart LR
    A run given `annotated` reuses that folder's annotation of this union too.
 1. `SV_ANNOTATION_TABLES` reads the second JSON and writes that union's `sv` and `sv_transcripts` tables, with each
    gene's HGNC id as well.
-1. `FAMILY_TABLES` reads each family's calls, cuts the union's tables and archive values down to the family's alleles,
-   and writes the family's folder, in which each member's calls are a column of `variants`. For a family that brings
-   them, it also reads the VCFs of the larger variants into `sv` and `repeats`, gives each record of `sv` the annotation
-   of its site, and writes `sv_transcripts`.
+1. `FAMILY_TABLES` reads each family's calls, cuts the union's tables, archive values and joined values down to the
+   family's alleles, and writes the family's folder, in which each member's calls are a column of `variants`. For a
+   family that brings them, it also reads the VCFs of the larger variants into `sv` and `repeats`, gives each record of
+   `sv` the annotation of its site, and writes `sv_transcripts`.
 
 The four steps of the structural variants run only in a group with a family that names `sv_vcf` or `cnv_vcf`. The
 repeats take no part in either union: nothing annotates them, so they go from the members' VCFs straight into the
@@ -507,6 +514,11 @@ Some of the steps have details that matter when a run fails or an input is unusu
 REF and ALT. That is why it gets the split and left-aligned union. `case-annotation echtvar-values` then writes the
 values as a table keyed by variant id, and fails unless the table's alleles are exactly the union's. It also fails where
 two archives add a field of the same name: echtvar does not check that, and would keep the later archive's values.
+
+`JOINED_VALUES` normalises gnomAD's VCF with bcftools, and `case-annotation joined-values` then joins every file of the
+run to the union's alleles and writes the values as a table keyed by variant id, in the union's order. It fails unless
+the table's alleles are exactly the union's, and for a file that is not what its source publishes
+([Joined files](#joined-files)).
 
 `ILLUMINA_ANNOTATE` and a reused annotation give the same thing: the group's annotation is the JSON named after the
 group, and a run without one stops with the group's name.
@@ -612,12 +624,12 @@ The workflow publishes the union and the families' folders apart, and the tables
 folder of each. For the tables' version `0.5.0` and catalog `202610` the folder is `tables-0.5.0-illumina-202610`. The
 Annotator's output has a folder of its own, which the catalog names without the tables' version.
 
-| What                                                         | Folder                                                           |
-| ------------------------------------------------------------ | ---------------------------------------------------------------- |
-| the union, its tables and its values from the archives       | `annotation-unions/<group>/tables-<version>-illumina-<catalog>/` |
-| the union of the structural variants, its map and its tables | the same folder                                                  |
-| the Annotator's output for both unions                       | `annotation-unions/<group>/illumina-<catalog>/`                  |
-| each family's folder                                         | `annotations/<family>/tables-<version>-illumina-<catalog>/`      |
+| What                                                                        | Folder                                                           |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| the union, its tables and its values from the archives and the joined files | `annotation-unions/<group>/tables-<version>-illumina-<catalog>/` |
+| the union of the structural variants, its map and its tables                | the same folder                                                  |
+| the Annotator's output for both unions                                      | `annotation-unions/<group>/illumina-<catalog>/`                  |
+| each family's folder                                                        | `annotations/<family>/tables-<version>-illumina-<catalog>/`      |
 
 > [!IMPORTANT]
 >
@@ -634,13 +646,13 @@ The two Annotator runs publish into one folder: the JSON of the alleles as `out/
 variants as `out/<group>.sv.json.gz`, a log each, and one `run.json`, since both runs have the same catalog and sources.
 That folder is what `annotated` takes ([Reusing an annotation](#reusing-an-annotation)).
 
-A run into folders that an earlier run wrote replaces what that run published. The unions' tables and archive values are
-removed whole and written again, so the union's folder holds the tables that the families' newest tables were cut from.
-A run that annotates replaces the files that an earlier run of the group with the same catalog published for the
-Annotator, whatever version of the tables that run wrote. It replaces only the files that it writes itself
-([Reusing an annotation](#reusing-an-annotation)). A run that reuses an annotation publishes no Annotator JSON, and
-leaves one that an earlier run published there. A family's folder keeps an `sv.parquet`, an `sv_transcripts.parquet` or
-a `repeats.parquet` of an earlier run as well, where the family's row no longer names the VCFs: the new manifest's
+A run into folders that an earlier run wrote replaces what that run published. The unions' tables, archive values and
+joined values are removed whole and written again, so the union's folder holds the tables that the families' newest
+tables were cut from. A run that annotates replaces the files that an earlier run of the group with the same catalog
+published for the Annotator, whatever version of the tables that run wrote. It replaces only the files that it writes
+itself ([Reusing an annotation](#reusing-an-annotation)). A run that reuses an annotation publishes no Annotator JSON,
+and leaves one that an earlier run published there. A family's folder keeps an `sv.parquet`, an `sv_transcripts.parquet`
+or a `repeats.parquet` of an earlier run as well, where the family's row no longer names the VCFs: the new manifest's
 `tables` lists the tables that belong to it.
 
 ### Reusing an annotation
@@ -725,11 +737,11 @@ output {
 
 The workflow takes three values.
 
-| Value          | What it holds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `families`     | a channel with one value for each family, `tuple(family, vcf, ped, proband, sv, cnv, repeats)`. The first four are the family's id, its VCF, its PED file and its proband's sample id, as in [the sheet's columns](#the-input-contract) of those names. The last three are the VCFs of its structural-variant caller, of its copy-number caller and of its members' repeats, each as a list of the VCFs and their `.tbi` indexes, which is empty for what the family does not have.                                           |
-| `annotates_sv` | `true` where any family has a structural-variant or a copy-number VCF                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `settings`     | a map with the keys `group`, `reference`, `catalog`, `annotation_data`, `sources`, `workers`, `annotator`, `annotator_version`, `license_secret`, `annotated`, `gnomad_joint`, `alphagenome_avi`, `alphagenome_avi_breakdown` and `alphagenome_splicing`. Each holds the value of [the param of that name](#params-of-family_tablesnf), with the param's type. Only `annotated`, `annotator`, `annotator_version`, `license_secret` and the three `alphagenome_` archives can be `null`, each in a run that does not need it. |
+| Value          | What it holds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `families`     | a channel with one value for each family, `tuple(family, vcf, ped, proband, sv, cnv, repeats)`. The first four are the family's id, its VCF, its PED file and its proband's sample id, as in [the sheet's columns](#the-input-contract) of those names. The last three are the VCFs of its structural-variant caller, of its copy-number caller and of its members' repeats, each as a list of the VCFs and their `.tbi` indexes, which is empty for what the family does not have.                                                                                                               |
+| `annotates_sv` | `true` where any family has a structural-variant or a copy-number VCF                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `settings`     | a map with the keys `group`, `reference`, `catalog`, `annotation_data`, `sources`, `workers`, `annotator`, `annotator_version`, `license_secret`, `annotated`, `gnomad_joint`, `alphagenome_avi`, `alphagenome_avi_breakdown`, `alphagenome_splicing`, `gnomad_mito`, `gencode_polya` and `aparent2`. Each holds the value of [the param of that name](#params-of-family_tablesnf), with the param's type. Only `annotated`, `annotator`, `annotator_version`, `license_secret`, the three `alphagenome_` archives and the three joined files can be `null`, each in a run that does not need it. |
 
 A family's files can be written during the run. `annotates_sv` and the settings are read while Nextflow builds the
 workflow, before any task runs. `annotates_sv` decides whether the run has the steps of the structural variants' union
@@ -1005,6 +1017,100 @@ case-annotation alphagenome-check --table "${table}" --annotated sample.annotate
 the encoding explains: one step of the field, plus the resolution of a 32-bit float at the value's size (the value times
 2<sup>-22</sup>). For a PHRED of 50 that is 0.000013.
 
+### Joined files
+
+A run can add values to `variants` from three public files, which `JOINED_VALUES` joins to the union's alleles by allele
+or by position ([Steps](#steps)). Each file is a param that a run can leave out. The tables of a run without a file lack
+its columns, as they lack those of an archive of AlphaGenome's scores that the run does not name: the manifest lists
+them in `omitted_columns`, and a query that reads one fails.
+
+| Param           | The file                                                                  | Adds to `variants`                                                                                             |
+| --------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `gnomad_mito`   | gnomAD's sites VCF of the mitochondrial genome                            | the 15 `gnomad_mito_` columns: gnomAD's counts and frequencies of an allele on chrM, and MitoTIP's score of it |
+| `gencode_polya` | GENCODE's GTF of polyadenylation features                                 | `gencode_polya_signal`, which says whether the allele changes a base of a polyadenylation signal               |
+| `aparent2`      | APARENT2's table of the effects of single-base changes on polyadenylation | `aparent2_min`, `aparent2_max` and `aparent2_ref_usage`                                                        |
+
+[Reading the family tables](family-tables.md#mitochondrial-frequencies-and-polyadenylation) says what each column holds
+and shows queries on them. A run takes a copy of each file as its source publishes it:
+
+| Param           | Published as                                                                                                                                    | Release                     | Bytes         | Licence                                                                              |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | ------------- | ------------------------------------------------------------------------------------ |
+| `gnomad_mito`   | `gs://gcp-public-data--gnomad/release/3.1/vcf/genomes/gnomad.genomes.v3.1.sites.chrM.vcf.bgz`                                                   | gnomAD 3.1                  | 5,150,029     | CC0                                                                                  |
+| `gencode_polya` | `https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_50/gencode.v50.polyAs.gtf.gz`                                                | GENCODE 50, of 8 April 2026 | 2,038,356     | open access                                                                          |
+| `aparent2`      | `aparent2_ism_scores_polyadb_v3.csv.gz`, in the Google Drive folder that [APARENT2's repository](https://github.com/johli/aparent-resnet) links | the only one                | 1,420,937,772 | the repository's code is under the MIT licence, and the score files carry no licence |
+
+The sizes were read on 20 November 2026. The SHA-256 of gnomAD's file was then
+`507e4a1fab8c8d2dfb5d77239b0fb31e3db92634519f1d6cd9b9ff38df181f99`, and that of GENCODE's file
+`f0eb0333157b5c88e90c6537f9a5758fd763d807016093d376abdbe1ee88223b`. A family's manifest has one key for the files,
+`joined_files`: an entry for each file that the run joined, with the param's name as `source`, the file's name, its size
+and its SHA-256 as the run read it, in the order of the table above, and an empty list in a run without a file. An entry
+can gain a key, such as a release date for a file whose content depends on its date. None of the three files holds its
+own version, so the checksum is what says which file a family's values come from.
+
+All three are current sources ([Dated sources](#dated-sources)), because none of them asserts a link between a variant
+and a disease or records that a variant was reported. gnomAD's file is population data, like the frequencies that
+Illumina carries. GENCODE's features are part of its annotation of the genome, as its gene models are. APARENT2 is a
+predictor that was trained on reporter assays. MitoTIP is a predictor too, and gnomAD's file holds its scores as gnomAD
+took them for release 3.1.
+
+`JOINED_VALUES` reads each file with the reader that fits its format and joins it with DuckDB. pysam reads gnomAD's VCF,
+because a VCF's INFO fields are typed by its header and DuckDB does not read them. DuckDB reads the GTF and APARENT2's
+table itself, gzipped or not, with every field as text, and the step converts and checks the fields that it uses.
+
+gnomAD's file is matched by chromosome, position, REF and ALT, so it has to write an indel as the union does. The step
+therefore runs `bcftools norm -m -any -f <reference> --check-ref e` on it first, the command that `NORMALISE_FAMILY`
+runs on a family's VCF, and reads the result. An indel that the file writes at another place of a repeat is then at the
+union's position, and the run stops if a REF of the file is not the reference's sequence, which is what a reference with
+another mitochondrial sequence than gnomAD's gives. On 20 November 2026, bcftools 1.22 left all 18,164 records of the
+release's file as they were against the revised Cambridge Reference Sequence, so the file is already normalised and the
+command is a safeguard for a later one. The manifest records the file as the run was given it.
+
+- An allele that the file lacks has a null in every `gnomad_mito_` column, and so has every allele off chrM.
+- gnomAD lists alleles that no sample passed its filters with. Such an allele has counts and frequencies of 0, and its
+  filters in `gnomad_mito_filters`.
+- `gnomad_mito_filters` holds the record's FILTER values as the `filters` column of `variants` holds the family's:
+  `['PASS']` for a record that passed.
+- The file gives the frequencies of each of 29 haplogroups as a list. Its fields `hapmax_AF_hom` and `hapmax_AF_het`
+  hold the name of the haplogroup with the highest frequency, and only where a single haplogroup has a highest frequency
+  above 0. `gnomad_mito_hapmax_af_hom` and `gnomad_mito_hapmax_af_het` are therefore the highest value of each list, and
+  the two `_haplogroup` columns hold the file's two fields.
+
+GENCODE's file holds three kinds of feature, and the step reads the `polyA_signal` features on the primary chromosomes:
+41,346 of them in release 50, of which 41,277 are six bases long and the others between two and thirteen. It leaves out
+the `polyA_site` features, most of which are the two bases where a transcript is cut, and the `pseudo_polyA` features.
+GENCODE annotates the signals by hand and does not have every signal, so a false `gencode_polya_signal` does not say
+that the allele lies outside every polyadenylation signal. An allele overlaps a signal where the signal holds a
+reference base that the allele changes:
+
+- The bases that REF and ALT start with alike are not changed. A deletion written as `TCA` to `T` changes the two bases
+  after its position, and overlaps a signal that holds either of them.
+- An insertion changes no reference base and lies between two bases. It overlaps a signal that holds both of them, and
+  none that begins or ends where it lies. That is the result of comparing half-open intervals, in which an insertion is
+  an empty interval between its two neighbours.
+- `gencode_polya_signal` is false for every other allele, and never null in a run that was given the file.
+
+APARENT2's table has one row for a single-base change and a polyadenylation site of PolyA_DB 3 near it. In the rows that
+were read, a change lies between 70 bases before the start of the site's signal and 76 bases after it. The table has 15
+columns, of which the step reads `chrom`, `var_position_hg38`, `ref_nucleotide`, `var_nucleotide`, `ref_usage` and
+`delta_logodds_narrow`. The positions are 1-based, and the bases are of the plus strand also for a gene on the minus
+strand, so a row is matched by chromosome, position, REF and ALT as it stands.
+
+A change near two sites, or near sites of genes on both strands, has several rows, and some changes have two rows with
+different values under one site's position. `aparent2_min` and `aparent2_max` are the lowest and the highest
+`delta_logodds_narrow` of the allele's rows. `aparent2_ref_usage` is the `ref_usage` of the lowest row, and where
+several rows are the lowest it is the highest usage among them. An insertion, a deletion and a change far from every
+site have a null in all three.
+
+The folder also holds `aparent2_ism_scores_polyadb_v3_cutoff.csv.gz`, which has the same columns and only the rows whose
+odds change more than 1.25-fold. The step reads that file as well, and the tables of such a run have a null for a change
+with a smaller effect. The manifest's `joined_files` gives the name of the file that a run read.
+
+The step reads APARENT2's table once and keeps the rows of the union's alleles and any row that is malformed, so that it
+checks the whole file and holds little of it. The table has about 76 million rows, which is an estimate from its size.
+[Checks that stop a run](#checks-that-stop-a-run) lists what the step refuses. Only the header and the first 21,000 rows
+of the table were read while the step was written, so a row further down that the checks refuse would stop the first run
+with the whole file.
+
 ### De novo variants
 
 The tables hold no de novo calls. Calls from fixed thresholds missed de novo variants planted in synthetic trios, for
@@ -1192,6 +1298,9 @@ as JSON, for a program that writes a sheet or launches a run.
 | `alphagenome_avi`                                                         | optional: the archive of AlphaGenome's AVI scores, for commercial and non-commercial use ([terms](#alphagenomes-scores))             |
 | `alphagenome_avi_breakdown`                                               | optional: the archive of the AVI score's breakdown by input, for non-commercial use only ([terms](#alphagenomes-scores))             |
 | `alphagenome_splicing`                                                    | optional: the archive of AlphaGenome's splicing scores, for non-commercial use only ([terms](#alphagenomes-scores))                  |
+| `gnomad_mito`                                                             | optional: gnomAD's sites VCF of the mitochondrial genome ([Joined files](#joined-files))                                             |
+| `gencode_polya`                                                           | optional: GENCODE's GTF of polyadenylation features ([Joined files](#joined-files))                                                  |
+| `aparent2`                                                                | optional: APARENT2's table of the effects of single-base changes on polyadenylation ([Joined files](#joined-files))                  |
 | `workers`                                                                 | the Annotator's worker processes, 8 by default                                                                                       |
 | `annotator_container`, `annotator`, `annotator_version`, `license_secret` | the Annotator's image, path and version, and the licence's secret, as for `annotator.nf`; needed unless the run reuses an annotation |
 | `tools_container`                                                         | the image `case-annotation-tools`, which runs every other step                                                                       |
@@ -1255,6 +1364,7 @@ annotation-unions/g1/tables-0.5.0-illumina-202610/
     g1.vcf.gz, g1.vcf.gz.tbi     the union's sites
     tables/                      variants/ and transcripts/, each a folder of parts, and annotation.json
     echtvar_values/              echtvar_values.parquet and echtvar_values.json
+    joined_values/               joined_values.parquet and joined_values.json
     g1.sv.vcf.gz, g1.sv.vcf.gz.tbi   the union of the structural variants' sites, in a group that has them
     g1.sv.map.parquet            the site of each allele of each family's records
     sv_annotation/               sv/ and sv_transcripts/, each a folder of parts, and annotation.json
@@ -1286,6 +1396,7 @@ process has the rest, such as the form of a name, a run config of another catalo
 | `NORMALISE_SV`         | a structural variant written as a sequence has a REF that is not the reference's sequence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `SV_UNION`             | a record has no ID, or two records of a family's callers share one; a record that is not a breakend has no INFO `END`, or a breakend has one; a record has no `SVTYPE`, or one that is none of `DEL`, `INS`, `DUP`, `INV`, `BND` and `CNV`, or a copy-number segment has an allele other than `<DEL>` and `<DUP>`; a record's `END` lies before its position; a record has another number of `SVLEN` values than of alleles; the families' files declare a contig with two lengths; no record is left on the primary chromosomes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `ECHTVAR_VALUES`       | the alleles of its table are not exactly the union's; two archives add a field of the same name; an archive lacks a field that its columns come from, or holds one as another type; an archive marks an allele that it lacks with a value that the field could hold; an allele has some of the scores of one of AlphaGenome's archives and not others; an archive of the breakdown or of the splicing scores has a field without the notice in its description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `JOINED_VALUES`        | a REF of gnomAD's mitochondrial VCF is not the reference's sequence; that VCF has samples, lacks one of the INFO fields that the columns come from or declares it with another type or number, or has a record that is off chrM, holds several alleles, lacks a field that every record of gnomAD's file has, or holds an allele that another record holds; a line of GENCODE's file is not the nine fields of a GTF, a feature is none of `polyA_signal`, `polyA_site` and `pseudo_polyA`, a feature has no start and end as positions in that order, or the file has no `polyA_signal` on a primary chromosome; the header of APARENT2's table is not its 15 columns, or a row has another number of fields or lacks a chromosome, a GRCh38 position, a base as its reference or its changed nucleotide, or a finite number as its usage or its change of the log odds; a gzipped file is cut off; the alleles of its table are not exactly the union's                                                                                                     |
 | `ILLUMINA_ANNOTATE`    | the bundle lacks a source named or is of another catalog; the licence is invalid for a source                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `ANNOTATION_TABLES`    | the JSON's alleles are not exactly the union's; the JSON holds ClinVar or dbSNP records, or a dated source's entry in its header, that the run did not name; the genes section holds a record without a symbol, an HGNC id that is not a positive integer or two HGNC ids for one symbol, or lacks the symbol of a transcript; the JSON lists a transcript twice for one allele; a SpliceAI entry has a key the conversion does not know, or a score without its distance, or a distance without its score; a PromoterAI entry lacks its score or its distance from the TSS; a regulatory feature lacks its id or its type; a gnomAD entry lacks its coverage, has a key the conversion does not know, or has some of a group's four values and not the others; an amino-acid conservation entry lacks its scores; a ClinVar record of the allele lacks the date of its last update, or a record of another allele lacks its accession or one of its alleles; a transcript's `hgvsc` has a position of a form that the conversion reads no intron offset from |
 | `SV_ANNOTATION_TABLES` | a record of the union has an ID that is not the id of its content; the JSON's positions are not exactly the union's sites, each once and with its site's place and alleles; a structural record has no `svEnd`, or does not end at its `END`; the Annotator gives a record a type that its `SVTYPE` cannot have, or a term outside the severity order; a position or a variant has a key the conversion does not know; the JSON holds ClinVar, ClinGen, MITOMAP or dbSNP records, or a dated source's entry in its header, that the run did not name; an entry of gnomAD, 1000 Genomes or ClinVar has a reciprocal overlap below 0.5, or none on a record with an extent, or is a loss on a gain; the genes section fails as for `ANNOTATION_TABLES`                                                                                                                                                                                                                                                                                                          |

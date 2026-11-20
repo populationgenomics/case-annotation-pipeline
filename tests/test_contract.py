@@ -24,7 +24,7 @@ import structural_vcfs
 import test_family_tables
 
 import case_annotation
-from case_annotation import cli, contract, echtvar_values, family_tables
+from case_annotation import cli, contract, echtvar_values, family_tables, joined_values
 
 REPOSITORY = pathlib.Path(__file__).parent.parent
 CONTRACT = REPOSITORY / 'contract'
@@ -149,9 +149,11 @@ def test_the_example_manifest_is_one_that_the_model_reads_and_writes() -> None:
     assert [table.table for table in manifest.tables] == list(family_tables.TABLES)
     assert manifest.alleles == manifest.tables[0].rows
     assert all(member.sequenced for member in manifest.members if member.role is not None)
-    named = set(manifest.annotation.sources) | {
-        name for name in echtvar_values.SOURCES if getattr(manifest, name) is not None
-    }
+    named = (
+        set(manifest.annotation.sources)
+        | {name for name in echtvar_values.SOURCES if getattr(manifest, name) is not None}
+        | {file.source for file in manifest.joined_files}
+    )
     for omitted, table in ((manifest.omitted_columns, 'variants'), (manifest.sv_omitted_columns, 'sv')):
         sources = family_tables.TABLES[table].sources
         assert omitted == tuple(c for source, columns in sources.items() if source not in named for c in columns)
@@ -164,6 +166,10 @@ def test_the_example_manifest_is_one_that_the_model_reads_and_writes() -> None:
     assert manifest.alphagenome_avi_breakdown is None
     assert manifest.alphagenome_splicing is not None
     assert manifest.alphagenome_splicing.terms == echtvar_values.ALPHAGENOME_SPLICING.notice
+    # It shows files that the run joined and one that it was not given, in the order of their columns.
+    joined = [file.source for file in manifest.joined_files]
+    assert joined == [name for name in joined_values.SOURCES if name in joined]
+    assert 0 < len(joined) < len(joined_values.SOURCES)
     assert manifest.sv_annotation is not None
     assert (manifest.sv_annotation.catalog, manifest.sv_annotation.sources) == (
         manifest.annotation.catalog,
@@ -222,7 +228,8 @@ def test_an_empty_proband_reaches_the_tools_as_no_proband() -> None:
         assert f'case-annotation {stated}' in FAMILY_MODULES
         options = ['--family', 'f', '--ped', 'p', '--vcf', 'v', '--no-proband', '--pipeline-version', 'p']
         if command == 'family-tables':
-            options += ['--annotation', 'a', '--echtvar-values', 'e', '--schema-version', 's', '--output', 'o']
+            options += ['--annotation', 'a', '--echtvar-values', 'e', '--joined-values', 'j']
+            options += ['--schema-version', 's', '--output', 'o']
         assert cli.parser().parse_args([command, *options]).proband is None
 
 
@@ -582,10 +589,11 @@ def _assemble(
     named: Sequence[str],
     sources: Sequence[str] = test_family_tables._SOURCES,
     scores: Sequence[echtvar_values.Source] = test_family_tables._SCORE_SOURCES,
+    joined: Sequence[joined_values.Source] = test_family_tables._JOINED_SOURCES,
 ) -> family_tables.FamilyManifest:
     """Writes the folder of the invented family of test_family_tables, for a row that names the columns given.
 
-    Its run named the sources given and read the archives of the scores given.
+    Its run named the sources given, read the archives of the scores given and joined the files given.
     """
     larger = test_family_tables._larger(
         tmp_path,
@@ -595,7 +603,7 @@ def _assemble(
         repeats='repeat_vcfs' in named,
         sources=sources,
     )
-    inputs = test_family_tables._inputs(tmp_path, info=test_family_tables._info(*sources), scores=scores)
+    inputs = test_family_tables._inputs(tmp_path, info=test_family_tables._info(*sources), scores=scores, joined=joined)
     return family_tables.assemble(**{**inputs, **larger})
 
 
@@ -678,23 +686,30 @@ def _schema(table: Mapping[str, Any], samples: Sequence[str], sources: Sequence[
     return pa.schema([pa.field(c['name'], _arrow(c), nullable=c['nullable']) for c in (*columns, *members)])
 
 
+_EVERY_FILE = test_family_tables._JOINED_SOURCES
 RUNS = {
-    'every source and every archive': (test_family_tables._SOURCES, test_family_tables._SCORE_SOURCES),
-    'no dated source': (('Ensembl',), test_family_tables._SCORE_SOURCES),
-    'no archive of scores': (test_family_tables._SOURCES, ()),
-    'the scores alone': (test_family_tables._SOURCES, test_family_tables._SCORE_SOURCES[:1]),
-    'nothing that a run can leave out': (('Ensembl',), ()),
+    'every source, every archive and every file': (
+        test_family_tables._SOURCES,
+        test_family_tables._SCORE_SOURCES,
+        _EVERY_FILE,
+    ),
+    'no dated source': (('Ensembl',), test_family_tables._SCORE_SOURCES, _EVERY_FILE),
+    'no archive of scores': (test_family_tables._SOURCES, (), _EVERY_FILE),
+    'the scores alone': (test_family_tables._SOURCES, test_family_tables._SCORE_SOURCES[:1], _EVERY_FILE),
+    'no joined file': (test_family_tables._SOURCES, test_family_tables._SCORE_SOURCES, ()),
+    'one joined file': (test_family_tables._SOURCES, test_family_tables._SCORE_SOURCES, _EVERY_FILE[1:2]),
+    'nothing that a run can leave out': (('Ensembl',), (), ()),
 }
 
 
 @pytest.mark.parametrize('case', RUNS)
 def test_the_columns_of_each_table_are_the_ones_its_file_declares(tmp_path: pathlib.Path, case: str) -> None:
-    sources, scores = RUNS[case]
-    manifest = _assemble(tmp_path, FOLDERS['every VCF of the larger variants'], sources, scores)
+    sources, scores, joined = RUNS[case]
+    manifest = _assemble(tmp_path, FOLDERS['every VCF of the larger variants'], sources, scores, joined)
     assert [table.table for table in manifest.tables] == list(TABLES)
     samples = [member.sample_id for member in manifest.members if member.sequenced]
-    # A run names a dated source in its sources and an archive by giving it.
-    named = (*sources, *(source.name for source in scores))
+    # A run names a dated source in its sources, and an archive or a joined file by giving it.
+    named = (*sources, *(source.name for source in scores), *(source.name for source in joined))
     for name, table in TABLES.items():
         written = pq.read_schema(tmp_path / 'out' / table['file'])
         assert written.equals(_schema(table, samples, named), check_metadata=False), name
@@ -702,7 +717,7 @@ def test_the_columns_of_each_table_are_the_ones_its_file_declares(tmp_path: path
     for name, omitted in (('variants', manifest.omitted_columns), ('sv', manifest.sv_omitted_columns)):
         left_out = [c['name'] for c in TABLES[name]['columns'] if 'source' in c and c['source'] not in named]
         assert tuple(sorted(left_out)) == tuple(sorted(omitted))
-    assert bool(manifest.omitted_columns) == (case != 'every source and every archive')
+    assert bool(manifest.omitted_columns) == (case != 'every source, every archive and every file')
     assert bool(manifest.sv_omitted_columns) == (sources == ('Ensembl',))
     assert all('source' not in c for name in set(TABLES) - {'variants', 'sv'} for c in TABLES[name]['columns'])
     # An archive's columns are those of its source, and the archive that every run reads is no column's source.
@@ -712,6 +727,9 @@ def test_the_columns_of_each_table_are_the_ones_its_file_declares(tmp_path: path
     for source in echtvar_values.SOURCES.values():
         expected = [] if source is echtvar_values.REQUIRED else list(source.columns)
         assert by_source.get(source.name, []) == expected
+    # A joined file's columns are those of its source, and a run can leave each file out.
+    for file in joined_values.SOURCES.values():
+        assert by_source[file.name] == list(file.columns)
 
 
 def test_a_table_with_the_members_columns_reserves_the_names_of_its_other_columns() -> None:

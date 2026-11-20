@@ -1,11 +1,11 @@
 // The steps of the family tables (family_tables.nf, docs/annotation.md) other than the Annotator's own: checking a
 // family's inputs, normalising its VCF and the sequences of its structural variants, taking the union of the families'
-// sites, reading the union's values from echtvar archives, converting the union's annotation, and writing each
-// family's tables. The structural variants and copy-number segments of a group have a union of their own,
-// which SV_SITES cuts from each family's VCFs, SV_UNION joins and SV_ANNOTATION_TABLES converts the annotation of.
-// NORMALISE_FAMILY, NORMALISE_SV, UNION_SITES and SV_SITES run bcftools alone, ECHTVAR_VALUES echtvar and
-// case-annotation, SV_UNION case-annotation and bcftools, and the others case-annotation, all in the tools image (label
-// 'tools').
+// sites, reading the union's values from echtvar archives, joining public files to the union's alleles, converting the
+// union's annotation, and writing each family's tables. The structural variants and copy-number segments of a group
+// have a union of their own, which SV_SITES cuts from each family's VCFs, SV_UNION joins and SV_ANNOTATION_TABLES
+// converts the annotation of. NORMALISE_FAMILY, NORMALISE_SV, UNION_SITES and SV_SITES run bcftools alone,
+// ECHTVAR_VALUES echtvar and case-annotation, SV_UNION and JOINED_VALUES case-annotation and bcftools, and the others
+// case-annotation, all in the tools image (label 'tools').
 //
 // A family's structural-variant VCF, its copy-number VCF and its members' repeat VCFs are optional. A process takes
 // each as the files the sheet names with their indexes, staged in a folder of their own, or as an empty list.
@@ -263,6 +263,62 @@ process ECHTVAR_VALUES {
     """
 }
 
+// The values of the union's alleles that come from public files which a run joins by allele or by position, each of
+// which a run need not have (docs/annotation.md): gnomAD's sites VCF of the mitochondrial genome, GENCODE's
+// polyadenylation features and APARENT2's table of effects on polyadenylation. A file that the run does not have is an
+// empty list. gnomAD's VCF is matched by position, REF and ALT, so bcftools first normalises it as NORMALISE_FAMILY
+// normalises a family's VCF, one allele per record and left-aligned against the reference, and stops at a REF that is
+// not the reference's. case-annotation writes the values as a table keyed by variant id and records each file's name,
+// size and SHA-256 as the run was given it. It fails for a file that is not what its source publishes, and unless the
+// table's alleles are exactly the union's. The step runs in every run, also in one without a file, whose table then
+// holds the alleles alone. The normalised VCF gets an index only because htslib reports a file it opens without one.
+// The stub gives its folder a fixed time, as the stub of ECHTVAR_VALUES does.
+process JOINED_VALUES {
+    tag "${group}"
+    label 'tools'
+    machineType 'n2d-standard-4'
+    cpus 4
+    memory 16.GB
+    disk 50.GB
+
+    input:
+    tuple val(group), path(sites), path(sites_index)
+    tuple path(reference), path(reference_index)
+    path gnomad_mito, stageAs: 'gnomad_mito/*'
+    path gencode_polya, stageAs: 'gencode_polya/*'
+    path aparent2, stageAs: 'aparent2/*'
+
+    output:
+    path 'joined_values'
+
+    script:
+    // Each file of the run under the name that case-annotation knows it by, which is its param's.
+    def given = [gnomad_mito: gnomad_mito, gencode_polya: gencode_polya, aparent2: aparent2].findAll { _source, joined -> joined }
+    // The files that are VCFs of alleles, each of which is read as bcftools norm rewrote it.
+    def allele_vcfs = given.findAll { source, _joined -> source == 'gnomad_mito' }
+    """
+    set -o pipefail
+    echo "${given.size()} files"
+    normalised() {
+        # A VCF of alleles as the union's are: its source's name, the VCF.
+        bcftools norm --no-version -m -any -f ${reference} --check-ref e -Oz -o "\$1.normalised.vcf.gz" "\$2"
+        bcftools index -t "\$1.normalised.vcf.gz"
+    }
+    ${allele_vcfs.collect { source, joined -> "normalised ${source} ${joined}" }.join('\n    ')}
+    case-annotation joined-values --sites ${sites} \\
+        ${given.collect { source, joined -> "--file ${source} ${joined}" }.join(' ')} \\
+        ${allele_vcfs.collect { source, _joined -> "--normalised ${source} ${source}.normalised.vcf.gz" }.join(' ')} \\
+        --output joined_values --scratch /tmp
+    """
+
+    stub:
+    """
+    mkdir joined_values
+    touch joined_values/joined_values.parquet joined_values/joined_values.json
+    touch -t 200001010000 joined_values
+    """
+}
+
 // The union's variants and transcripts tables from its Annotator JSON, checked against its sites. The JSON is read
 // twice: its genes section, which ends it, gives the HGNC ids that the rows of its positions hold. CPU-bound: one
 // process inflates the JSON and the others parse its lines.
@@ -332,7 +388,7 @@ process SV_ANNOTATION_TABLES {
 
 // One family's variants table, which holds a column of each member's calls, its transcripts table, its manifest and
 // the notes on the tables (tables.md, a copy of the file in the tools' package), from the union's tables and its values
-// from the echtvar archives. The manifest's roles are those of the proband the sheet names
+// from the echtvar archives and from the joined files. The manifest's roles are those of the proband the sheet names
 // and of its parents; nobody has one where the sheet names none. DuckDB sorts the union's tables down to the family's
 // alleles, spilling to the boot disk.
 // A family with a structural-variant or a copy-number VCF also gets sv, which holds a column of each member's calls
@@ -352,6 +408,7 @@ process FAMILY_TABLES {
     tuple val(family), path(vcf), path(vcf_index), path(ped, stageAs: 'input/*'), val(proband), path(sv, stageAs: 'sv/*'), path(cnv, stageAs: 'cnv/*'), path(repeats, stageAs: 'repeats/*'), path(sv_alleles, stageAs: 'sv-alleles/*')
     path tables
     path echtvar_values
+    path joined_values
     path sv_annotation, stageAs: 'sv-union/*'
     path sv_map, stageAs: 'sv-union/*'
     val schema_version
@@ -367,8 +424,8 @@ process FAMILY_TABLES {
     case-annotation family-tables --family ${family} --ped ${ped} --vcf ${vcf} ${probandOption(proband)} \\
         ${structuralOptions(sv, cnv, repeats)} ${vcfs(sv_alleles).collect { f -> "--sv-alleles ${f}" }.join(' ')} \\
         ${annotated} \\
-        --annotation ${tables} --echtvar-values ${echtvar_values} --schema-version ${schema_version} \\
-        --pipeline-version ${pipeline_version} --output out --scratch /tmp
+        --annotation ${tables} --echtvar-values ${echtvar_values} --joined-values ${joined_values} \\
+        --schema-version ${schema_version} --pipeline-version ${pipeline_version} --output out --scratch /tmp
     mv out/* .
     """
 
