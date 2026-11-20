@@ -23,7 +23,7 @@ from typing import Any, TextIO
 
 import pysam
 
-from case_annotation import family_tables
+from case_annotation import sv_sites
 
 # The notice that DeepMind's terms give as an example for output under its Output Terms of Use. The encode
 # configurations of the two tables that are not for permissive use hold it in every field's description, which echtvar
@@ -186,7 +186,7 @@ def read_contigs(reference_index: pathlib.Path) -> dict[str, int]:
     for line in reference_index.read_text('utf-8').splitlines():
         name, length, *_ = line.split('\t')
         lengths[name] = int(length)
-    contigs = {name: lengths[name] for name in family_tables.PRIMARY if name in lengths}
+    contigs = {name: lengths[name] for name in sv_sites.PRIMARY if name in lengths}
     if not contigs:
         raise ValueError(f'{reference_index}: no primary chromosome; are its contigs named chr1, chr2, ...?')
     return contigs
