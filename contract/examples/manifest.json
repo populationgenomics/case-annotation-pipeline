@@ -237,6 +237,12 @@
       "file": "gencode-polya.invented.gtf.gz",
       "bytes": 2000000,
       "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    {
+      "source": "mcr",
+      "file": "mcr.invented.tsv",
+      "bytes": 3500000,
+      "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
     }
   ],
   "omitted_columns": [
@@ -257,9 +263,16 @@
     "avi_shap_start_lost",
     "avi_shap_stop_lost",
     "avi_shap_phastcons_470way",
+    "mitotip_score",
+    "mitotip_quartile",
     "aparent2_min",
     "aparent2_max",
-    "aparent2_ref_usage"
+    "aparent2_ref_usage",
+    "genomic_constraint_z",
+    "mpc_max"
+  ],
+  "transcripts_omitted_columns": [
+    "mpc"
   ],
   "sv_annotation": {
     "annotator": "Invented Annotator 1.0",

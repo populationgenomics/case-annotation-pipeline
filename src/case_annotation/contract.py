@@ -378,7 +378,8 @@ def example_manifest() -> family_tables.FamilyManifest:
     """An invented manifest: a trio with the tables of its larger variants.
 
     Its run did not name dbSNP, read AlphaGenome's scores and splicing scores and no breakdown of the scores, and
-    joined gnomAD's mitochondrial sites and GENCODE's polyadenylation features and no effects of APARENT2.
+    joined gnomAD's mitochondrial sites, GENCODE's polyadenylation features and gnomAD's regions of missense
+    constraint, and none of the other four files.
     """
 
     def member(
@@ -447,13 +448,15 @@ def example_manifest() -> family_tables.FamilyManifest:
             for source, file, size, digit in (
                 (joined_values.GNOMAD_MITO, 'gnomad-mito.invented.vcf.bgz', 5_000_000, 'b'),
                 (joined_values.GENCODE_POLYA, 'gencode-polya.invented.gtf.gz', 2_000_000, 'c'),
+                (joined_values.MCR, 'mcr.invented.tsv', 3_500_000, 'd'),
             )
         ),
-        omitted_columns=(
-            *family_tables.VARIANT_SOURCES['dbSNP'],
-            *family_tables.VARIANT_SOURCES['alphagenome_avi_breakdown'],
-            *family_tables.VARIANT_SOURCES['aparent2'],
+        omitted_columns=tuple(
+            column
+            for source in ('dbSNP', 'alphagenome_avi_breakdown', 'mitotip', 'aparent2', 'genomic_constraint', 'mpc')
+            for column in family_tables.VARIANT_SOURCES[source]
         ),
+        transcripts_omitted_columns=family_tables.TRANSCRIPT_SOURCES['mpc'],
         sv_annotation=annotation,
         sv_omitted_columns=(),
     )

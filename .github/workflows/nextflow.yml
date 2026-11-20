@@ -104,7 +104,8 @@ jobs:
           touch stub/reference.fa stub/reference.fa.fai stub/unindexed.fa stub/annotated/out/stub-group.json.gz \
             stub/annotated/out/stub-group.sv.json.gz stub/annotated/run.json stub/gnomad-joint.zip \
             stub/alphagenome-avi.zip stub/alphagenome-avi-breakdown.zip stub/alphagenome-splicing.zip \
-            stub/gnomad-mito.vcf.bgz stub/gencode-polya.gtf.gz stub/aparent2.csv.gz
+            stub/gnomad-mito.vcf.bgz stub/mitotip.txt stub/gencode-polya.gtf.gz stub/aparent2.csv.gz \
+            stub/genomic-constraint.txt.gz stub/mcr.tsv stub/mpc.tsv.bgz
           # An annotation folder of the group's alleles alone, without the annotation of its structural variants.
           mkdir -p stub/annotated-no-sv/out
           touch stub/annotated-no-sv/out/stub-group.json.gz stub/annotated-no-sv/run.json
@@ -238,13 +239,15 @@ jobs:
             test -L "stub/${run}/${union}/echtvar_values"
             test -L "stub/${run}/annotations/fam-a/tables-0.5.0-illumina-202610/variants.parquet"
           done
-          # A run names any of the three public files that are joined to the alleles: here all of them, and then
+          # A run names any of the seven public files that are joined to the alleles: here all of them, and then
           # APARENT2's alone. The step that joins them runs in each, as it does in a run that names none.
-          joined=(--gnomad_mito /src/stub/gnomad-mito.vcf.bgz --gencode_polya /src/stub/gencode-polya.gtf.gz
-            --aparent2 /src/stub/aparent2.csv.gz)
+          joined=(--gnomad_mito /src/stub/gnomad-mito.vcf.bgz --mitotip /src/stub/mitotip.txt
+            --gencode_polya /src/stub/gencode-polya.gtf.gz --aparent2 /src/stub/aparent2.csv.gz
+            --genomic_constraint /src/stub/genomic-constraint.txt.gz --mcr /src/stub/mcr.tsv
+            --mpc /src/stub/mpc.tsv.bgz)
           family_run --families /src/stub/families.csv --annotated "/src/${results}/${annotation}" "${joined[@]}" \
             --output_dir /src/stub/joined > joined.log
-          family_run --families /src/stub/families.csv --annotated "/src/${results}/${annotation}" "${joined[@]:4:2}" \
+          family_run --families /src/stub/families.csv --annotated "/src/${results}/${annotation}" "${joined[@]:6:2}" \
             --output_dir /src/stub/joined-alone > joined-alone.log
           for run in reuse joined joined-alone; do
             grep -qF 'ANNOTATE_FAMILIES:JOINED_VALUES (stub-group)' "${run}.log" ||
@@ -365,7 +368,7 @@ jobs:
                 "$@"
           }
           family=(--family fam-c --proband A3)
-          # The run names one of the three archives of AlphaGenome's scores and one of the three files that are joined
+          # The run names one of the three archives of AlphaGenome's scores and one of the seven files that are joined
           # to the alleles, and leaves the other settings of both null.
           included_run "${family[@]}" --with_sv --annotates_sv --alphagenome_avi /src/stub/alphagenome-avi.zip \
             --gencode_polya /src/stub/gencode-polya.gtf.gz --output_dir /src/stub/included > included.log

@@ -115,6 +115,9 @@ erDiagram
         float gnomad_mito_af_hom "gnomAD's, on chrM, where the run read its file"
         bool gencode_polya_signal "in a polyadenylation signal"
         float aparent2_min "APARENT2's lowest effect on a site"
+        float genomic_constraint_z "gnomAD's, of the allele's window of 1,000 bases"
+        float mcr_oe_min "the lowest missense ratio of its regions"
+        float mpc_max "the highest of gnomAD's missense scores"
         double alphamissense_max
         double revel
         double spliceai_max
@@ -138,6 +141,8 @@ erDiagram
         string hgvsp
         bool is_mane_select
         bool is_canonical
+        float mcr_oe "gnomAD's missense ratio of the transcript's region"
+        float mpc "gnomAD's missense score, where the run read its file"
     }
     call {
         string gt "after the split"
@@ -1565,27 +1570,34 @@ contributions = con.sql(
 
 ### Mitochondrial frequencies and polyadenylation
 
-A run that was given the public files for them has up to 19 more columns in `variants`, from three files that the
+A run that was given the public files for them has up to 19 more columns in `variants`, from four files that the
 workflow joins to the alleles ([Joined files](annotation.md#joined-files)). The counts are 32-bit integers and the
 frequencies and scores 32-bit floats.
 
-gnomAD's sites of the mitochondrial genome give the 15 `gnomad_mito_` columns, which hold a value only for an allele on
+gnomAD's sites of the mitochondrial genome give the 13 `gnomad_mito_` columns, which hold a value only for an allele on
 chrM that gnomAD's file lists. gnomAD counts a sample as homoplasmic for an allele at a heteroplasmy level of 0.95 or
 more, which is the share of the sample's mitochondrial DNA that has the allele, and as heteroplasmic at a level from
 0.10 up to 0.95.
 
-| Column                                                                   | Holds                                                                                                                                                                            | gnomAD's field                             |
-| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| `gnomad_mito_ac_hom`, `gnomad_mito_ac_het`                               | the number of samples that are homoplasmic and that are heteroplasmic for the allele                                                                                             | `AC_hom`, `AC_het`                         |
-| `gnomad_mito_af_hom`, `gnomad_mito_af_het`                               | those counts as a share of `gnomad_mito_an`                                                                                                                                      | `AF_hom`, `AF_het`                         |
-| `gnomad_mito_an`                                                         | the number of samples with a call at the site                                                                                                                                    | `AN`                                       |
-| `gnomad_mito_max_heteroplasmy`                                           | the highest heteroplasmy level of the allele in any sample                                                                                                                       | `max_hl`                                   |
-| `gnomad_mito_hapmax_af_hom`, `gnomad_mito_hapmax_af_het`                 | the highest homoplasmic and the highest heteroplasmic frequency among gnomAD's 29 haplogroups                                                                                    | the highest of `hap_AF_hom`, `hap_AF_het`  |
-| `gnomad_mito_hapmax_hom_haplogroup`, `gnomad_mito_hapmax_het_haplogroup` | the haplogroup that has that frequency; null where the frequency is 0 or several haplogroups share it                                                                            | `hapmax_AF_hom`, `hapmax_AF_het`           |
-| `gnomad_mito_faf_hapmax_hom`                                             | the highest filtering allele frequency of the homoplasmic calls among the haplogroups, which allows for a haplogroup's size                                                      | `faf_hapmax_hom`                           |
-| `gnomad_mito_filters`                                                    | the record's FILTER values as a list: `['PASS']`, or the names of gnomAD's filters `artifact_prone_site`, `indel_stack` and `npg` (no sample passed the filters with the allele) | FILTER                                     |
-| `gnomad_mito_hap_defining`                                               | whether the allele defines a haplogroup in PhyloTree                                                                                                                             | `hap_defining_variant`                     |
-| `gnomad_mito_mitotip_score`, `gnomad_mito_mitotip_prediction`            | MitoTIP's score of a change in a tRNA gene and the predictor's reading of it, such as `possibly_benign`; null for an allele outside the tRNA genes                               | `mitotip_score`, `mitotip_trna_prediction` |
+| Column                                                                   | Holds                                                                                                                                                                            | gnomAD's field                            |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `gnomad_mito_ac_hom`, `gnomad_mito_ac_het`                               | the number of samples that are homoplasmic and that are heteroplasmic for the allele                                                                                             | `AC_hom`, `AC_het`                        |
+| `gnomad_mito_af_hom`, `gnomad_mito_af_het`                               | those counts as a share of `gnomad_mito_an`                                                                                                                                      | `AF_hom`, `AF_het`                        |
+| `gnomad_mito_an`                                                         | the number of samples with a call at the site                                                                                                                                    | `AN`                                      |
+| `gnomad_mito_max_heteroplasmy`                                           | the highest heteroplasmy level of the allele in any sample                                                                                                                       | `max_hl`                                  |
+| `gnomad_mito_hapmax_af_hom`, `gnomad_mito_hapmax_af_het`                 | the highest homoplasmic and the highest heteroplasmic frequency among gnomAD's 29 haplogroups                                                                                    | the highest of `hap_AF_hom`, `hap_AF_het` |
+| `gnomad_mito_hapmax_hom_haplogroup`, `gnomad_mito_hapmax_het_haplogroup` | the haplogroup that has that frequency; null where the frequency is 0 or several haplogroups share it                                                                            | `hapmax_AF_hom`, `hapmax_AF_het`          |
+| `gnomad_mito_faf_hapmax_hom`                                             | the highest filtering allele frequency of the homoplasmic calls among the haplogroups, which allows for a haplogroup's size                                                      | `faf_hapmax_hom`                          |
+| `gnomad_mito_filters`                                                    | the record's FILTER values as a list: `['PASS']`, or the names of gnomAD's filters `artifact_prone_site`, `indel_stack` and `npg` (no sample passed the filters with the allele) | FILTER                                    |
+| `gnomad_mito_hap_defining`                                               | whether the allele defines a haplogroup in PhyloTree                                                                                                                             | `hap_defining_variant`                    |
+
+MitoTIP is a predictor of how likely a change in a mitochondrial tRNA gene is to be pathogenic. Its table of scores
+holds every single-base change of the 1,504 bases of those genes, and gives two columns:
+
+| Column             | Holds                                                                                                                                                                                                                                                                 |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mitotip_score`    | MitoTIP's score of the change, between -5.9 and 21.8 in its file of April 2020. A higher score is a change that MitoTIP takes as more likely to be pathogenic                                                                                                         |
+| `mitotip_quartile` | the quartile of the score among all the changes that MitoTIP scores, as text. `Q1` holds the highest scores, above 16.25, which MitoTIP words as likely pathogenic; then come `Q2` (possibly pathogenic), `Q3` (possibly benign) and `Q4`, below 8.44 (likely benign) |
 
 GENCODE's polyadenylation features give `gencode_polya_signal`, a flag that is true where the allele changes a base of a
 polyadenylation signal: the short motif, nearly always six bases, before the place where a transcript is cut and gets
@@ -1613,8 +1625,11 @@ A query has to allow for these things.
   comparison drops the null, so a search for rare alleles on chrM reads `coalesce(gnomad_mito_af_hom, 0)`.
 - `gnomad_mito_hapmax_af_hom` can be 1 because of one sample: a haplogroup with a single sample that carries the allele
   has a frequency of 1. `gnomad_mito_faf_hapmax_hom` is the value that allows for the number of samples.
-- `gnomad_mito_mitotip_score` is gnomAD's copy of the score, so a change in a tRNA gene that gnomAD's file does not list
-  has none. The prediction is the predictor's wording and no classification of the variant.
+- The two `mitotip_` columns come from MitoTIP's own table and not from gnomAD's file, so a change in a tRNA gene that
+  gnomAD does not list has a score. They are null for an allele outside the tRNA genes and for every insertion and
+  deletion: MitoTIP also scores the deletion of each base, and the tables do not hold those scores
+  ([Joined files](annotation.md#joined-files)). The wording of a quartile is the predictor's and no classification of
+  the variant.
 - `gencode_polya_signal` is false for an allele in a signal that GENCODE has not annotated, and GENCODE annotates the
   signals by hand.
 - The three `aparent2_` columns are null for every insertion and deletion, also one that removes a whole signal, and for
@@ -1623,14 +1638,14 @@ A query has to allow for these things.
 
 The first query is for the proband's alleles on chrM that are rare in gnomAD and define no haplogroup, with gnomAD's
 values and MitoTIP's score beside the call. `proband.allele_balance` is the share of the proband's reads at the site
-that show the allele. The query needs the run to have had the file `gnomad_mito`.
+that show the allele. The query needs the run to have had the files `gnomad_mito` and `mitotip`.
 
 ```python
 rare_mito = con.sql(
     """
     SELECT variant_id, proband.gt AS proband_gt, proband.allele_balance AS proband_balance,
            gnomad_mito_af_hom, gnomad_mito_af_het, gnomad_mito_max_heteroplasmy, gnomad_mito_filters,
-           gnomad_mito_mitotip_score, gnomad_mito_mitotip_prediction
+           mitotip_score, mitotip_quartile
     FROM trio
     WHERE chrom = 'chrM'
       AND proband.carries
@@ -1664,9 +1679,112 @@ polyadenylation = con.sql(
 ```
 
 Both queries were run on a toy table of eight invented alleles. The first returned two of its four alleles on chrM: one
-with a homoplasmic frequency of 0, and one that gnomAD's file does not list. It left out a common allele and one that
-defines a haplogroup. The second returned three of the other four: a change in a signal with an effect of -3.5, a change
-outside every signal that raises a site's odds by 1.4, and last a deletion in a signal, which has no score.
+with a homoplasmic frequency of 0, and one that gnomAD's file does not list, which has MitoTIP's score all the same, in
+`Q1`. It left out a common allele and one that defines a haplogroup. The second returned three of the other four: a
+change in a signal with an effect of -3.5, a change outside every signal that raises a site's odds by 1.4, and last a
+deletion in a signal, which has no score.
+
+### Constraint and missense scores from gnomAD
+
+A run that was given gnomAD's three files for them has three more columns in `variants` and five in `transcripts`
+([Joined files](annotation.md#joined-files)). Two of the files measure constraint: the number of variants that gnomAD's
+samples have in a stretch of sequence, against the number that a model of mutation expects there. A stretch with fewer
+variants than expected is one that selection keeps free of them. The third file scores single missense changes.
+
+| Table         | Column                 | Holds                                                                                                                                                                                                                                                              | Null where                                                                                                          |
+| ------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `variants`    | `genomic_constraint_z` | the z score of the window of 1,000 bases that holds `pos`, from gnomAD v3.1.2, as a 32-bit float. A higher score is a window with fewer variants than expected                                                                                                     | the window did not pass gnomAD's quality control, or the allele is on chrX, chrY or chrM, which the file leaves out |
+| `variants`    | `mcr_oe_min`           | the lowest `mcr_oe` among the regions that hold `pos`, whatever their transcript, as a 32-bit float                                                                                                                                                                | no region holds the position                                                                                        |
+| `variants`    | `mpc_max`              | the highest `mpc` of the allele among its transcripts, as a 32-bit float                                                                                                                                                                                           | gnomAD's file has no row of the allele                                                                              |
+| `transcripts` | `mcr_oe`               | the ratio of observed to expected missense variants in the region of the row's transcript that holds `pos`, from gnomAD v4.1.1, as a 32-bit float. A ratio below 1 is a region with fewer missense variants than expected, and 0 one in which gnomAD observed none | gnomAD's file has no region of the row's transcript at the position                                                 |
+| `transcripts` | `mcr_regions`          | the number of regions that gnomAD divides the coding sequence of the transcript into, as a 32-bit integer. With 1 the region is the whole coding sequence, and `mcr_oe` is the ratio of the transcript                                                             | `mcr_oe` is null                                                                                                    |
+| `transcripts` | `mcr_oe_p`             | the p-value of a chi-squared test of the region's observed number against its expected one, as a 64-bit float. It is small where the ratio differs from 1 in either direction                                                                                      | `mcr_oe` is null                                                                                                    |
+| `transcripts` | `mcr_high_coverage`    | whether gnomAD's exomes cover the region well: the share of them with a call, taken as the median over the region, is at least 90%                                                                                                                                 | `mcr_oe` is null                                                                                                    |
+| `transcripts` | `mpc`                  | gnomAD's MPC score, v4.1.1, of the allele as a missense change of the row's transcript, as a 32-bit float: from 0 to about 5, and the value 6. A higher score is a more deleterious change                                                                         | gnomAD's file has no row of the allele and the transcript                                                           |
+
+A window of the genomic constraint covers whatever lies in it, coding or not. gnomAD gives 2.18 and 4.0 as the scores
+that the top 10% and the top 1% of the non-coding windows reach. The windows that hold coding sequence score higher, so
+the two values are thresholds for an allele outside coding sequence.
+
+`mcr_oe` describes the region and not the allele. A region is a stretch of the transcript's coding sequence and spans
+the introns between its coding bases, so an intronic or a synonymous allele in it has the same ratio as a missense
+change, and a query filters on the consequence itself. The authors of the measure give a ratio of at most 0.59 as
+supporting and a ratio of at most 0.36 as moderate evidence for a missense change under the ACMG criterion PP2, and set
+no condition on the coverage for that. gnomAD's browser greys out a region whose p-value is above 0.001 or whose
+coverage is low.
+
+The authors of MPC use 2 and 2.5 as the edges of its bins. The score was fitted with ClinVar's classifications of May
+2025 ([Dated sources](annotation.md#dated-sources)).
+
+A query has to allow for these things.
+
+- A run that was not given a file has none of its columns, and a query that reads one fails. The manifest lists the
+  missing columns of `variants` in `omitted_columns` and those of `transcripts` in `transcripts_omitted_columns`
+  ([The manifest](#the-manifest)).
+- The five columns of `transcripts` hold a value on Ensembl rows only. gnomAD's files have one transcript for a gene,
+  under its Ensembl id: the MANE Select transcript, or the canonical one for a gene without a MANE Select transcript. A
+  RefSeq row has another id and no value, and `is_mane_select` is true on RefSeq rows only, so a filter on it leaves no
+  row with a value. A query filters on `variants.mcr_oe_min` or `variants.mpc_max`, which need no transcript, or picks
+  the transcript in `transcripts` with `source = 'Ensembl' AND is_canonical`. gnomAD chose its transcripts from MANE
+  Select 0.95 and GENCODE 39, and a run's annotation can be of other releases, so the canonical transcript of a gene can
+  be another than gnomAD's. A query that must not miss a value leaves the flag out, because every row with a value is of
+  gnomAD's transcript for the gene.
+- A comparison drops a null, and a null is no ratio of 0. `mcr_oe_min <= 0.36` leaves out an allele in a transcript
+  without a region, and `coalesce(mcr_oe_min, 0)` would rank it as the most constrained of all. The file of regions
+  leaves out the transcripts in which the authors caution that the ratios are less accurate, so a transcript without a
+  region has no measure, which says nothing about its constraint.
+- `mcr_oe_min` and `mpc_max` are taken over the transcripts of gnomAD's files. Where the run's annotation does not list
+  such a transcript for the allele, no row of `transcripts` holds the value that `variants` has.
+- gnomAD's file of MPC scores has no row for some missense changes, so a missense allele can have a null `mpc_max`.
+- An insertion or a deletion has the window and the regions of its `pos`, the base that the VCF writes before the
+  changed ones. It has an `mpc` only where gnomAD's file has a row of its REF and ALT, and the rows of the file that
+  were read are all single-base changes.
+
+The first query is for the proband's rare missense alleles in a region with moderate evidence of constraint. It reads
+`variants` alone and needs the run to have had the files `mcr` and `mpc`.
+
+```python
+constrained_missense = con.sql(
+    """
+    SELECT variant_id, proband.gt AS proband_gt, gnomad_joint_af, mcr_oe_min, mpc_max, alphamissense_max
+    FROM trio
+    WHERE proband.carries
+      AND coalesce(gnomad_joint_af, 0) < $max_af
+      AND worst_consequence = 'missense_variant'
+      AND mcr_oe_min <= $max_oe
+    ORDER BY mcr_oe_min, variant_id
+    """,
+    params={'max_af': 0.001, 'max_oe': 0.36},
+).to_arrow_table()
+```
+
+The second query reads the values on the transcript: the proband's rare alleles that are a missense change of a gene's
+canonical Ensembl transcript, in a region with supporting evidence of constraint or with an MPC score of 2 or more, with
+the region's other columns. It needs the files `mcr` and `mpc`.
+
+```python
+missense_by_transcript = con.sql(
+    """
+    SELECT t.variant_id, t.transcript_id, t.gene_symbol, t.hgvsp,
+           t.mcr_oe, t.mcr_regions, t.mcr_oe_p, t.mcr_high_coverage, t.mpc
+    FROM transcripts t JOIN trio v USING (variant_id)
+    WHERE v.proband.carries
+      AND coalesce(v.gnomad_joint_af, 0) < $max_af
+      AND t.source = 'Ensembl' AND t.is_canonical
+      AND list_contains(t.consequences, 'missense_variant')
+      AND (t.mcr_oe <= $max_oe OR t.mpc >= $min_mpc)
+    ORDER BY t.mpc DESC NULLS LAST, t.variant_id
+    """,
+    params={'max_af': 0.001, 'max_oe': 0.59, 'min_mpc': 2.0},
+).to_arrow_table()
+```
+
+Both queries were run on toy tables of six invented alleles, each with an Ensembl and a RefSeq row in `transcripts`. The
+first returned one allele, with a ratio of 0.2. It left out a missense allele with a ratio of 0.5, a common one, an
+intronic allele in a region with a ratio of 0.15, a missense allele in a transcript without a region and one with a
+ratio of 0.9. The second returned three Ensembl rows: that allele, the one without a region, which has an MPC score of
+2.6, and the one with a ratio of 0.5. With `t.is_mane_select` in place of the two conditions on the transcript it
+returned no row.
 
 ### A de novo search
 
@@ -2485,33 +2603,35 @@ The tables share these properties:
 | shared columns     | a column that means the same thing has the same name and type in every table ([Shared column names](#shared-column-names))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | a missing value    | a null. That holds for the list columns `rsids`, `hgnc_ids`, `breakpoint_hgnc_ids`, `genes`, `regulatory_features`, `clinvar_records`, `clinvar_other_alleles`, `clinvar_conditions`, `clinvar_pubmed_ids`, `amino_acid_conservation`, `gnomad_sv_matches`, `fusion_partners`, `pl` and `ft` too, and for `cipos`, `ciend` and the lists of a repeat's genotype: an allele without an rsID has no `rsids`, not an empty list. `filters` differs: in every table it holds the VCF record's FILTER values, and an empty list for a record whose FILTER is `.`. `gnomad_mito_filters` holds those of gnomAD's record in the same way, and is null for an allele that gnomAD's file lacks |
 
-The tables hold no gene-level knowledge beyond a gene's identifiers. What OMIM, ClinGen and other gene–disease sources
-say about a gene is knowledge that the reader brings.
+The tables hold no gene-level knowledge beyond a gene's identifiers and, in a run that joined gnomAD's regions of
+missense constraint, the constraint of a transcript's regions. What OMIM, ClinGen and other gene–disease sources say
+about a gene is knowledge that the reader brings.
 
 ### The manifest
 
 `manifest.json` describes the folder: its tables, the family and what annotated the alleles and the structural variants.
 Every manifest holds every key below, also the manifest of a family without the optional tables.
 
-| Key                         | Holds                                                                                                                                                                                                                                                                                                                |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema_version`            | the tables' version, such as `0.5.0`                                                                                                                                                                                                                                                                                 |
-| `pipeline_version`          | the release of the pipeline that wrote the folder, such as `0.3.0`: the version of the workflow and of the tools image at once, because the workflow gives its own version to the step that writes the folder, which refuses to write with tools of another. It is the same in every run of one release              |
-| `family`                    | the family's id                                                                                                                                                                                                                                                                                                      |
-| `members`                   | the pedigree: each member with its `sample_id`, `father`, `mother`, `sex`, `affected` (empty where the PED file gives the phenotype as unknown), `sequenced` (whether `variants` has its column, and `sv` and `repeats` where the family has them) and `role`                                                        |
-| `notes`                     | the notes on the tables in the folder: the `path`, which is `tables.md`, with the file's size in `bytes` and its `sha256`, as an entry of `tables` gives a table's                                                                                                                                                   |
-| `tables`                    | each table the folder holds, with its rows, size and SHA-256: `variants` and `transcripts`, then `sv`, `sv_transcripts` and `repeats` where the family has them                                                                                                                                                      |
-| `sv_callers`                | the callers whose records `sv` holds: `sv`, `cnv` or both, and an empty list in a family without the table. A named caller with no row of `sv` reported nothing                                                                                                                                                      |
-| `alleles`                   | the number of alleles, which is the number of rows of `variants`                                                                                                                                                                                                                                                     |
-| `annotation`                | what annotated the alleles: the Annotator, the catalog, the sources named and the versions they pinned, the data sources the JSON header records, and the bundle's sources the run left out, each with its reason: `dated`, `not_applicable`, `current` or `unplaced`                                                |
-| `gnomad_joint`              | the archive of gnomAD's joint values: its file name, its size and SHA-256 as the run read it, echtvar's version, and each field the archive's embedded configuration declares, with gnomAD's name for it, the archive's alias, its type, its multiplier and the value that stands for a missing one                  |
-| `alphagenome_avi`           | the archive of AlphaGenome's AVI scores, which `avi_phred` and `avi_raw` come from, in the form of `gnomad_joint`; null in a run that was not given it                                                                                                                                                               |
-| `alphagenome_avi_breakdown` | the archive of the breakdown of the AVI score, which the `avi_shap_` columns come from, in the same form, with the notice that DeepMind's terms ask for as `terms`; null in a run that was not given it                                                                                                              |
-| `alphagenome_splicing`      | the archive of AlphaGenome's splicing scores, which `alphagenome_splicing` comes from, in the form of `alphagenome_avi_breakdown`; null in a run that was not given it                                                                                                                                               |
-| `joined_files`              | the public files that the run joined to the alleles ([Joined files](annotation.md#joined-files)): an entry for each, with the name of its param as `source`, its `file` name, and its size in `bytes` and its `sha256` as the run read it, in the order of their columns; an empty list in a run that was given none |
-| `omitted_columns`           | the columns of `variants` that the run left out because it did not name their source: those of its dated sources, then those of the archives of AlphaGenome's scores that it was not given, then those of the joined files that it was not given                                                                     |
-| `sv_annotation`             | what annotated the structural variants and copy number segments, in the form of `annotation`: the second Annotator run, which has the catalog and the sources of the first; null in a family without `sv`                                                                                                            |
-| `sv_omitted_columns`        | the columns of `sv` that the run left out because it did not name their dated source; an empty list in a family without `sv`                                                                                                                                                                                         |
+| Key                           | Holds                                                                                                                                                                                                                                                                                                                |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema_version`              | the tables' version, such as `0.5.0`                                                                                                                                                                                                                                                                                 |
+| `pipeline_version`            | the release of the pipeline that wrote the folder, such as `0.3.0`: the version of the workflow and of the tools image at once, because the workflow gives its own version to the step that writes the folder, which refuses to write with tools of another. It is the same in every run of one release              |
+| `family`                      | the family's id                                                                                                                                                                                                                                                                                                      |
+| `members`                     | the pedigree: each member with its `sample_id`, `father`, `mother`, `sex`, `affected` (empty where the PED file gives the phenotype as unknown), `sequenced` (whether `variants` has its column, and `sv` and `repeats` where the family has them) and `role`                                                        |
+| `notes`                       | the notes on the tables in the folder: the `path`, which is `tables.md`, with the file's size in `bytes` and its `sha256`, as an entry of `tables` gives a table's                                                                                                                                                   |
+| `tables`                      | each table the folder holds, with its rows, size and SHA-256: `variants` and `transcripts`, then `sv`, `sv_transcripts` and `repeats` where the family has them                                                                                                                                                      |
+| `sv_callers`                  | the callers whose records `sv` holds: `sv`, `cnv` or both, and an empty list in a family without the table. A named caller with no row of `sv` reported nothing                                                                                                                                                      |
+| `alleles`                     | the number of alleles, which is the number of rows of `variants`                                                                                                                                                                                                                                                     |
+| `annotation`                  | what annotated the alleles: the Annotator, the catalog, the sources named and the versions they pinned, the data sources the JSON header records, and the bundle's sources the run left out, each with its reason: `dated`, `not_applicable`, `current` or `unplaced`                                                |
+| `gnomad_joint`                | the archive of gnomAD's joint values: its file name, its size and SHA-256 as the run read it, echtvar's version, and each field the archive's embedded configuration declares, with gnomAD's name for it, the archive's alias, its type, its multiplier and the value that stands for a missing one                  |
+| `alphagenome_avi`             | the archive of AlphaGenome's AVI scores, which `avi_phred` and `avi_raw` come from, in the form of `gnomad_joint`; null in a run that was not given it                                                                                                                                                               |
+| `alphagenome_avi_breakdown`   | the archive of the breakdown of the AVI score, which the `avi_shap_` columns come from, in the same form, with the notice that DeepMind's terms ask for as `terms`; null in a run that was not given it                                                                                                              |
+| `alphagenome_splicing`        | the archive of AlphaGenome's splicing scores, which `alphagenome_splicing` comes from, in the form of `alphagenome_avi_breakdown`; null in a run that was not given it                                                                                                                                               |
+| `joined_files`                | the public files that the run joined to the alleles ([Joined files](annotation.md#joined-files)): an entry for each, with the name of its param as `source`, its `file` name, and its size in `bytes` and its `sha256` as the run read it, in the order of their columns; an empty list in a run that was given none |
+| `omitted_columns`             | the columns of `variants` that the run left out because it did not name their source: those of its dated sources, then those of the archives of AlphaGenome's scores that it was not given, then those of the joined files that it was not given                                                                     |
+| `transcripts_omitted_columns` | the columns of `transcripts` that the run left out because it was not given the joined file that they come from                                                                                                                                                                                                      |
+| `sv_annotation`               | what annotated the structural variants and copy number segments, in the form of `annotation`: the second Annotator run, which has the catalog and the sources of the first; null in a family without `sv`                                                                                                            |
+| `sv_omitted_columns`          | the columns of `sv` that the run left out because it did not name their dated source; an empty list in a family without `sv`                                                                                                                                                                                         |
 
 The reasons, under `annotation.omitted`, follow the groups of sources in [Dated sources](annotation.md#dated-sources):
 `dated` for a dated source, `not_applicable` for one that does not apply to germline small variants, `current` for a

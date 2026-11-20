@@ -1,0 +1,4 @@
+chrom	start	end	element_id	possible	expected	observed	oe	z
+chr1	0	1000	chr1-0-1000	2400.0	150.5	120.0	0.797	2.5
+chr1	1000	2000	chr1-1000-2000	2400.0	150.5	170.0	1.13	-1.5
+chr2	0	1000	chr2-0-1000	2400.0	150.5	165.0	1.096	-1.25

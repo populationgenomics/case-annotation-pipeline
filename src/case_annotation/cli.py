@@ -271,7 +271,10 @@ def _joined_values_arguments(parser: argparse.ArgumentParser) -> None:
         '--output',
         type=path,
         required=True,
-        help=f'the folder to write {joined_values.TABLE_NAME} and {joined_values.INFO_NAME} into; it must not exist',
+        help=(
+            f'the folder to write {joined_values.TABLE_NAME}, {joined_values.TRANSCRIPTS_NAME} and '
+            f'{joined_values.INFO_NAME} into; it must not exist'
+        ),
     )
     parser.add_argument('--scratch', type=path, help='a local folder for temporary files, rather than the default')
 
@@ -481,9 +484,10 @@ _SUBCOMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Ca
     'joined-values': (
         (
             'writes the values of a sites union from the public files that a run joins to its alleles by allele or by '
-            "position, which are gnomAD's mitochondrial frequencies, GENCODE's polyadenylation signals and APARENT2's "
-            "effects on polyadenylation, with each file's record; fails for a file that is not what its source "
-            'publishes'
+            "position, as a table by allele and one by allele and transcript, with each file's record: gnomAD's "
+            "mitochondrial frequencies, MitoTIP's scores, GENCODE's polyadenylation signals, APARENT2's effects on "
+            "polyadenylation, and gnomAD's genomic constraint by window, regions of missense constraint and MPC "
+            'scores; fails for a file that is not what its source publishes'
         ),
         _joined_values_arguments,
         _joined_values,

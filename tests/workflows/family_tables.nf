@@ -46,10 +46,17 @@
 // effects, with invented features and values in the layout of the public files. JOINED_VALUES joins them to the union:
 // three alleles change a base of a signal, one of them a deletion whose last base lies in it, and a change in a site
 // and one in a pseudogene's signal overlap none; one allele has a row for each of two sites, and others one row or
-// none. The run names no file of gnomAD's mitochondrial sites, so the families' tables lack those columns.
-// gnomad_mito.vcf stands in for that file, with invented values under gnomAD's field names, and is joined to
-// mito-union.vcf, an invented union on an invented chrM of 120 bases (mito-reference.fa): it writes a deletion at the
-// right end of a repeat, which the union holds at the left end, as a family's normalised VCF would.
+// none. genomic_constraint.tsv, mcr.tsv and mpc.tsv stand in for gnomAD's tables of genomic constraint by window, of
+// regions of missense constraint and of MPC scores, with invented windows, regions and scores under gnomAD's column
+// names and the invented transcripts of the annotation. The union's alleles on chr1 and chr2 lie in a window each and
+// those on chrX in none; ENST01, the transcript of every row of the annotation, has two regions on chr1, and ENST02,
+// which the annotation lacks, one on chr2 and a score, so its values are in variants and on no row of transcripts.
+// The run names no file of gnomAD's mitochondrial sites and none of MitoTIP's scores, so the families' tables lack
+// those columns. gnomad_mito.vcf and mitotip.tsv stand in for those files, with invented values under the field names
+// of gnomAD's file and the column names of MitoTIP's, and are joined to mito-union.vcf, an invented union on an
+// invented chrM of 120 bases (mito-reference.fa): gnomad_mito.vcf writes a deletion at the right end of a repeat,
+// which the union holds at the left end, as a family's normalised VCF would, and mitotip.tsv scores the changes of one
+// base of the union and the deletion of a base that the union's deletion removes.
 // Refused inputs must fail, and so must Annotator outputs without the group's annotation. The case-annotation and
 // echtvar steps run in the tools image, built first. Run with Docker from the repository's root, with this folder's
 // config alone (-C), because a run from the root would otherwise read the pipeline's nextflow.config over it:
@@ -140,21 +147,31 @@ workflow {
     if (archivesDisk([small, [], [], []]) != 51.GB || archivesDisk([small, small, small, small]) != 51.GB) {
         error("the disk of four small archives is ${archivesDisk([small, small, small, small])}, and of one ${archivesDisk([small, [], [], []])}")
     }
-    // The two files on polyadenylation, joined to the union, and no file of gnomAD's mitochondrial sites.
+    // The two files on polyadenylation and gnomAD's three tables of constraint, joined to the union, and no file of
+    // gnomAD's mitochondrial sites or of MitoTIP's scores.
     polya = file("${fixture}/gencode_polya.gtf")
     effects = file("${fixture}/aparent2.tsv")
-    joined = JOINED_VALUES(union, reference, [], polya, effects)
-    // gnomAD's mitochondrial sites, joined to an invented union on an invented chrM.
+    windows = file("${fixture}/genomic_constraint.tsv")
+    regions = file("${fixture}/mcr.tsv")
+    scores = file("${fixture}/mpc.tsv")
+    joined = JOINED_VALUES(union, reference, [], [], polya, effects, windows, regions, scores)
+    // gnomAD's mitochondrial sites and MitoTIP's scores, joined to an invented union on an invented chrM.
     mito = file("${fixture}/gnomad_mito.vcf")
+    mitotip = file("${fixture}/mitotip.tsv")
     CHECK_JOINED_MITO(
         JOINED_VALUES_MITO(
             INVENTED_MITO_UNION(file("${fixture}/mito-union.vcf")),
             channel.value(tuple(file("${fixture}/mito-reference.fa"), file("${fixture}/mito-reference.fa.fai"))),
             mito,
+            mitotip,
+            [],
+            [],
+            [],
             [],
             [],
         ),
         mito,
+        mitotip,
     )
     // The union of the group's structural variants and copy-number segments, which are family A's, and its tables.
     sv_sites = SV_SITES(
@@ -183,7 +200,7 @@ workflow {
     )
     CHECK_TABLES(written.filter { w -> w[0] == 'family-a' }.map { w -> w[0..4] }, archive)
     CHECK_NO_ROLES(written.filter { w -> w[0] == 'family-b' }.map { w -> w[3] })
-    CHECK_JOINED(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[1], w[3]) }, polya, effects)
+    CHECK_JOINED(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[1], w[2], w[3]) }, polya, effects, windows, regions, scores)
     CHECK_LARGER(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[1], w[3], w[5]) })
     // A family whose row names no such VCF gets no table of them.
     written
@@ -683,17 +700,24 @@ process INVENTED_MITO_UNION {
     """
 }
 
-// Family A's values from the two files on polyadenylation, after the columns of the echtvar archives: the flag of a
-// signal, which is true for the three alleles that change a base of one and false for every other allele, and
-// APARENT2's lowest and highest effect with the usage of the lowest row's site, for the four single-base changes that
-// the invented table scores. The manifest and the table's metadata record both files by name, size and SHA-256, and the
-// manifest lists the columns of gnomAD's mitochondrial sites, which the run did not name, as left out, after those of
-// the dated sources.
+// Family A's values from the two files on polyadenylation and from gnomAD's three tables of constraint, after the
+// columns of the echtvar archives: the flag of a signal, which is true for the three alleles that change a base of one
+// and false for every other allele; APARENT2's lowest and highest effect with the usage of the lowest row's site, for
+// the four single-base changes that the invented table scores; the z score of the window of each allele on chr1 and
+// chr2; the lowest ratio among the regions that hold the allele's position; and the highest MPC score of the allele.
+// The last two also count a transcript that the annotation lacks. transcripts holds the ratio, the number of regions,
+// the p-value, the coverage and the MPC score on the row of the allele's transcript, which the files write without its
+// version, and nothing of the transcript that the annotation lacks. The manifest and the tables' metadata record the
+// five files by name, size and SHA-256, and the manifest lists the columns of gnomAD's mitochondrial sites and of
+// MitoTIP's scores, which the run did not name, as left out, after those of the dated sources.
 process CHECK_JOINED {
     input:
-    tuple path(variants), path(manifest)
+    tuple path(variants), path(transcripts), path(manifest)
     path polya
     path effects
+    path windows
+    path regions
+    path scores
 
     script:
     """
@@ -705,47 +729,73 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 variants = pq.read_table('${variants}')
-added = ('gencode_polya_signal', 'aparent2_min', 'aparent2_max', 'aparent2_ref_usage')
+added = ('gencode_polya_signal', 'aparent2_min', 'aparent2_max', 'aparent2_ref_usage', 'genomic_constraint_z',
+         'mcr_oe_min', 'mpc_max')
 at = variants.column_names.index('alphagenome_splicing')
 assert tuple(variants.column_names[at + 1:at + 1 + len(added)]) == added, variants.column_names
 assert variants.column_names[at + 1 + len(added)] == 'qual', variants.column_names
 kinds = [variants.schema.field(c).type for c in added]
-assert kinds == [pa.bool_(), pa.float32(), pa.float32(), pa.float32()], kinds
+assert kinds == [pa.bool_()] + [pa.float32()] * 6, kinds
 assert not variants.schema.field('gencode_polya_signal').nullable, variants.schema
 rows = {r['variant_id']: tuple(r[c] for c in added) for r in variants.to_pylist()}
 assert rows == {
-    'chr1-100-G-A': (False, -2.25, 0.75, 0.5),
-    'chr1-100-G-C': (False, 0.03125, 0.03125, 0.5),
-    'chr1-200-G-A': (False, None, None, None),
-    'chr1-300-T-A': (True, None, None, None),
-    'chr1-400-TCA-T': (True, None, None, None),
-    'chr2-60-C-A': (False, -0.5, -0.5, 0.25),
-    'chr2-80-C-T': (True, None, None, None),
-    'chr2-90-GCGTAAA-G': (False, None, None, None),
-    'chrX-100-T-A': (False, None, None, None),
-    'chrX-100-T-C': (False, 1.5, 1.5, 0.0625),
+    'chr1-100-G-A': (False, -2.25, 0.75, 0.5, 2.5, 0.25, 3.25),
+    'chr1-100-G-C': (False, 0.03125, 0.03125, 0.5, 2.5, 0.25, 0.5),
+    'chr1-200-G-A': (False, None, None, None, 2.5, 0.75, None),
+    'chr1-300-T-A': (True, None, None, None, 2.5, 0.75, None),
+    'chr1-400-TCA-T': (True, None, None, None, 2.5, None, None),
+    'chr2-60-C-A': (False, -0.5, -0.5, 0.25, -1.25, 0.125, None),
+    'chr2-80-C-T': (True, None, None, None, -1.25, 0.125, None),
+    'chr2-90-GCGTAAA-G': (False, None, None, None, -1.25, None, None),
+    'chrX-100-T-A': (False, None, None, None, None, None, None),
+    'chrX-100-T-C': (False, 1.5, 1.5, 0.0625, None, None, 6.0),
 }, rows
+transcripts = pq.read_table('${transcripts}')
+by_transcript = ('mcr_oe', 'mcr_regions', 'mcr_oe_p', 'mcr_high_coverage', 'mpc')
+assert tuple(transcripts.column_names[-len(by_transcript):]) == by_transcript, transcripts.column_names
+kinds = [transcripts.schema.field(c).type for c in by_transcript]
+assert kinds == [pa.float32(), pa.int32(), pa.float64(), pa.bool_(), pa.float32()], kinds
+held = {(r['variant_id'], r['transcript_id']): tuple(r[c] for c in by_transcript) for r in transcripts.to_pylist()}
+nothing = (None, None, None, None, None)
+assert held == {
+    ('chr1-100-G-A', 'ENST01.1'): (0.25, 2, 2.1e-60, True, 2.5),
+    ('chr1-100-G-C', 'ENST01.1'): (0.25, 2, 2.1e-60, True, 0.5),
+    ('chr1-200-G-A', 'ENST01.1'): (0.75, 2, 0.125, False, None),
+    ('chr1-300-T-A', 'ENST01.1'): (0.75, 2, 0.125, False, None),
+    ('chr1-400-TCA-T', 'ENST01.1'): nothing,
+    ('chr2-60-C-A', 'ENST01.1'): nothing,
+    ('chr2-80-C-T', 'ENST01.1'): nothing,
+    ('chr2-90-GCGTAAA-G', 'ENST01.1'): nothing,
+    ('chrX-100-T-A', 'ENST01.1'): nothing,
+    ('chrX-100-T-C', 'ENST01.1'): (None, None, None, None, 6.0),
+}, held
 manifest = json.load(open('${manifest}'))
-files = {'gencode_polya': '${polya}', 'aparent2': '${effects}'}
+files = {'gencode_polya': '${polya}', 'aparent2': '${effects}', 'genomic_constraint': '${windows}',
+         'mcr': '${regions}', 'mpc': '${scores}'}
 assert manifest['joined_files'] == [
     {'source': source, 'file': name, 'bytes': len(open(name, 'rb').read()),
      'sha256': hashlib.sha256(open(name, 'rb').read()).hexdigest()}
     for source, name in files.items()], manifest
-assert json.loads(variants.schema.metadata[b'joined_files']) == manifest['joined_files'], variants.schema.metadata
-left_out = [c for c in manifest['omitted_columns'] if c.startswith('gnomad_mito_')]
-assert len(left_out) == 15 and left_out == manifest['omitted_columns'][-15:], manifest
-assert not [c for c in variants.column_names if c.startswith('gnomad_mito_')], variants.column_names
+for table in (variants, transcripts):
+    assert json.loads(table.schema.metadata[b'joined_files']) == manifest['joined_files'], table.schema.metadata
+left_out = manifest['omitted_columns'][-15:]
+assert [c for c in left_out if c.startswith('gnomad_mito_')] == left_out[:13], manifest
+assert left_out[13:] == ['mitotip_score', 'mitotip_quartile'], manifest
+assert manifest['transcripts_omitted_columns'] == [], manifest
+assert not [c for c in variants.column_names if c.startswith(('gnomad_mito_', 'mitotip_'))], variants.column_names
 EOF
     """
 }
 
-// The values of the invented union on chrM from the invented file of gnomAD's mitochondrial sites: the single-base
-// change has the file's values, the deletion those of the record that the file writes six bases to the right, and the
-// allele that the file lacks none. The record is of the file as it was given.
+// The values of the invented union on chrM from the invented files of gnomAD's mitochondrial sites and of MitoTIP's
+// scores: the single-base change has both files' values, the deletion gnomAD's values of the record that the file
+// writes six bases to the right and no score, although MitoTIP's file scores the deletion of a base that it removes,
+// and the allele that both files lack none. No value is by transcript. The records are of the files as they were given.
 process CHECK_JOINED_MITO {
     input:
     path values
     path mito
+    path mitotip
 
     script:
     """
@@ -763,23 +813,27 @@ def float32(value):
 
 table = pq.read_table('${values}/joined_values.parquet')
 assert table.column_names[0] == 'variant_id' and len(table.column_names) == 16, table.column_names
-assert all(c.startswith('gnomad_mito_') for c in table.column_names[1:]), table.column_names
+assert all(c.startswith('gnomad_mito_') for c in table.column_names[1:14]), table.column_names
+assert table.column_names[14:] == ['mitotip_score', 'mitotip_quartile'], table.column_names
 rows = {r.pop('variant_id'): {c.removeprefix('gnomad_mito_'): v for c, v in r.items()} for r in table.to_pylist()}
 assert list(rows) == ['chrM-10-A-C', 'chrM-12-C-T', 'chrM-30-GCA-G'], rows
 assert rows['chrM-10-A-C'] == {
     'ac_hom': 8, 'ac_het': 2, 'af_hom': float32(0.002), 'af_het': float32(0.0005), 'an': 4000,
     'max_heteroplasmy': 0.5, 'hapmax_af_hom': 0.125, 'hapmax_af_het': 0.03125, 'hapmax_hom_haplogroup': 'B',
     'hapmax_het_haplogroup': 'B', 'faf_hapmax_hom': 0.0625, 'filters': ['PASS'], 'hap_defining': True,
-    'mitotip_score': 12.5, 'mitotip_prediction': 'possibly_benign'}, rows
+    'mitotip_score': 12.5, 'mitotip_quartile': 'Q3'}, rows
 assert set(rows['chrM-12-C-T'].values()) == {None}, rows
 deletion = rows['chrM-30-GCA-G']
 assert (deletion['an'], deletion['ac_hom'], deletion['af_hom'], deletion['filters']) == (4000, 0, 0.0, ['npg']), rows
-assert (deletion['hap_defining'], deletion['hapmax_hom_haplogroup'], deletion['mitotip_score']) == (
-    False, None, None), rows
-mito = open('${mito}', 'rb').read()
-assert json.load(open('${values}/joined_values.json')) == {'files': [{
-    'source': 'gnomad_mito', 'file': '${mito}', 'bytes': len(mito),
-    'sha256': hashlib.sha256(mito).hexdigest()}]}
+assert (deletion['hap_defining'], deletion['hapmax_hom_haplogroup']) == (False, None), rows
+assert (deletion['mitotip_score'], deletion['mitotip_quartile']) == (None, None), rows
+by_transcript = pq.read_table('${values}/joined_transcript_values.parquet')
+assert (by_transcript.column_names, by_transcript.num_rows) == (['variant_id', 'transcript_id'], 0), by_transcript
+files = {'gnomad_mito': '${mito}', 'mitotip': '${mitotip}'}
+assert json.load(open('${values}/joined_values.json')) == {'files': [
+    {'source': source, 'file': name, 'bytes': len(open(name, 'rb').read()),
+     'sha256': hashlib.sha256(open(name, 'rb').read()).hexdigest()}
+    for source, name in files.items()]}
 EOF
     """
 }

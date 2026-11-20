@@ -96,12 +96,32 @@
           "required": false
         },
         {
+          "name": "mitotip",
+          "type": "Path",
+          "required": false
+        },
+        {
           "name": "gencode_polya",
           "type": "Path",
           "required": false
         },
         {
           "name": "aparent2",
+          "type": "Path",
+          "required": false
+        },
+        {
+          "name": "genomic_constraint",
+          "type": "Path",
+          "required": false
+        },
+        {
+          "name": "mcr",
+          "type": "Path",
+          "required": false
+        },
+        {
+          "name": "mpc",
           "type": "Path",
           "required": false
         },
