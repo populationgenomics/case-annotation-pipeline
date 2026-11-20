@@ -1050,6 +1050,28 @@ splicing_of_variant = con.sql(
 `COLUMNS('^spliceai_')` stands for every column whose name starts that way: `spliceai_max`, which is the highest of the
 four scores, and the four with their distances.
 
+An allele deep in an intron can change splicing too, for example at the branch point before an acceptor site, and a
+search for such alleles asks how far each lies from the nearest exon. `intron_offset_start` and `intron_offset_end` in
+`transcripts` hold that distance as numbers. They are the intron offsets that the row's `hgvsc` writes for its first and
+for its last position: `c.123+5G>A` has 5 in both columns, and the deletion `c.124-30_124-25del` has -30 and -25. An
+offset counts from the exon's edge in the transcript's direction, whatever the strand of the gene. It is positive after
+the end of an exon, on the donor side of the intron, and negative before the start of an exon, so negative before an
+acceptor site. This query returns the rows of one gene whose allele has an end 18 to 44 bases before an exon of the
+row's transcript, which is the window where most known branch points lie:
+
+```python
+in_branch_point_window = con.sql(
+    """
+    SELECT variant_id, transcript_id, hgvsc, intron_offset_start, intron_offset_end
+    FROM transcripts
+    WHERE hgnc_id = $hgnc_id
+      AND (intron_offset_start BETWEEN -44 AND -18 OR intron_offset_end BETWEEN -44 AND -18)
+    ORDER BY pos, transcript_id
+    """,
+    params={'hgnc_id': 99901},
+).to_arrow_table()
+```
+
 PromoterAI scores what an allele does to the expression of a gene from the promoter of one transcript, from -1 to 1. A
 score below 0 predicts less expression and a score above 0 more, and Illumina treats a score between -0.05 and 0.05 as
 no effect. `promoterai_score` in `transcripts` is the score for the row's transcript, and `promoterai_tss_distance` the
@@ -1083,6 +1105,21 @@ A query on these columns has to allow for the following.
   threshold of Illumina's release, and a distance is null with its score.
 - A RefSeq row has the SpliceAI scores of the Ensembl gene with its symbol, because a SpliceAI entry is matched to a
   transcript by the id of the transcript's Ensembl gene.
+- Both intron offsets are null in a row without `hgvsc`, and in a row whose allele lies in an exon of the transcript,
+  where `hgvsc` writes no offset. A range with one end in an exon, such as `c.120_123+5del`, has one offset and one
+  null. A comparison drops a null, so the condition on the window needs no `IS NOT NULL`.
+- The offsets belong to the row's transcript. One allele can lie 25 bases before an exon of one transcript and inside an
+  exon of another, so a query that should count each allele once selects one row per allele, such as the row of the MANE
+  Select transcript.
+- HGVS counts an offset from the nearer of the intron's two exons, so the sign turns from plus to minus in the middle of
+  the intron. In an intron shorter than 88 bases, some of the 44 bases before the acceptor site therefore have a
+  positive offset, and the condition on the window does not return an allele there.
+- The condition on the window returns an allele with an end in the window. A deletion that starts before the window and
+  ends after it has neither end in it, and the two offsets alone do not say whether both ends lie in the same intron.
+  The `hgvsc` of the row has both positions in full.
+- The offsets place an insertion or a deletion where `hgvsc` places it. HGVS's rule for a repeated sequence is the last
+  possible place in the transcript's direction, and `pos` holds the first place on the genome, so the offsets of such an
+  allele can differ from a count of bases from `pos` by the length of the repeat.
 - Illumina gives the transcript of a PromoterAI entry by its Ensembl id, so both PromoterAI columns are null on the
   RefSeq rows of `transcripts`. `is_mane_select` is true on RefSeq rows only, so a condition on it together with one on
   `promoterai_score` matches no row.

@@ -19,6 +19,7 @@ import concurrent.futures
 import gzip
 import json
 import pathlib
+import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from typing import Any, Literal
 
@@ -135,6 +136,19 @@ _GNOMAD_KEYS: Mapping[str, frozenset[str]] = {
     | {f'{group}{ending}' for group in ('all', *groups) for ending in _GNOMAD_VALUES.values()}
     for key, groups in _GNOMAD_GROUPS.items()
 }
+
+# One position of an HGVS coding or non-coding name. It is the number of a base of an exon: a plain number, a number
+# after `-` for a base before the start codon, or a number after `*` for one after the stop codon. A base of an intron
+# adds its offset from that base of an exon, with a sign, so in `c.-12-5` the first `-` is the position's and the
+# second the offset's. The braces take the name of the group that holds the offset.
+_HGVS_POSITION = r'[-*]?[0-9]+(?P<{}>[+-][1-9][0-9]*)?'
+# A whole name as far as its positions go: the reference, `c.` or `n.`, one position or two around `_`, and the first
+# character of the change, which is a letter, `=` or `[`. Any other character there belongs to a position of a form
+# that the pattern does not read, such as the `?` of an unknown offset. The pattern asks of a name only what its
+# offsets need: it reads a `-` or a `*` after `n.` too, where HGVS has plain numbers alone.
+_HGVS_NAME = re.compile(
+    rf'[^:]+:[cn]\.{_HGVS_POSITION.format("start")}(?P<range>_{_HGVS_POSITION.format("end")})?[A-Za-z=\[]'
+)
 
 
 def gnomad_fields(prefix: str) -> list[pa.Field]:
@@ -295,6 +309,8 @@ TRANSCRIPTS = pa.schema(
         pa.field('is_canonical', pa.bool_(), nullable=False),
         pa.field('exon', _STRING),
         pa.field('intron', _STRING),
+        pa.field('intron_offset_start', pa.int32()),
+        pa.field('intron_offset_end', pa.int32()),
         pa.field('cdna_pos', _STRING),
         pa.field('cds_pos', _STRING),
         pa.field('protein_pos', _STRING),
@@ -584,6 +600,27 @@ def _conservation(transcript: Mapping[str, Any], where: str) -> list[float] | No
     return list(entry['scores']) or None
 
 
+def intron_offsets(name: str, where: str) -> tuple[int | None, int | None]:
+    """The intron offsets of the first and of the last position that an HGVS coding or non-coding name writes.
+
+    An offset counts the bases from the nearest exon in the transcript's direction, and keeps the sign of the name:
+    `c.123+5G>A` gives 5, the fifth base after the end of an exon, and `c.124-25A>G` gives -25, the 25th base before
+    the start of one. A position in an exon gives None. A name of one position gives its offset twice.
+
+    Fails on a name that is not of the form _HGVS_NAME: one of another kind than `c.` and `n.`, one that ends after
+    its positions, and one with a position of another form, such as an unknown offset (`c.123+?`) or an uncertain
+    position in parentheses. A missing offset for such a name would hide its allele from a query on the offsets. The
+    change after the positions is not read.
+    """
+    match = _HGVS_NAME.match(name)
+    if match is None:
+        raise ValueError(f'{where}: the HGVS name {name!r} is of no form that the conversion reads intron offsets from')
+    start = int(match['start']) if match['start'] else None
+    if match['range'] is None:
+        return start, start
+    return start, int(match['end']) if match['end'] else None
+
+
 def clinvar_record(record: Mapping[str, Any]) -> dict[str, Any]:
     germline = record.get('classifications', {}).get('germlineClassification', {})
     status = germline.get('reviewStatus')
@@ -796,6 +833,8 @@ def position_rows(
 
     The Annotator writes a flag only where it is true, so an allele without `inLowComplexityRegion` is outside those
     regions, and an AlphaMissense entry without `isIsoform` is not of an isoform.
+
+    A transcript with an `hgvsc` gives its row the intron offsets of that name, and fails as intron_offsets does.
     """
     chrom, pos, ref = position['chromosome'], position['position'], position['refAllele']
     alts = position['altAlleles']
@@ -859,6 +898,8 @@ def position_rows(
         am = alphamissense.get(_unversioned(tid))
         p3d = primateai3d.get(_unversioned(tid))
         promoter = promoterai.get(_unversioned(tid))
+        hgvsc = t.get('hgvsc')
+        offset_start, offset_end = (None, None) if hgvsc is None else intron_offsets(hgvsc, where)
         transcript_rows.append(
             {
                 'chrom': chrom,
@@ -873,13 +914,15 @@ def position_rows(
                 'consequences': consequences,
                 'worst_consequence': consequences[0],
                 'impact': t.get('impact'),
-                'hgvsc': t.get('hgvsc'),
+                'hgvsc': hgvsc,
                 'hgvsp': t.get('hgvsp'),
                 'protein_id': t.get('proteinId'),
                 'is_mane_select': bool(t.get('isManeSelect', False)),
                 'is_canonical': bool(t.get('isCanonical', False)),
                 'exon': t.get('exons'),
                 'intron': t.get('introns'),
+                'intron_offset_start': offset_start,
+                'intron_offset_end': offset_end,
                 'cdna_pos': t.get('cdnaPos'),
                 'cds_pos': t.get('cdsPos'),
                 'protein_pos': t.get('proteinPos'),

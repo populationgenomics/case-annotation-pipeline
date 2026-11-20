@@ -1328,6 +1328,16 @@
           "nullable": true
         },
         {
+          "name": "intron_offset_start",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "intron_offset_end",
+          "type": "int32",
+          "nullable": true
+        },
+        {
           "name": "cdna_pos",
           "type": "string",
           "nullable": true
