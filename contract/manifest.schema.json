@@ -540,6 +540,13 @@
       "title": "Omitted Columns",
       "type": "array"
     },
+    "transcripts_omitted_columns": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Transcripts Omitted Columns",
+      "type": "array"
+    },
     "sv_annotation": {
       "anyOf": [
         {
@@ -574,6 +581,7 @@
     "alphagenome_splicing",
     "joined_files",
     "omitted_columns",
+    "transcripts_omitted_columns",
     "sv_annotation",
     "sv_omitted_columns"
   ],

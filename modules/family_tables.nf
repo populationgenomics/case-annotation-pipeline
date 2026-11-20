@@ -264,14 +264,17 @@ process ECHTVAR_VALUES {
 }
 
 // The values of the union's alleles that come from public files which a run joins by allele or by position, each of
-// which a run need not have (docs/annotation.md): gnomAD's sites VCF of the mitochondrial genome, GENCODE's
-// polyadenylation features and APARENT2's table of effects on polyadenylation. A file that the run does not have is an
-// empty list. gnomAD's VCF is matched by position, REF and ALT, so bcftools first normalises it as NORMALISE_FAMILY
-// normalises a family's VCF, one allele per record and left-aligned against the reference, and stops at a REF that is
-// not the reference's. case-annotation writes the values as a table keyed by variant id and records each file's name,
-// size and SHA-256 as the run was given it. It fails for a file that is not what its source publishes, and unless the
-// table's alleles are exactly the union's. The step runs in every run, also in one without a file, whose table then
-// holds the alleles alone. The normalised VCF gets an index only because htslib reports a file it opens without one.
+// which a run need not have (docs/annotation.md): gnomAD's sites VCF of the mitochondrial genome, MitoTIP's table of
+// scores, GENCODE's polyadenylation features, APARENT2's table of effects on polyadenylation, and gnomAD's tables of
+// genomic constraint by window, of regions of missense constraint and of MPC scores. A file that the run does not have
+// is an empty list. gnomAD's VCF is matched by position, REF and ALT, so bcftools first normalises it as
+// NORMALISE_FAMILY normalises a family's VCF, one allele per record and left-aligned against the reference, and stops
+// at a REF that is not the reference's. case-annotation writes the values as a table keyed by variant id, and those
+// that a file gives for an allele and one transcript as a second table keyed by variant id and transcript id, and
+// records each file's name, size and SHA-256 as the run was given it. It fails for a file that is not what its source
+// publishes, and unless the first table's alleles are exactly the union's. The step runs in every run, also in one
+// without a file, whose first table then holds the alleles alone and whose second has no row. The normalised VCF gets
+// an index only because htslib reports a file it opens without one.
 // The stub gives its folder a fixed time, as the stub of ECHTVAR_VALUES does.
 process JOINED_VALUES {
     tag "${group}"
@@ -285,15 +288,19 @@ process JOINED_VALUES {
     tuple val(group), path(sites), path(sites_index)
     tuple path(reference), path(reference_index)
     path gnomad_mito, stageAs: 'gnomad_mito/*'
+    path mitotip, stageAs: 'mitotip/*'
     path gencode_polya, stageAs: 'gencode_polya/*'
     path aparent2, stageAs: 'aparent2/*'
+    path genomic_constraint, stageAs: 'genomic_constraint/*'
+    path mcr, stageAs: 'mcr/*'
+    path mpc, stageAs: 'mpc/*'
 
     output:
     path 'joined_values'
 
     script:
     // Each file of the run under the name that case-annotation knows it by, which is its param's.
-    def given = [gnomad_mito: gnomad_mito, gencode_polya: gencode_polya, aparent2: aparent2].findAll { _source, joined -> joined }
+    def given = [gnomad_mito: gnomad_mito, mitotip: mitotip, gencode_polya: gencode_polya, aparent2: aparent2, genomic_constraint: genomic_constraint, mcr: mcr, mpc: mpc].findAll { _source, joined -> joined }
     // The files that are VCFs of alleles, each of which is read as bcftools norm rewrote it.
     def allele_vcfs = given.findAll { source, _joined -> source == 'gnomad_mito' }
     """
@@ -314,7 +321,7 @@ process JOINED_VALUES {
     stub:
     """
     mkdir joined_values
-    touch joined_values/joined_values.parquet joined_values/joined_values.json
+    touch joined_values/joined_values.parquet joined_values/joined_transcript_values.parquet joined_values/joined_values.json
     touch -t 200001010000 joined_values
     """
 }

@@ -28,8 +28,12 @@ params {
     alphagenome_avi_breakdown: Path?
     alphagenome_splicing: Path?
     gnomad_mito: Path?
+    mitotip: Path?
     gencode_polya: Path?
     aparent2: Path?
+    genomic_constraint: Path?
+    mcr: Path?
+    mpc: Path?
     // A name to add to the settings, and the name of a setting to give as null, for the runs that ANNOTATE_FAMILIES
     // refuses for them.
     unknown_setting: String?
@@ -56,8 +60,12 @@ workflow {
         alphagenome_avi_breakdown: params.alphagenome_avi_breakdown,
         alphagenome_splicing: params.alphagenome_splicing,
         gnomad_mito: params.gnomad_mito,
+        mitotip: params.mitotip,
         gencode_polya: params.gencode_polya,
         aparent2: params.aparent2,
+        genomic_constraint: params.genomic_constraint,
+        mcr: params.mcr,
+        mpc: params.mpc,
     ]
     families = MADE_FAMILY(params.with_sv).map { vcf, ped, sv -> tuple(params.family, vcf, ped, params.proband, sv, [], []) }
     annotated = ANNOTATE_FAMILIES(

@@ -154,7 +154,11 @@ def test_the_example_manifest_is_one_that_the_model_reads_and_writes() -> None:
         | {name for name in echtvar_values.SOURCES if getattr(manifest, name) is not None}
         | {file.source for file in manifest.joined_files}
     )
-    for omitted, table in ((manifest.omitted_columns, 'variants'), (manifest.sv_omitted_columns, 'sv')):
+    for omitted, table in (
+        (manifest.omitted_columns, 'variants'),
+        (manifest.transcripts_omitted_columns, 'transcripts'),
+        (manifest.sv_omitted_columns, 'sv'),
+    ):
         sources = family_tables.TABLES[table].sources
         assert omitted == tuple(c for source, columns in sources.items() if source not in named for c in columns)
     # Each of its archives holds the fields that a run reads the source's values from, and it shows an archive that
@@ -166,10 +170,12 @@ def test_the_example_manifest_is_one_that_the_model_reads_and_writes() -> None:
     assert manifest.alphagenome_avi_breakdown is None
     assert manifest.alphagenome_splicing is not None
     assert manifest.alphagenome_splicing.terms == echtvar_values.ALPHAGENOME_SPLICING.notice
-    # It shows files that the run joined and one that it was not given, in the order of their columns.
+    # It shows files that the run joined and one that it was not given, in the order of their columns, and of the
+    # files with columns in transcripts one of each.
     joined = [file.source for file in manifest.joined_files]
     assert joined == [name for name in joined_values.SOURCES if name in joined]
     assert 0 < len(joined) < len(joined_values.SOURCES)
+    assert 0 < len(manifest.transcripts_omitted_columns) < len(test_family_tables._JOINED_TRANSCRIPT_COLUMNS)
     assert manifest.sv_annotation is not None
     assert (manifest.sv_annotation.catalog, manifest.sv_annotation.sources) == (
         manifest.annotation.catalog,
@@ -697,7 +703,7 @@ RUNS = {
     'no archive of scores': (test_family_tables._SOURCES, (), _EVERY_FILE),
     'the scores alone': (test_family_tables._SOURCES, test_family_tables._SCORE_SOURCES[:1], _EVERY_FILE),
     'no joined file': (test_family_tables._SOURCES, test_family_tables._SCORE_SOURCES, ()),
-    'one joined file': (test_family_tables._SOURCES, test_family_tables._SCORE_SOURCES, _EVERY_FILE[1:2]),
+    'one joined file': (test_family_tables._SOURCES, test_family_tables._SCORE_SOURCES, (joined_values.MCR,)),
     'nothing that a run can leave out': (('Ensembl',), (), ()),
 }
 
@@ -714,12 +720,18 @@ def test_the_columns_of_each_table_are_the_ones_its_file_declares(tmp_path: path
         written = pq.read_schema(tmp_path / 'out' / table['file'])
         assert written.equals(_schema(table, samples, named), check_metadata=False), name
     # The columns that the contract gives a source are the ones the manifest lists as left out.
-    for name, omitted in (('variants', manifest.omitted_columns), ('sv', manifest.sv_omitted_columns)):
+    for name, omitted in (
+        ('variants', manifest.omitted_columns),
+        ('transcripts', manifest.transcripts_omitted_columns),
+        ('sv', manifest.sv_omitted_columns),
+    ):
         left_out = [c['name'] for c in TABLES[name]['columns'] if 'source' in c and c['source'] not in named]
         assert tuple(sorted(left_out)) == tuple(sorted(omitted))
     assert bool(manifest.omitted_columns) == (case != 'every source, every archive and every file')
+    assert bool(manifest.transcripts_omitted_columns) == (joined != _EVERY_FILE)
     assert bool(manifest.sv_omitted_columns) == (sources == ('Ensembl',))
-    assert all('source' not in c for name in set(TABLES) - {'variants', 'sv'} for c in TABLES[name]['columns'])
+    with_sources = {'variants', 'transcripts', 'sv'}
+    assert all('source' not in c for name in set(TABLES) - with_sources for c in TABLES[name]['columns'])
     # An archive's columns are those of its source, and the archive that every run reads is no column's source.
     by_source: dict[str, list[str]] = {}
     for column in TABLES['variants']['columns']:
@@ -727,9 +739,14 @@ def test_the_columns_of_each_table_are_the_ones_its_file_declares(tmp_path: path
     for source in echtvar_values.SOURCES.values():
         expected = [] if source is echtvar_values.REQUIRED else list(source.columns)
         assert by_source.get(source.name, []) == expected
-    # A joined file's columns are those of its source, and a run can leave each file out.
+    # A joined file's columns are those of its source, in variants and in transcripts, and a run can leave each file
+    # out.
+    by_transcript: dict[str, list[str]] = {}
+    for column in TABLES['transcripts']['columns']:
+        by_transcript.setdefault(column.get('source', ''), []).append(column['name'])
     for file in joined_values.SOURCES.values():
         assert by_source[file.name] == list(file.columns)
+        assert by_transcript.get(file.name, []) == list(file.transcript_columns)
 
 
 def test_a_table_with_the_members_columns_reserves_the_names_of_its_other_columns() -> None:

@@ -1321,16 +1321,16 @@
           "source": "gnomad_mito"
         },
         {
-          "name": "gnomad_mito_mitotip_score",
+          "name": "mitotip_score",
           "type": "float32",
           "nullable": true,
-          "source": "gnomad_mito"
+          "source": "mitotip"
         },
         {
-          "name": "gnomad_mito_mitotip_prediction",
+          "name": "mitotip_quartile",
           "type": "string",
           "nullable": true,
-          "source": "gnomad_mito"
+          "source": "mitotip"
         },
         {
           "name": "gencode_polya_signal",
@@ -1355,6 +1355,24 @@
           "type": "float32",
           "nullable": true,
           "source": "aparent2"
+        },
+        {
+          "name": "genomic_constraint_z",
+          "type": "float32",
+          "nullable": true,
+          "source": "genomic_constraint"
+        },
+        {
+          "name": "mcr_oe_min",
+          "type": "float32",
+          "nullable": true,
+          "source": "mcr"
+        },
+        {
+          "name": "mpc_max",
+          "type": "float32",
+          "nullable": true,
+          "source": "mpc"
         },
         {
           "name": "qual",
@@ -1687,6 +1705,36 @@
           "name": "promoterai_tss_distance",
           "type": "int32",
           "nullable": true
+        },
+        {
+          "name": "mcr_oe",
+          "type": "float32",
+          "nullable": true,
+          "source": "mcr"
+        },
+        {
+          "name": "mcr_regions",
+          "type": "int32",
+          "nullable": true,
+          "source": "mcr"
+        },
+        {
+          "name": "mcr_oe_p",
+          "type": "float64",
+          "nullable": true,
+          "source": "mcr"
+        },
+        {
+          "name": "mcr_high_coverage",
+          "type": "bool",
+          "nullable": true,
+          "source": "mcr"
+        },
+        {
+          "name": "mpc",
+          "type": "float32",
+          "nullable": true,
+          "source": "mpc"
         }
       ]
     },

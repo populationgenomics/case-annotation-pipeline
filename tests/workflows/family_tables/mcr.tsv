@@ -1,0 +1,4 @@
+transcript	n_total_transcript_regions	chr	region_start	region_end	region_obs	region_exp	region_oe	region_oe_chisq	region_oe_chisq_p	is_high_coverage
+ENST01	2	chr1	50	150	10	4.0000e+01	2.5000e-01	2.2500e+01	2.1000e-60	true
+ENST01	2	chr1	151	350	30	4.0000e+01	7.5000e-01	2.5000e+00	1.2500e-01	false
+ENST02	1	chr2	50	85	5	4.0000e+01	1.2500e-01	3.0625e+01	3.1250e-02	true

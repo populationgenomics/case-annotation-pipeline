@@ -1,0 +1,6 @@
+locus	alleles	transcript	mpc
+chr1:100	["G","A"]	ENST01	2.5000e+00
+chr1:100	["G","A"]	ENST02	3.2500e+00
+chr1:100	["G","C"]	ENST01	5.0000e-01
+chr1:101	["G","A"]	ENST01	1.0000e+00
+chrX:100	["T","C"]	ENST01	6.0000e+00

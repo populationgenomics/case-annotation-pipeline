@@ -62,11 +62,17 @@ params {
     alphagenome_avi_breakdown: Path?
     alphagenome_splicing: Path?
     // Public files that are joined to the union's alleles, each of which a run can leave out (docs/annotation.md):
-    // gnomAD's sites VCF of the mitochondrial genome, GENCODE's GTF of polyadenylation features, and APARENT2's table
-    // of the effects of single-base changes on polyadenylation. The tables of a run without a file lack its columns.
+    // gnomAD's sites VCF of the mitochondrial genome, MitoTIP's table of scores, GENCODE's GTF of polyadenylation
+    // features, APARENT2's table of the effects of single-base changes on polyadenylation, and gnomAD's tables of
+    // genomic constraint by window, of regions of missense constraint and of MPC scores. The tables of a run without a
+    // file lack its columns.
     gnomad_mito: Path?
+    mitotip: Path?
     gencode_polya: Path?
     aparent2: Path?
+    genomic_constraint: Path?
+    mcr: Path?
+    mpc: Path?
     tools_container: String
     output_dir: String?
     arGuid: String?
@@ -219,8 +225,12 @@ workflow ANNOTATE_FAMILIES {
         union,
         reference,
         settings.gnomad_mito ?: [],
+        settings.mitotip ?: [],
         settings.gencode_polya ?: [],
         settings.aparent2 ?: [],
+        settings.genomic_constraint ?: [],
+        settings.mcr ?: [],
+        settings.mpc ?: [],
     )
 
     if (settings.annotated != null) {
@@ -358,7 +368,7 @@ def pipelineVersion() {
 
 // The settings of ANNOTATE_FAMILIES, each of which the entry workflow takes as the param of the same name.
 def settingNames() {
-    return ['group', 'reference', 'catalog', 'annotation_data', 'sources', 'workers', 'annotator', 'annotator_version', 'license_secret', 'annotated', 'gnomad_joint', 'alphagenome_avi', 'alphagenome_avi_breakdown', 'alphagenome_splicing', 'gnomad_mito', 'gencode_polya', 'aparent2']
+    return ['group', 'reference', 'catalog', 'annotation_data', 'sources', 'workers', 'annotator', 'annotator_version', 'license_secret', 'annotated', 'gnomad_joint', 'alphagenome_avi', 'alphagenome_avi_breakdown', 'alphagenome_splicing', 'gnomad_mito', 'mitotip', 'gencode_polya', 'aparent2', 'genomic_constraint', 'mcr', 'mpc']
 }
 
 // The columns of the families sheet: four that every sheet has, and the optional ones of the larger variants.

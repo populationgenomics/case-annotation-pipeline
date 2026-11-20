@@ -10,7 +10,8 @@ Parquet files, a manifest and the notes on the tables:
   AlphaGenome's scores where the run names their archives), its values from the public files that the run joined
   (joined_values), the family's own QUAL and FILTER and, as in a VCF, one column per sequenced member, named as the
   member's sample in the VCF and in the VCF's order, with that member's own call of the allele;
-- `transcripts.parquet`: the union's `transcripts` rows of the family's alleles;
+- `transcripts.parquet`: the union's `transcripts` rows of the family's alleles, each with the values that the joined
+  files give for its allele and its transcript;
 - `manifest.json`: the tables, the pedigree with the roles of the named proband and its parents, and what annotated the
   alleles: the Annotator's run, each echtvar archive that the run read and each file that it joined;
 - `tables.md`: a copy of the notes on the tables in this package (NOTES), which the manifest names.
@@ -128,6 +129,18 @@ VARIANT_SOURCES: Mapping[str, tuple[str, ...]] = {
     },
     **{source.name: source.columns for source in joined_values.SOURCES.values()},
 }
+# The columns of the transcripts table, in the table's order: the union's annotation of an allele's transcript, then
+# the values that each joined file gives for the two. The file declares every column nullable (TABLES).
+TRANSCRIPT = pa.schema(
+    [
+        *(field.with_nullable(True) for field in annotation_tables.TRANSCRIPTS),
+        *(field for source in joined_values.SOURCES.values() for field in source.transcript_fields),
+    ]
+)
+# The columns of the transcripts table that a run can leave out, by the joined file that it then was not given.
+TRANSCRIPT_SOURCES: Mapping[str, tuple[str, ...]] = {
+    source.name: source.transcript_columns for source in joined_values.SOURCES.values() if source.transcript_fields
+}
 
 
 def variants_schema(samples: Sequence[str], omitted: Collection[str] = ()) -> pa.Schema:
@@ -199,7 +212,7 @@ class Table:
 # column nullable, also the ones that hold a value in every row.
 TABLES: Mapping[str, Table] = {
     'variants': Table(ALLELE, CALL, VARIANT_SOURCES),
-    'transcripts': Table(pa.schema([f.with_nullable(True) for f in annotation_tables.TRANSCRIPTS]), None, {}),
+    'transcripts': Table(TRANSCRIPT, None, TRANSCRIPT_SOURCES),
     'sv': Table(sv_schema(()), sv_tables.CALL, sv_annotation.SOURCE_COLUMNS),
     'sv_transcripts': Table(sv_tables.transcripts_schema(sv_annotation.TRANSCRIPT_COLUMNS), None, {}),
     'repeats': Table(repeat_tables.LOCUS, repeat_tables.CALL, {}),
@@ -357,6 +370,8 @@ class FamilyManifest(pydantic.BaseModel, frozen=True, extra='forbid'):
     # The variants columns of the sources the run did not name: its dated sources, then the archives it need not read,
     # then the files it need not join.
     omitted_columns: tuple[str, ...]
+    # The transcripts columns of the joined files that the run was not given.
+    transcripts_omitted_columns: tuple[str, ...]
     # What annotated the family's structural variants and copy-number segments, and the sv columns of the dated
     # sources that run did not name; None and no columns in a family without the sv table.
     sv_annotation: annotation_tables.AnnotationInfo | None
@@ -820,6 +835,7 @@ def assemble(
         con.read_parquet(str(annotation / 'transcripts' / '*.parquet')).create_view('union_transcripts')
         con.read_parquet(str(archive_values / echtvar_values.TABLE_NAME)).create_view('union_archives')
         con.read_parquet(str(joined / joined_values.TABLE_NAME)).create_view('union_joined')
+        con.read_parquet(str(joined / joined_values.TRANSCRIPTS_NAME)).create_view('union_joined_transcripts')
         for problem, query in {
             'the VCF repeats alleles': 'SELECT variant_id FROM records GROUP BY 1 HAVING count(*) > 1',
             "alleles the union's annotation lacks": (
@@ -844,6 +860,18 @@ def assemble(
         )
         from_archives = [f'a.{column}' for source in archives.given() for column in source.columns]
         from_files = [f'j.{column}' for source in joined_files.given() for column in source.columns]
+        transcripts_omitted = tuple(
+            column for source, columns in TRANSCRIPT_SOURCES.items() if source not in named for column in columns
+        )
+        by_transcript = [f'x.{column}' for source in joined_files.given() for column in source.transcript_columns]
+        # A joined file has a transcript under Ensembl's id without its version, and a row of the union under the id
+        # with its version. A row of RefSeq's has another id and so no value.
+        joined_transcripts = (
+            'LEFT JOIN union_joined_transcripts x '
+            "ON x.variant_id = t.variant_id AND x.transcript_id = split_part(t.transcript_id, '.', 1) "
+            if by_transcript
+            else ''
+        )
         sv_omitted = tuple(
             column
             for source, columns in sv_annotation.SOURCE_COLUMNS.items()
@@ -870,7 +898,8 @@ def assemble(
                 'JOIN union_joined j USING (variant_id) ORDER BY chrom_rank(v.chrom), v.pos, v.ref, v.alt'
             ),
             'transcripts': (
-                'SELECT t.* FROM union_transcripts t SEMI JOIN records USING (variant_id) '
+                f'SELECT {", ".join(["t.*", *by_transcript])} '  # noqa: S608 (column names of this package's own)
+                f'FROM union_transcripts t SEMI JOIN records USING (variant_id) {joined_transcripts}'
                 'ORDER BY chrom_rank(t.chrom), t.pos, t.variant_id, t.transcript_id'
             ),
         }
@@ -886,7 +915,7 @@ def assemble(
         files = []
         for table, query in queries.items():
             path = output / f'{table}.parquet'
-            left_out = sv_omitted if table == 'sv' else omitted
+            left_out = {'sv': sv_omitted, 'transcripts': transcripts_omitted}.get(table, omitted)
             rows = _write(con, query, path, table, metadata[table], _encodings(table, left_out), declared.get(table))
             files.append(
                 TableFile(table=table, path=path.name, rows=rows, bytes=path.stat().st_size, sha256=_sha256(path))
@@ -920,6 +949,7 @@ def assemble(
         alphagenome_splicing=archives.alphagenome_splicing,
         joined_files=joined_files.files,
         omitted_columns=omitted,
+        transcripts_omitted_columns=transcripts_omitted,
         sv_annotation=sv_info,
         sv_omitted_columns=sv_omitted,
     )

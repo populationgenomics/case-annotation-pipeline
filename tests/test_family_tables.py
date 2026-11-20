@@ -335,7 +335,9 @@ def _write_joint(
 _JOINED_SOURCES = tuple(joined_values.SOURCES.values())
 _JOINED_COLUMNS = tuple(column for source in _JOINED_SOURCES for column in source.columns)
 # Invented values of the union's alleles from the joined files, by source: gnomAD's mitochondrial sites hold the allele
-# on chrM, a polyadenylation signal the first allele, and APARENT2 scores the second, a single-base change.
+# on chrM, which MitoTIP scores, a polyadenylation signal holds the first allele, and APARENT2 scores the second, a
+# single-base change. The first two alleles lie in a window of gnomAD's genomic constraint, the first two in regions of
+# missense constraint, and the second and the fourth have MPC scores.
 _JOINED: dict[str, dict[str, dict[str, Any]]] = {
     'gnomad_mito': {
         _ALLELES[4]: {
@@ -352,10 +354,9 @@ _JOINED: dict[str, dict[str, dict[str, Any]]] = {
             'gnomad_mito_faf_hapmax_hom': _float32(0.003),
             'gnomad_mito_filters': ['npg'],
             'gnomad_mito_hap_defining': True,
-            'gnomad_mito_mitotip_score': _float32(12.5),
-            'gnomad_mito_mitotip_prediction': 'possibly_benign',
         }
     },
+    'mitotip': {_ALLELES[4]: {'mitotip_score': _float32(12.5), 'mitotip_quartile': 'Q3'}},
     'gencode_polya': {_ALLELES[0]: {'gencode_polya_signal': True}},
     'aparent2': {
         _ALLELES[1]: {
@@ -364,7 +365,34 @@ _JOINED: dict[str, dict[str, dict[str, Any]]] = {
             'aparent2_ref_usage': _float32(0.75),
         }
     },
+    'genomic_constraint': {
+        _ALLELES[0]: {'genomic_constraint_z': _float32(2.5)},
+        _ALLELES[1]: {'genomic_constraint_z': _float32(-0.75)},
+    },
+    'mcr': {_ALLELES[0]: {'mcr_oe_min': _float32(0.6)}, _ALLELES[1]: {'mcr_oe_min': _float32(0.25)}},
+    'mpc': {_ALLELES[1]: {'mpc_max': _float32(2.75)}, _ALLELES[3]: {'mpc_max': _float32(0.5)}},
 }
+# Invented values of an allele and a transcript from the joined files, by source, with the transcript as the files write
+# it: Ensembl's id without its version. The union's rows are of ENST01.1, so the first allele's region, which is of
+# another transcript, is on no row. The p-value is below the smallest 32-bit float.
+_JOINED_TRANSCRIPTS: dict[str, dict[tuple[str, str], dict[str, Any]]] = {
+    'mcr': {
+        (_ALLELES[0], 'ENST09'): {
+            'mcr_oe': _float32(0.6),
+            'mcr_regions': 1,
+            'mcr_oe_p': 0.04,
+            'mcr_high_coverage': False,
+        },
+        (_ALLELES[1], 'ENST01'): {
+            'mcr_oe': _float32(0.25),
+            'mcr_regions': 3,
+            'mcr_oe_p': 7e-256,
+            'mcr_high_coverage': True,
+        },
+    },
+    'mpc': {(_ALLELES[1], 'ENST01'): {'mpc': _float32(2.75)}, (_ALLELES[3], 'ENST01'): {'mpc': _float32(0.5)}},
+}
+_JOINED_TRANSCRIPT_COLUMNS = tuple(column for source in _JOINED_SOURCES for column in source.transcript_columns)
 
 
 def _joined_file(source: joined_values.Source) -> joined_values.JoinedFile:
@@ -385,6 +413,22 @@ def _write_joined(path: pathlib.Path, alleles: Sequence[str], sources: Sequence[
         for vid in alleles
     ]
     pq.write_table(pa.Table.from_pylist(rows, schema=joined_values.schema(sources)), path / joined_values.TABLE_NAME)
+    pairs = sorted(
+        {pair for source in sources for pair in _JOINED_TRANSCRIPTS.get(source.name, {}) if pair[0] in alleles}
+    )
+    by_transcript = [
+        {'variant_id': vid, 'transcript_id': transcript}
+        | {
+            column: _JOINED_TRANSCRIPTS[source.name].get((vid, transcript), {}).get(column)
+            for source in sources
+            for column in source.transcript_columns
+        }
+        for vid, transcript in pairs
+    ]
+    pq.write_table(
+        pa.Table.from_pylist(by_transcript, schema=joined_values.transcripts_schema(sources)),
+        path / joined_values.TRANSCRIPTS_NAME,
+    )
     info = joined_values.JoinedFiles(files=tuple(_joined_file(source) for source in sources))
     (path / joined_values.INFO_NAME).write_text(info.model_dump_json())
 
@@ -2029,9 +2073,11 @@ def test_a_sample_cannot_take_the_name_of_a_score_column_whatever_the_run_reads(
 
 JOINED_RUNS = {
     'no joined file': (),
-    "gnomAD's mitochondrial sites alone": _JOINED_SOURCES[:1],
-    'the two files on polyadenylation': _JOINED_SOURCES[1:],
-    'all three files': _JOINED_SOURCES,
+    "gnomAD's mitochondrial sites alone": (joined_values.GNOMAD_MITO,),
+    'the two files on polyadenylation': (joined_values.GENCODE_POLYA, joined_values.APARENT2),
+    'the regions of missense constraint without the MPC scores': (joined_values.MCR,),
+    'the MPC scores without the regions': (joined_values.MPC,),
+    'every file': _JOINED_SOURCES,
 }
 
 
@@ -2061,6 +2107,86 @@ def test_a_family_has_the_columns_of_the_files_its_run_joined(tmp_path: pathlib.
     assert manifest.joined_files == tuple(_joined_file(source) for source in given)
     assert [file['source'] for file in written['joined_files']] == [source.name for source in given]
     assert json.loads(schema.metadata[b'joined_files']) == written['joined_files']
+    # transcripts has the columns that the files give by transcript, after the annotation's, and the manifest lists
+    # those of a file that the run did not join.
+    by_transcript = pq.read_schema(tmp_path / 'out' / 'transcripts.parquet')
+    held = [column for source in given for column in source.transcript_columns]
+    assert by_transcript.names == [*annotation_tables.TRANSCRIPTS.names, *held]
+    assert [by_transcript.field(column) for column in held] == [family_tables.TRANSCRIPT.field(c) for c in held]
+    assert manifest.transcripts_omitted_columns == tuple(c for c in _JOINED_TRANSCRIPT_COLUMNS if c not in held)
+    assert json.loads(by_transcript.metadata[b'joined_files']) == written['joined_files']
+    # A row has the values of its allele and its transcript, which the files write without its version.
+    for row in _rows(tmp_path / 'out' / 'transcripts.parquet'):
+        assert row['transcript_id'] == 'ENST01.1'
+        for source in given:
+            values = _JOINED_TRANSCRIPTS.get(source.name, {}).get(
+                (row['variant_id'], 'ENST01'), dict.fromkeys(source.transcript_columns)
+            )
+            assert {column: row[column] for column in source.transcript_columns} == values
+
+
+def _add_transcripts(union: pathlib.Path, rows: Sequence[tuple[str, str, str]]) -> None:
+    """Adds rows to the union's transcripts: an allele, a transcript's id and the source of its gene model."""
+    added = []
+    for vid, transcript, source in rows:
+        chrom, pos, _ref, _alt = vid.split('-')
+        added.append(
+            {
+                'chrom': chrom,
+                'pos': int(pos),
+                'variant_id': vid,
+                'transcript_id': transcript,
+                'source': source,
+                'consequences': ['intron_variant'],
+                'worst_consequence': 'intron_variant',
+                'is_mane_select': source == 'RefSeq',
+                'is_canonical': False,
+            }
+        )
+    pq.write_table(
+        pa.Table.from_pylist(added, schema=annotation_tables.TRANSCRIPTS), union / 'transcripts' / 'added.parquet'
+    )
+
+
+def test_a_value_by_transcript_is_on_the_row_of_ensembls_transcript_whatever_its_version(
+    tmp_path: pathlib.Path,
+) -> None:
+    inputs = _inputs(tmp_path)
+    # The second allele has values for ENST01 and the first for ENST09. Beside the row of ENST01.1 that each allele
+    # has, the second gets a row of RefSeq's and one of another Ensembl transcript, and the first rows of ENST09 in
+    # another version and of a transcript whose id only starts with ENST09.
+    _add_transcripts(
+        inputs['annotation'],
+        [
+            (_ALLELES[1], 'NM_01.4', 'RefSeq'),
+            (_ALLELES[1], 'ENST02.3', 'Ensembl'),
+            (_ALLELES[0], 'ENST09.12', 'Ensembl'),
+            (_ALLELES[0], 'ENST090.1', 'Ensembl'),
+        ],
+    )
+    family_tables.assemble(**inputs)
+    rows = _rows(tmp_path / 'out' / 'transcripts.parquet')
+    assert len(rows) == len(_ALLELES) + 4
+    held = {
+        (row['variant_id'], row['transcript_id']): (row['mcr_oe'], row['mcr_regions'], row['mpc'])
+        for row in rows
+        if row['mcr_oe'] is not None or row['mpc'] is not None
+    }
+    assert held == {
+        (_ALLELES[0], 'ENST09.12'): (_float32(0.6), 1, None),
+        (_ALLELES[1], 'ENST01.1'): (_float32(0.25), 3, _float32(2.75)),
+        (_ALLELES[3], 'ENST01.1'): (None, None, _float32(0.5)),
+    }
+    # The p-value keeps its 64 bits.
+    assert {row['mcr_oe_p'] for row in rows} == {None, 0.04, 7e-256}
+    # The rows are still in the order of the alleles and of the transcripts' ids.
+    assert [(row['variant_id'], row['transcript_id']) for row in rows[:5]] == [
+        (_ALLELES[0], 'ENST01.1'),
+        (_ALLELES[0], 'ENST09.12'),
+        (_ALLELES[0], 'ENST090.1'),
+        (_ALLELES[1], 'ENST01.1'),
+        (_ALLELES[1], 'ENST02.3'),
+    ]
 
 
 def test_a_run_without_the_joined_files_writes_the_other_columns_as_a_run_with_them(tmp_path: pathlib.Path) -> None:
@@ -2068,13 +2194,14 @@ def test_a_run_without_the_joined_files_writes_the_other_columns_as_a_run_with_t
         (tmp_path / run).mkdir()
     family_tables.assemble(**_inputs(tmp_path / 'with'))
     family_tables.assemble(**_inputs(tmp_path / 'without', joined=()))
-    with_files = _rows(tmp_path / 'with' / 'out' / 'variants.parquet')
-    assert [{name: value for name, value in row.items() if name not in _JOINED_COLUMNS} for row in with_files] == _rows(
-        tmp_path / 'without' / 'out' / 'variants.parquet'
-    )
+    for table, joined in (('variants', _JOINED_COLUMNS), ('transcripts', _JOINED_TRANSCRIPT_COLUMNS)):
+        with_files = _rows(tmp_path / 'with' / 'out' / f'{table}.parquet')
+        assert [{name: value for name, value in row.items() if name not in joined} for row in with_files] == _rows(
+            tmp_path / 'without' / 'out' / f'{table}.parquet'
+        )
 
 
 def test_a_sample_cannot_take_the_name_of_a_joined_column_whatever_the_run_joins() -> None:
-    for column in ('gnomad_mito_af_hom', 'GENCODE_POLYA_SIGNAL', 'aparent2_min'):
+    for column in ('gnomad_mito_af_hom', 'GENCODE_POLYA_SIGNAL', 'aparent2_min', 'mcr_oe_min', 'MPC_MAX'):
         with pytest.raises(ValueError, match=f'the VCF sample {column!r} would share the column name'):
             family_tables.check_column_names(['S1', column])
