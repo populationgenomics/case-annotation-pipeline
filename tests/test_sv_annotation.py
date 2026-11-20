@@ -240,8 +240,16 @@ def _transcripts() -> list[dict[str, Any]]:
         transcript('ENST02.1', 'Ensembl', 'GENEB', 'ENSG02', 'copy_number_decrease', 'transcript_ablation',
                    completeOverlap=True, isCanonical=True),
         transcript('ENST01.1', 'Ensembl', 'GENEA', 'ENSG01', 'unidirectional_gene_fusion', 'intron_variant',
-                   introns='1/4', bioType='lncRNA', geneFusions=[{'hgnc': 'GENEC'}]),
+                   introns='1/4', bioType='lncRNA', geneFusions=_fusions()),
     ]  # fmt: skip
+
+
+def _fusions() -> list[dict[str, Any]]:
+    partner = invented.fusion_partner
+    return [
+        partner('ENST09.1', 'GENEC', intron='4/17', isImprecise=True, isCanonical=True, proteinId='ENSP09.1'),
+        partner('ENST08.1', 'GENEB', exon='2/5', inFrame=True),
+    ]
 
 
 def test_each_transcript_gives_a_row_with_what_tells_how_the_variant_hits_it() -> None:
@@ -276,10 +284,149 @@ def test_each_transcript_gives_a_row_with_what_tells_how_the_variant_hits_it() -
     assert coding['consequences'] == ['feature_truncation', 'exon_variant', 'intron_variant']
     assert whole['consequences'] == ['transcript_ablation', 'copy_number_decrease']
     assert fused['consequences'] == ['unidirectional_gene_fusion', 'intron_variant']
-    # The table has no column of the fields that are left out: the coding position, the impact, the fusion, the HGVS.
+    # Only a transcript with a gene fusion has partners.
+    assert (fused['fusion_partners'] is not None, whole['fusion_partners'], coding['fusion_partners']) == (
+        True,
+        None,
+        None,
+    )
+    # The table has no column of the fields that are left out: the coding position, the impact, the transcript's HGVS.
     assert not {'cds_pos', 'impact', 'hgvsc'} & set(sv_annotation.SV_TRANSCRIPTS.names)
     assert all(set(r) == set(sv_annotation.TRANSCRIPT_COLUMNS.names) for r in rows)
     pa.Table.from_pylist(rows, schema=sv_annotation.TRANSCRIPT_COLUMNS)
+
+
+def _fused(partners: object) -> list[dict[str, Any]] | None:
+    transcript = invented.transcript('ENST01.1', 'Ensembl', 'GENEA', 'ENSG01', 'intron_variant', geneFusions=partners)
+    _, (row,) = _rows(invented.position(_BREAKEND, {'transcripts': [transcript]}))
+    return row['fusion_partners']
+
+
+def test_the_partners_of_a_gene_fusion_are_copied_as_the_annotator_gives_them() -> None:
+    given = _fusions()
+    exonic, intronic = partners = _fused(given) or []
+    # By partner transcript, whatever order the Annotator gave them in, and an entry that it repeats once.
+    assert [p['transcript_id'] for p in partners] == ['ENST08.1', 'ENST09.1']
+    assert _fused(given[::-1]) == partners
+    assert _fused([*given, dict(given[0])]) == partners
+    by_id = {entry['transcript']: entry for entry in given}
+    for partner in partners:
+        entry = by_id[partner['transcript_id']]
+        assert (partner['gene_symbol'], partner['directionality'], partner['hgvsr']) == (
+            entry['hgnc'],
+            entry['directionality'],
+            entry['hgvsr'],
+        )
+        assert (partner['exon'], partner['intron']) == (entry.get('exon'), entry.get('intron'))
+        assert partner['hgnc_id'] == invented.HGNC[entry['hgnc']]
+        assert set(partner) == {field.name for field in sv_annotation.FUSION_PARTNER}
+    # The partner's place is its exon or its intron, and a flag that the Annotator does not write is false.
+    assert (exonic['exon'], exonic['intron'], exonic['in_frame'], exonic['imprecise']) == ('2/5', None, True, False)
+    assert (intronic['exon'], intronic['intron'], intronic['in_frame'], intronic['imprecise']) == (
+        None,
+        '4/17',
+        False,
+        True,
+    )
+    # A transcript without a fusion has no list, and neither has one with an empty list.
+    assert _fused([]) is None
+    pa.array([partners, None], type=sv_annotation.TRANSCRIPT_COLUMNS.field('fusion_partners').type)
+
+
+_WHOLE = {'completeOverlap': True}
+_IN_INTRON = {'introns': '2/8'}
+# Each kind of record with invented transcripts of two invented genes: of GENEA those that no breakpoint falls inside,
+# because the record covers them whole or lies beside them, and of GENEC those that an end of the record falls into.
+BREAKPOINTS: dict[str, tuple[sv_sites.Site, list[dict[str, Any]], list[dict[str, Any]]]] = {
+    'a deletion': (
+        _DELETION,
+        [invented.transcript('ENST01.1', 'Ensembl', 'GENEA', 'ENSG01', 'transcript_ablation', **_WHOLE)],
+        [invented.transcript('ENST09.1', 'Ensembl', 'GENEC', 'ENSG09', 'feature_truncation', 'exon_variant',
+                             exons='1-2/9', introns='1/8', cdnaPos='1-200/3000')],
+    ),
+    'a tandem duplication': (
+        _DUPLICATION,
+        [invented.transcript('ENST01.1', 'Ensembl', 'GENEA', 'ENSG01', 'transcript_amplification', **_WHOLE)],
+        [invented.transcript('ENST09.1', 'Ensembl', 'GENEC', 'ENSG09', 'feature_elongation', 'intron_variant',
+                             **_IN_INTRON)],
+    ),
+    'a copy-number loss': (
+        _LOSS,
+        [invented.transcript('ENST01.1', 'Ensembl', 'GENEA', 'ENSG01', 'copy_number_decrease', 'transcript_ablation',
+                             **_WHOLE)],
+        [invented.transcript('ENST09.1', 'Ensembl', 'GENEC', 'ENSG09', 'copy_number_decrease', 'feature_truncation',
+                             'intron_variant', **_IN_INTRON)],
+    ),
+    'a copy-number gain': (
+        _GAIN,
+        [invented.transcript('ENST01.1', 'Ensembl', 'GENEA', 'ENSG01', 'copy_number_increase',
+                             'transcript_amplification', **_WHOLE)],
+        [invented.transcript('ENST09.1', 'Ensembl', 'GENEC', 'ENSG09', 'copy_number_increase',
+                             'five_prime_duplicated_transcript', 'intron_variant', **_IN_INTRON)],
+    ),
+    'an inversion': (
+        _INVERSION,
+        [invented.transcript('ENST01.1', 'Ensembl', 'GENEA', 'ENSG01', 'structural_variant', **_WHOLE)],
+        [invented.transcript('ENST09.1', 'Ensembl', 'GENEC', 'ENSG09', 'intron_variant', **_IN_INTRON)],
+    ),
+    # A deletion written as a sequence has the term of an ablation without the flag, and transcripts beside it.
+    'a deletion written as a sequence': (
+        _LONG,
+        [invented.transcript('ENST01.1', 'Ensembl', 'GENEA', 'ENSG01', 'transcript_ablation'),
+         invented.transcript('ENST01.2', 'Ensembl', 'GENEA', 'ENSG01', 'upstream_gene_variant')],
+        [invented.transcript('ENST09.1', 'Ensembl', 'GENEC', 'ENSG09', 'feature_truncation', 'intron_variant',
+                             **_IN_INTRON)],
+    ),
+    # An insertion and a breakend are annotated at one position, which no transcript lies wholly inside.
+    'an insertion': (
+        _INSERTION,
+        [],
+        [invented.transcript('ENST09.1', 'Ensembl', 'GENEC', 'ENSG09', 'feature_elongation', 'intron_variant',
+                             **_IN_INTRON)],
+    ),
+    'a breakend': (
+        _BREAKEND,
+        [],
+        [invented.transcript('ENST09.1', 'Ensembl', 'GENEC', 'ENSG09', 'intron_variant', 'unidirectional_gene_fusion',
+                             geneFusions=[invented.fusion_partner('ENST01.1', 'GENEA', intron='1/4')], **_IN_INTRON),
+         invented.transcript('ENST09.2', 'Ensembl', 'GENEC', 'ENSG09', 'exon_variant', exons='3/9',
+                             cdnaPos='591/3217')],
+    ),
+    'a record annotated as a small variant': (
+        _SHORT,
+        [invented.transcript('ENST01.1', 'Ensembl', 'GENEA', 'ENSG01', 'downstream_gene_variant')],
+        [invented.transcript('ENST09.1', 'Ensembl', 'GENEC', 'ENSG09', 'intron_variant', **_IN_INTRON)],
+    ),
+}  # fmt: skip
+
+
+@pytest.mark.parametrize('case', BREAKPOINTS)
+def test_a_breakpoint_gene_has_a_transcript_that_an_end_of_the_record_falls_into(case: str) -> None:
+    site, outside, inside = BREAKPOINTS[case]
+    whole_or_beside, cut = invented.HGNC['GENEA'], invented.HGNC['GENEC']
+    row = _row(invented.position(site, {'transcripts': [*outside, *inside]}))
+    assert row['hgnc_ids'] == ([whole_or_beside, cut] if outside else [cut])
+    assert row['breakpoint_hgnc_ids'] == [cut]
+    # The same genes whichever way round the Annotator lists the transcripts.
+    assert _row(invented.position(site, {'transcripts': [*outside, *inside][::-1]})) == row
+    # A record without such a gene has no list, and not an empty one.
+    for transcripts in (outside, []):
+        assert _row(invented.position(site, {'transcripts': transcripts}))['breakpoint_hgnc_ids'] is None
+    pa.Table.from_pylist([row], schema=sv_annotation.SV)
+
+
+def test_a_gene_is_a_breakpoint_gene_by_any_of_its_transcripts_and_only_with_an_hgnc_id() -> None:
+    transcript = invented.transcript
+    whole = transcript('ENST01.1', 'Ensembl', 'GENEA', 'ENSG01', 'structural_variant', **_WHOLE)
+    longer = transcript('ENST01.2', 'Ensembl', 'GENEA', 'ENSG01', 'intron_variant', **_IN_INTRON)
+    unnamed = transcript('ENST02.1', 'Ensembl', 'GENEB', 'ENSG02', 'intron_variant', **_IN_INTRON)
+    # An end of the inversion falls into the longer transcript of GENEA, beyond the one that lies wholly inside.
+    row = _row(invented.position(_INVERSION, {'transcripts': [whole, longer]}))
+    assert row['breakpoint_hgnc_ids'] == [invented.HGNC['GENEA']]
+    # GENEB has no HGNC id, so neither list holds it.
+    row = _row(invented.position(_INVERSION, {'transcripts': [whole, unnamed]}))
+    assert (row['hgnc_ids'], row['breakpoint_hgnc_ids']) == ([invented.HGNC['GENEA']], None)
+    assert sv_annotation.COLUMNS.field('breakpoint_hgnc_ids').type == sv_annotation.COLUMNS.field('hgnc_ids').type
 
 
 def test_a_site_has_the_hgnc_ids_of_the_genes_of_its_transcripts() -> None:
@@ -303,7 +450,7 @@ def test_the_transcripts_table_has_the_columns_it_shares_with_a_small_variants_u
     assert all(small[name].equals(larger[name]) for name in shared)
     # They stand in the same order in both, and a structural variant's own fields are the others.
     assert [name for name in larger if name in small] == shared
-    assert [name for name in larger if name not in small] == ['variant_type', 'complete_overlap']
+    assert [name for name in larger if name not in small] == ['variant_type', 'complete_overlap', 'fusion_partners']
 
 
 def test_the_rows_do_not_depend_on_the_order_of_transcripts_entries_or_terms() -> None:
@@ -315,6 +462,7 @@ def test_the_rows_do_not_depend_on_the_order_of_transcripts_entries_or_terms() -
         transcripts = transcripts[turn:] + transcripts[:turn]
         for held in transcripts:
             held['consequence'].reverse()
+            held.get('geneFusions', []).reverse()
         turned = entries[turn:] + entries[:turn]
         assert _rows(invented.position(_DELETION, {'transcripts': transcripts}, gnomad=turned[::-1])) == expected
 
@@ -336,8 +484,8 @@ def test_the_sources_that_are_left_out_are_known_and_give_no_column() -> None:
     }
     row, _, on_position, _ = sv_annotation.position_rows(invented.position(_DELETION, **held), _BY_ID, invented.HGNC)
     assert on_position == set(held)
-    own = {'site_id', 'chrom', 'pos', 'variant_type', 'annotated_as', 'annotated_pos', 'annotated_end_pos', 'hgnc_ids'}
-    assert set(row) == own
+    own = {'site_id', 'chrom', 'pos', 'variant_type', 'annotated_as', 'annotated_pos', 'annotated_end_pos'}
+    assert set(row) == own | {'hgnc_ids', 'breakpoint_hgnc_ids'}
     assert not any(name.startswith(('decipher', 'clingen', 'mitomap')) for name in sv_annotation.COLUMNS.names)
 
 
@@ -357,11 +505,16 @@ def test_a_record_of_two_alleles_keeps_each_alleles_matches_and_no_summary() -> 
     assert [m['id'] for m in merged['gnomad_sv_matches']] == ['g-loss', 'g-gain']
     assert [r['accession'] for r in merged['clinvar_records']] == ['VCV-loss']
     assert (merged['annotated_as'], merged['annotated_pos'], merged['annotated_end_pos']) == ('structural', 1000, 5000)
-    assert set(merged) == {'annotated_as', 'annotated_pos', 'annotated_end_pos', 'hgnc_ids', *sv_annotation.LISTS}
-    # The genes are those of either allele's transcripts, each once.
-    named = [loss | {'hgnc_ids': [90002, 90001]}, gain | {'hgnc_ids': [90001, 90003]}]
-    assert sv_annotation.record_of_alleles(named)['hgnc_ids'] == [90001, 90002, 90003]
-    assert merged['hgnc_ids'] is None
+    genes = {'hgnc_ids', 'breakpoint_hgnc_ids'}
+    assert set(merged) == {'annotated_as', 'annotated_pos', 'annotated_end_pos', *genes, *sv_annotation.LISTS}
+    # The genes are those of either allele's transcripts, each once, and so are those that hold a breakpoint.
+    named = [
+        loss | {'hgnc_ids': [90002, 90001], 'breakpoint_hgnc_ids': [90002]},
+        gain | {'hgnc_ids': [90001, 90003], 'breakpoint_hgnc_ids': [90003, 90002]},
+    ]
+    both = sv_annotation.record_of_alleles(named)
+    assert (both['hgnc_ids'], both['breakpoint_hgnc_ids']) == ([90001, 90002, 90003], [90002, 90003])
+    assert (merged['hgnc_ids'], merged['breakpoint_hgnc_ids']) == (None, None)
     # Alleles without a match leave no list, and alleles of other intervals no interval.
     unmatched = [_row(invented.position(site)) | {'gnomad_sv_matches': None} for site in (_LOSS, _DUPLICATION)]
     plain = sv_annotation.record_of_alleles(unmatched)
@@ -383,6 +536,18 @@ def _without(site: sv_sites.Site, key: str) -> dict[str, Any]:
 
 def _gnomad(**extra: object) -> list[dict[str, Any]]:
     return [invented.gnomad_entry('g-1', 1001, 5000, 'deletion', 0.1, **extra)]
+
+
+def _partner(*without: str) -> dict[str, Any]:
+    """A fusion partner that the conversion accepts, without the keys given."""
+    partner = invented.fusion_partner('ENST09.1', 'GENEC', intron='4/17')
+    return {key: value for key, value in partner.items() if key not in without}
+
+
+def _fusing(partners: object) -> dict[str, Any]:
+    """A breakend in a transcript with the gene fusions given."""
+    transcript = invented.transcript('T1', 'Ensembl', 'GENEA', 'E', 'intron_variant', geneFusions=partners)
+    return _with(_BREAKEND, {'transcripts': [transcript]})
 
 
 _OVERLAP = invented.overlaps(1.0)
@@ -469,6 +634,31 @@ POSITIONS_REFUSED: dict[str, tuple[Callable[[], dict[str, Any]], str]] = {
     'a transcript without its id': (
         lambda: _with(_DELETION, {'transcripts': [{'source': 'Ensembl', 'consequence': ['intron_variant']}]}),
         'no transcript',
+    ),
+    'gene fusions that are no list': (
+        lambda: _fusing({'transcript': 'ENST09.1'}),
+        'the transcript T1: geneFusions: not a list of entries',
+    ),
+    'a fusion partner without its transcript': (
+        lambda: _fusing([_partner('transcript')]),
+        'the transcript T1: a fusion partner: no transcript',
+    ),
+    'a fusion partner without its gene': (lambda: _fusing([_partner('hgnc')]), 'the fusion partner ENST09.1: no hgnc'),
+    'a fusion partner of a gene that the genes section lacks': (
+        lambda: _fusing([_partner() | {'hgnc': 'GENEX'}]),
+        "the fusion partner ENST09.1: the genes section lacks 'GENEX', its gene",
+    ),
+    'a fusion partner without its exon or intron': (
+        lambda: _fusing([_partner('intron')]),
+        'the fusion partner ENST09.1: neither exon nor intron',
+    ),
+    'a fusion partner without its directionality': (
+        lambda: _fusing([_partner('directionality')]),
+        'the fusion partner ENST09.1: no directionality',
+    ),
+    'a fusion partner without its HGVS name': (
+        lambda: _fusing([_partner('hgvsr')]),
+        'the fusion partner ENST09.1: no hgvsr',
     ),
     'entries that are no list': (lambda: _with(_DELETION, gnomad={'allAf': 0.1}), 'gnomad: not a list of entries'),
     'a gnomAD entry without its overlaps on a deletion': (
@@ -596,6 +786,40 @@ def test_the_union_converts_into_its_two_tables(tmp_path: pathlib.Path) -> None:
     assert con.sql('SELECT site_id FROM sv WHERE gnomad_sv_id IS NOT NULL').fetchall() == [(_DELETION.site_id,)]
     assert con.sql('SELECT * FROM sv').to_arrow_table().schema.names == sv_annotation.SV.names
     assert con.sql('SELECT * FROM transcripts').to_arrow_table().schema.names == sv_annotation.SV_TRANSCRIPTS.names
+
+
+# The rule of breakpoint_hgnc_ids as a reader of the tables writes it, which docs/family-tables.md gives.
+_BREAKPOINT_GENES = """
+    SELECT site_id, list_sort(list(DISTINCT hgnc_id)) AS breakpoint_hgnc_ids
+    FROM transcripts
+    WHERE NOT complete_overlap
+      AND NOT list_has_any(consequences, ['transcript_ablation', 'transcript_amplification',
+                                          'upstream_gene_variant', 'downstream_gene_variant'])
+      AND hgnc_id IS NOT NULL
+    GROUP BY site_id
+"""
+
+
+def test_the_tables_hold_the_breakpoint_genes_that_their_transcripts_give_and_the_fusion_partners(
+    tmp_path: pathlib.Path,
+) -> None:
+    listed = {site.site_id: [*outside, *inside] for site, outside, inside in BREAKPOINTS.values()}
+    positions = [invented.position(site, {'transcripts': listed.get(site.site_id, [])}) for site in _SITES]
+    _convert(tmp_path, {'header': invented.header(), 'positions': positions})
+    con = duckdb.connect()
+    con.read_parquet(str(tmp_path / 'tables' / 'sv' / '*.parquet')).create_view('sv')
+    con.read_parquet(str(tmp_path / 'tables' / 'sv_transcripts' / '*.parquet')).create_view('transcripts')
+    held = dict(con.sql('SELECT site_id, breakpoint_hgnc_ids FROM sv WHERE breakpoint_hgnc_ids IS NOT NULL').fetchall())
+    assert held == dict(con.sql(_BREAKPOINT_GENES).fetchall())
+    assert held == {site_id: [invented.HGNC['GENEC']] for site_id in listed}
+    # A site without such a gene has a null, and no table holds an empty list.
+    assert con.sql('SELECT count(*) FROM sv WHERE breakpoint_hgnc_ids IS NULL').fetchall() == [(1,)]
+    assert con.sql('SELECT count(*) FROM transcripts WHERE len(fusion_partners) = 0').fetchall() == [(0,)]
+    partners = con.sql(
+        'SELECT t.site_id, t.gene_symbol, p.gene_symbol, p.hgnc_id, p.intron, p.in_frame '
+        'FROM transcripts t, unnest(t.fusion_partners) AS u(p)'
+    ).fetchall()
+    assert partners == [(_BREAKEND.site_id, 'GENEC', 'GENEA', invented.HGNC['GENEA'], '1/4', False)]
 
 
 def test_the_command_writes_the_tables_and_what_annotated_them(tmp_path: pathlib.Path) -> None:

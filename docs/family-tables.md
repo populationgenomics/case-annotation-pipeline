@@ -465,6 +465,7 @@ erDiagram
         string small_variant_id FK "the same allele in variants"
         string annotated_as "structural or small_variant"
         list hgnc_ids "of every gene it touches"
+        list breakpoint_hgnc_ids "of every gene a breakpoint falls inside"
         float gnomad_sv_af "the best gnomAD match"
         float gnomad_sv_max_af "over all its matches"
         list gnomad_sv_matches "every match"
@@ -484,6 +485,7 @@ erDiagram
         bool complete_overlap
         string exon
         string protein_pos
+        list fusion_partners "the Annotator's gene fusions"
         bool is_mane_select
     }
     sv_call {
@@ -592,7 +594,8 @@ columns, and this section how to read them.
 `hgnc_ids` names the record's genes as it names an allele's in `variants`: it holds the HGNC id of each gene that one of
 the record's transcripts belongs to. The deletion in `EXMPL1` has `[99901]`, and a deletion of 2 Mb has the id of every
 gene in it. A record that touches no transcript has no list, and neither has one that lies only in genes without an HGNC
-id ([A gene without an HGNC id](#a-gene-without-an-hgnc-id)).
+id ([A gene without an HGNC id](#a-gene-without-an-hgnc-id)). `breakpoint_hgnc_ids` holds those of the record's genes
+that one of its breakpoints falls inside ([A breakpoint inside a gene](#a-breakpoint-inside-a-gene)).
 
 A small variant is found in a database by its position and alleles. A structural variant rarely has an exact
 counterpart, because two callers seldom place the same deletion at the same two bases. The Annotator therefore reports
@@ -635,9 +638,9 @@ The other columns of the annotation follow from the same matching:
   instead gnomAD's values of the allele itself in `gnomad_genomes_` and `gnomad_exomes_` and ClinVar's records of the
   allele itself, as a row of `variants` has. Where the record names a row of `variants`, that row has the scores too.
 - A segment that one member loses and another gains (`sv_type` `CNV`) has two alleles. Its lists hold the matches of
-  both, each with its `variant_type`, and its `hgnc_ids` the genes of both. Its best match and `gnomad_sv_max_af` are
-  empty, because either would be that of one allele. So are its `onekg_sv_` and `gnomad_cnv_` columns, which are best
-  matches without a list: the table does not say what those two sources hold on such a segment.
+  both, each with its `variant_type`, and its `hgnc_ids` and `breakpoint_hgnc_ids` the genes of both. Its best match and
+  `gnomad_sv_max_af` are empty, because either would be that of one allele. So are its `onekg_sv_` and `gnomad_cnv_`
+  columns, which are best matches without a list: the table does not say what those two sources hold on such a segment.
 - `annotated_pos` and `annotated_end_pos` give the interval the Annotator annotated. It equals `pos` and `end_pos`
   except where the Annotator trimmed or left-aligned an allele written as a sequence.
 
@@ -664,15 +667,130 @@ say that the variant damages the transcript, and the fields above do. That is al
 `worst_consequence`: Illumina's impact is `high` for about six rows in ten, and the severity order puts an intronic
 `feature_truncation` above a missense variant.
 
-The table leaves three more things out. The coding position is not stable: two runs of the Annotator over the same
-records give it for different rows, while `protein_pos` is the same in both. The HGVS names spell out the inserted or
-deleted sequence. The partners of a gene fusion are mostly neighbouring genes that a deletion joins, and the term
-`unidirectional_gene_fusion` stays in `consequences` for a reader who wants to look at such a record.
+The table leaves two more things out. The coding position is not stable: two runs of the Annotator over the same records
+give it for different rows, while `protein_pos` is the same in both. The transcript's HGVS names spell out the inserted
+or deleted sequence. The table does keep the partners of a gene fusion, in `fusion_partners`
+([A breakpoint inside a gene](#a-breakpoint-inside-a-gene)). Most records with a fusion are breakends, and the partner
+of a breakend's transcript is a gene at the mate's place, which is in none of the breakend's own rows.
 
 `is_mane_select` is true on RefSeq transcripts only, as in `transcripts`, so a query for the MANE Select transcript of a
 gene reads a row with NCBI's `gene_id`; the row's `gene_symbol` and `hgnc_id` are the ones that the gene's Ensembl
 transcripts have too. `variant_type` is the Annotator's type of the allele, such as `deletion` or `copy_number_loss`,
 and it tells the two alleles of a `CNV` segment apart: such a record has rows of both types.
+
+### A breakpoint inside a gene
+
+A breakpoint is a place where a record ends or joins another place: each end of a deletion, a duplication, an inversion
+or a copy number segment, the place of an insertion, and the position of a breakend. A gene with a breakpoint inside it
+is cut there. Two reading rules tell such a gene from one that the record covers whole, and both follow from how the
+Annotator lists transcripts:
+
+1. For a record with an extent, a transcript that lies wholly inside the interval has `complete_overlap` true and no
+   exon, intron or position. A transcript that an end of the interval falls into has `complete_overlap` false, and
+   `intron`, `exon` or both for the part of it that the record covers. A transcript wholly inside an inversion has the
+   single term `structural_variant`.
+1. A breakend is annotated as the one base at its position, so `annotated_pos` and `annotated_end_pos` both equal `pos`.
+   Each of its rows is therefore of a transcript that holds the breakpoint, with the `intron` or the `exon` it lies in.
+   An insertion is annotated at one place in the same way.
+
+The flag alone does not cover a record written as a sequence. A deletion written as a sequence that takes a whole
+transcript has the term `transcript_ablation` without the flag, and `transcript_amplification` is the same term for a
+gain. Such a record also has rows of transcripts that it lies beside. So a breakpoint of the record falls inside the
+transcript of a row where all of this holds:
+
+```sql
+NOT complete_overlap
+AND NOT list_has_any(consequences, ['transcript_ablation', 'transcript_amplification',
+                                    'upstream_gene_variant', 'downstream_gene_variant'])
+```
+
+`breakpoint_hgnc_ids` in `sv` applies that condition for the reader. It holds the HGNC id of each gene with such a row,
+sorted and each once, and a record without such a gene has no list, not an empty one. A gene is listed by any one of its
+transcripts, also where the record covers a shorter transcript of the gene whole. What the list says depends on the
+record:
+
+| Record                                             | `breakpoint_hgnc_ids` holds the genes                                                                                         |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| a deletion, a duplication or a copy number segment | that the record covers only in part: one end of its interval lies inside the gene, or both ends                               |
+| an inversion                                       | that an end of the inverted interval lies inside. A gene wholly inside the inversion is turned around whole and is not listed |
+| an insertion                                       | that hold the place of the insertion                                                                                          |
+| a breakend                                         | that hold its position. The genes at the other side of the junction are on the row of the mate, whose id is in `mate_id`      |
+| a record annotated as a small variant              | that the allele lies in, without the genes it lies beside                                                                     |
+
+For a breakend and for an insertion written as `<INS>` the list equals `hgnc_ids` in the output seen so far, because
+every row of such a record is of a transcript that holds its position. The list says where the ends of a record lie and
+not what the record does to the gene: a deletion within one intron lists its gene as a deletion of the first exons does,
+and `exon` and `protein_pos` of the gene's rows say what the record covers. The ends are as certain as the record's own
+(`imprecise`, `cipos` and `ciend`), and the copy-number caller places a segment's ends by the depth. A `CNV` segment of
+two alleles lists the genes of either. A gene without an HGNC id is not in the list, and the condition above finds it by
+`gene_symbol` in `sv_transcripts`.
+
+`fusion_partners` in `sv_transcripts` holds the gene fusions that the Annotator reports for the transcript of a row. The
+Annotator looks for them on a deletion, a tandem duplication, an inversion and a breakend. It reports one where the
+record joins the row's transcript to a transcript of another gene, of the same source and in the same orientation, and
+the row then has the term `unidirectional_gene_fusion`. The column has one entry for each partner transcript, copied as
+the Annotator gives it, and a row without a fusion has no list:
+
+| Field of an entry                         | Holds                                                                                                                                       |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `transcript_id`, `gene_symbol`, `hgnc_id` | the partner transcript and its gene, in the fields that a row has for its own                                                               |
+| `exon` or `intron`                        | the partner's exon or intron that holds the junction, out of the transcript's, such as `4/17`                                               |
+| `in_frame`                                | true where the Annotator predicts that the joined transcript keeps the reading frame, and false where it does not say so                    |
+| `imprecise`                               | true where the Annotator marks the fusion as imprecise, which Illumina's pages do not define                                                |
+| `directionality`                          | the Annotator's word for the orientation of the two transcripts: `unidirectional`, since the workflow does not set the option for any other |
+| `hgvsr`                                   | the Annotator's HGVS name of the joined RNA, with both transcripts in it                                                                    |
+
+An entry is the Annotator's prediction from the record's coordinates, so it does not show that a cell makes the joined
+transcript. A gene with many transcripts gives many entries, so a query groups them by gene. The partner's own row is in
+the same table: under the same record where the record has an extent, and under the mate's record for a breakend.
+
+Suppose `family-a` has two more invented records. The inversion `EX:INV:7` on chromosome 2 starts in intron 2 of
+`EXMPL1` and holds the gene `EXMPL2` whole. The breakend `EX:BND:3:0` on chromosome 2 lies in intron 5 of `EXMPL3`, and
+its mate `EX:BND:3:1` on chromosome 10 in intron 1 of `EXMPL4`. With one invented transcript for each gene,
+`sv_transcripts` has four rows for them:
+
+| `sv_id`      | `gene_symbol` | `complete_overlap` | `intron` | `consequences`                                 | `fusion_partners`             |
+| ------------ | ------------- | ------------------ | -------- | ---------------------------------------------- | ----------------------------- |
+| `EX:INV:7`   | `EXMPL1`      | false              | `2/8`    | `[intron_variant]`                             |                               |
+| `EX:INV:7`   | `EXMPL2`      | true               |          | `[structural_variant]`                         |                               |
+| `EX:BND:3:0` | `EXMPL3`      | false              | `5/11`   | `[unidirectional_gene_fusion, intron_variant]` | one entry, `EXMPL4` in `1/6`  |
+| `EX:BND:3:1` | `EXMPL4`      | false              | `1/6`    | `[unidirectional_gene_fusion, intron_variant]` | one entry, `EXMPL3` in `5/11` |
+
+In `sv` the inversion has the `hgnc_ids` `[99901, 99902]` and the `breakpoint_hgnc_ids` `[99901]`, and each breakend has
+its one gene in both lists. The first query finds the records with a breakpoint inside a gene, on the connection of
+[Setup](#setup):
+
+```python
+cutting_a_gene = con.sql(
+    """
+    SELECT sv_id, sv_type, chrom, pos, end_pos, mate_chrom, mate_pos, hgnc_ids
+    FROM sv
+    WHERE list_contains(breakpoint_hgnc_ids, $hgnc_id)
+    ORDER BY sv_id
+    """,
+    params={'hgnc_id': 99901},
+).to_arrow_table()
+```
+
+It returns the inversion, with both of its genes in `hgnc_ids`. For 99902, the id of `EXMPL2`, it returns nothing, while
+`list_contains(hgnc_ids, 99902)` finds the inversion. The second query lists the gene fusions of every record, one row
+for each pair of genes:
+
+```python
+gene_fusions = con.sql(
+    """
+    SELECT t.sv_id, t.gene_symbol, t.intron, p.gene_symbol AS partner_gene, p.hgnc_id AS partner_hgnc_id,
+           p.intron AS partner_intron, count(*) AS transcript_pairs, bool_or(p.in_frame) AS in_frame
+    FROM sv_transcripts t
+    CROSS JOIN unnest(t.fusion_partners) AS u(p)
+    GROUP BY ALL
+    ORDER BY t.sv_id
+    """
+).to_arrow_table()
+```
+
+It returns two rows: `EX:BND:3:0` with `EXMPL3` and the partner `EXMPL4`, and `EX:BND:3:1` with the two the other way
+round, each with one pair of transcripts and `in_frame` false.
 
 ## Querying the tables from Python
 

@@ -116,6 +116,20 @@ def transcript(
     }
 
 
+def fusion_partner(transcript_id: str, gene: str, **extra: object) -> dict[str, Any]:
+    """One partner of a gene fusion, as an entry of a transcript's geneFusions; give its exon or its intron."""
+    return {
+        'transcript': transcript_id,
+        'bioType': 'mRNA',
+        'source': 'Ensembl',
+        'geneId': 'ENSG09',
+        'hgnc': gene,
+        'hgvsr': f'{transcript_id}({gene}):r.?_10+5::ENST00.1(GENE):r.20+7_?',
+        'directionality': 'unidirectional',
+        **extra,
+    }
+
+
 def position(found: sv_sites.Site, variant: Mapping[str, Any] | None = None, /, **sources: object) -> dict[str, Any]:
     """The position line of a site, with the sources given on it and the variant's keys given on its variant."""
     structural = is_structural(found)
