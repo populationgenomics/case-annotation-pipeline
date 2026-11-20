@@ -107,6 +107,44 @@
       "title": "ArchiveField",
       "type": "object"
     },
+    "ArchiveInfo": {
+      "description": "An echtvar archive that a run read values from, and the echtvar that read it.",
+      "properties": {
+        "archive": {
+          "title": "Archive",
+          "type": "string"
+        },
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "echtvar_version": {
+          "minLength": 1,
+          "title": "Echtvar Version",
+          "type": "string"
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/ArchiveField"
+          },
+          "title": "Fields",
+          "type": "array"
+        }
+      },
+      "required": [
+        "archive",
+        "bytes",
+        "sha256",
+        "echtvar_version",
+        "fields"
+      ],
+      "title": "ArchiveInfo",
+      "type": "object"
+    },
     "Caller": {
       "enum": [
         "sv",
@@ -214,8 +252,32 @@
       "title": "FamilyMember",
       "type": "object"
     },
-    "GnomadJointInfo": {
-      "description": "The echtvar archive the joint values come from, and the echtvar that read it.",
+    "NotesFile": {
+      "description": "The notes on the tables in a family's folder, named as a table's file is (TableFile).",
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "bytes",
+        "sha256"
+      ],
+      "title": "NotesFile",
+      "type": "object"
+    },
+    "NoticedArchiveInfo": {
+      "description": "An archive whose values are under terms that ask for a notice with every copy of them.",
       "properties": {
         "archive": {
           "title": "Archive",
@@ -240,6 +302,10 @@
           },
           "title": "Fields",
           "type": "array"
+        },
+        "terms": {
+          "title": "Terms",
+          "type": "string"
         }
       },
       "required": [
@@ -247,33 +313,10 @@
         "bytes",
         "sha256",
         "echtvar_version",
-        "fields"
+        "fields",
+        "terms"
       ],
-      "title": "GnomadJointInfo",
-      "type": "object"
-    },
-    "NotesFile": {
-      "description": "The notes on the tables in a family's folder, named as a table's file is (TableFile).",
-      "properties": {
-        "path": {
-          "title": "Path",
-          "type": "string"
-        },
-        "bytes": {
-          "title": "Bytes",
-          "type": "integer"
-        },
-        "sha256": {
-          "title": "Sha256",
-          "type": "string"
-        }
-      },
-      "required": [
-        "path",
-        "bytes",
-        "sha256"
-      ],
-      "title": "NotesFile",
+      "title": "NoticedArchiveInfo",
       "type": "object"
     },
     "OmissionReason": {
@@ -422,7 +465,37 @@
       "$ref": "#/$defs/AnnotationInfo"
     },
     "gnomad_joint": {
-      "$ref": "#/$defs/GnomadJointInfo"
+      "$ref": "#/$defs/ArchiveInfo"
+    },
+    "alphagenome_avi": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ArchiveInfo"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "alphagenome_avi_breakdown": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NoticedArchiveInfo"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "alphagenome_splicing": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NoticedArchiveInfo"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "omitted_columns": {
       "items": {
@@ -460,6 +533,9 @@
     "alleles",
     "annotation",
     "gnomad_joint",
+    "alphagenome_avi",
+    "alphagenome_avi_breakdown",
+    "alphagenome_splicing",
     "omitted_columns",
     "sv_annotation",
     "sv_omitted_columns"

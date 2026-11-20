@@ -16,7 +16,7 @@ from typing import Any, Literal
 import pyarrow as pa
 import pydantic.json_schema
 
-from case_annotation import annotation_tables, family_tables, gnomad_joint, pedigree
+from case_annotation import alphagenome_archives, annotation_tables, echtvar_values, family_tables, pedigree
 
 # A family's id, a sample's, a group's and a catalog's: each names files and folders and goes into command lines.
 NAME = pedigree.NAME.pattern
@@ -134,6 +134,11 @@ def _family_tables_workflow() -> dict[str, Any]:
             *(_param(name, 'String') for name in annotator),
             _param('annotated', 'Path'),
             _param('gnomad_joint', 'Path', required=True),
+            *(
+                _param(source.name, 'Path')
+                for source in echtvar_values.SOURCES.values()
+                if source is not echtvar_values.REQUIRED
+            ),
             _param('tools_container', 'String', required=True),
             _param('output_dir', 'String'),
             _param('arGuid', 'String'),
@@ -249,9 +254,10 @@ def tables() -> dict[str, Any]:
     """The columns of each table as its Parquet file declares them (family_tables.TABLES).
 
     A type is the name of an Arrow type, or `list` with its `element`, or `struct` with its `fields`. `nullable` is
-    what the file declares. A column with a `source` holds that dated source's data, and the table of a run that did
-    not name the source lacks the column. `member` is the type of the column that each sequenced member has after the
-    others, named as the member's sample.
+    what the file declares. A column with a `source` holds the data of a source that a run can leave out, and the table
+    of a run that did not name the source lacks the column: a dated source, by its name in a run config, or an echtvar
+    archive that a run need not read, by its param's name. `member` is the type of the column that each sequenced member
+    has after the others, named as the member's sample.
     """
     described = []
     for name, table in family_tables.TABLES.items():
@@ -306,6 +312,28 @@ _EXAMPLE_ARCHIVE: Sequence[tuple[str, str, Literal['Integer', 'Float'], int, int
 )
 
 
+def _example_scores(name: str) -> dict[str, Any]:
+    """An invented record of an archive of one of AlphaGenome's tables, with the fields of the table's configuration."""
+    table = alphagenome_archives.TABLES[name]
+    return {
+        'archive': f'{name}.invented.zip',
+        'bytes': 1_000_000 * len(table.kept),
+        'sha256': f'{len(table.kept) % 16:x}' * 64,
+        'echtvar_version': '0.2.4',
+        'fields': tuple(
+            echtvar_values.ArchiveField(
+                field=field['field'],
+                alias=field['alias'],
+                ftype='Float',
+                multiplier=field['multiplier'],
+                missing_value=field['missing_value'],
+                missing_string='MISSING',
+            )
+            for field in alphagenome_archives.config(table).values()
+        ),
+    }
+
+
 def example_sheet() -> str:
     """An invented families sheet, whose first row is the family of the example manifest."""
     names = [column['name'] for column in families_sheet()['columns']]
@@ -339,7 +367,10 @@ def _example_annotation() -> annotation_tables.AnnotationInfo:
 
 
 def example_manifest() -> family_tables.FamilyManifest:
-    """An invented manifest: a trio with the tables of its larger variants, in a run that did not name dbSNP."""
+    """An invented manifest: a trio with the tables of its larger variants.
+
+    Its run did not name dbSNP, and read AlphaGenome's scores and splicing scores and no breakdown of the scores.
+    """
 
     def member(
         sample: str, father: str | None, mother: str | None, sex: pedigree.Sex, role: family_tables.Role
@@ -380,13 +411,13 @@ def example_manifest() -> family_tables.FamilyManifest:
         sv_callers=('sv', 'cnv'),
         alleles=sizes['variants'],
         annotation=annotation,
-        gnomad_joint=gnomad_joint.GnomadJointInfo(
+        gnomad_joint=echtvar_values.ArchiveInfo(
             archive='gnomad-joint.invented.zip',
             bytes=1_000_000,
             sha256='a' * 64,
             echtvar_version='0.2.4',
             fields=tuple(
-                gnomad_joint.ArchiveField(
+                echtvar_values.ArchiveField(
                     field=field,
                     alias=alias,
                     ftype=ftype,
@@ -397,7 +428,15 @@ def example_manifest() -> family_tables.FamilyManifest:
                 for field, alias, ftype, multiplier, missing_value in _EXAMPLE_ARCHIVE
             ),
         ),
-        omitted_columns=annotation_tables.SOURCE_COLUMNS['dbSNP'],
+        alphagenome_avi=echtvar_values.ArchiveInfo(**_example_scores('alphagenome_avi')),
+        alphagenome_avi_breakdown=None,
+        alphagenome_splicing=echtvar_values.NoticedArchiveInfo(
+            **_example_scores('alphagenome_splicing'), terms=alphagenome_archives.NOTICE
+        ),
+        omitted_columns=(
+            *family_tables.VARIANT_SOURCES['dbSNP'],
+            *family_tables.VARIANT_SOURCES['alphagenome_avi_breakdown'],
+        ),
         sv_annotation=annotation,
         sv_omitted_columns=(),
     )

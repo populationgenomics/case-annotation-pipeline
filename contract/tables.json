@@ -1125,6 +1125,120 @@
           "nullable": true
         },
         {
+          "name": "avi_phred",
+          "type": "float32",
+          "nullable": true,
+          "source": "alphagenome_avi"
+        },
+        {
+          "name": "avi_raw",
+          "type": "float32",
+          "nullable": true,
+          "source": "alphagenome_avi"
+        },
+        {
+          "name": "avi_shap_splicing",
+          "type": "float32",
+          "nullable": true,
+          "source": "alphagenome_avi_breakdown"
+        },
+        {
+          "name": "avi_shap_atac",
+          "type": "float32",
+          "nullable": true,
+          "source": "alphagenome_avi_breakdown"
+        },
+        {
+          "name": "avi_shap_contact_maps",
+          "type": "float32",
+          "nullable": true,
+          "source": "alphagenome_avi_breakdown"
+        },
+        {
+          "name": "avi_shap_dnase",
+          "type": "float32",
+          "nullable": true,
+          "source": "alphagenome_avi_breakdown"
+        },
+        {
+          "name": "avi_shap_chip_tf",
+          "type": "float32",
+          "nullable": true,
+          "source": "alphagenome_avi_breakdown"
+        },
+        {
+          "name": "avi_shap_chip_histone",
+          "type": "float32",
+          "nullable": true,
+          "source": "alphagenome_avi_breakdown"
+        },
+        {
+          "name": "avi_shap_cage",
+          "type": "float32",
+          "nullable": true,
+          "source": "alphagenome_avi_breakdown"
+        },
+        {
+          "name": "avi_shap_procap",
+          "type": "float32",
+          "nullable": true,
+          "source": "alphagenome_avi_breakdown"
+        },
+        {
+          "name": "avi_shap_rna_seq",
+          "type": "float32",
+          "nullable": true,
+          "source": "alphagenome_avi_breakdown"
+        },
+        {
+          "name": "avi_shap_polyadenylation",
+          "type": "float32",
+          "nullable": true,
+          "source": "alphagenome_avi_breakdown"
+        },
+        {
+          "name": "avi_shap_alphamissense",
+          "type": "float32",
+          "nullable": true,
+          "source": "alphagenome_avi_breakdown"
+        },
+        {
+          "name": "avi_shap_cactus_241way",
+          "type": "float32",
+          "nullable": true,
+          "source": "alphagenome_avi_breakdown"
+        },
+        {
+          "name": "avi_shap_protein_termination",
+          "type": "float32",
+          "nullable": true,
+          "source": "alphagenome_avi_breakdown"
+        },
+        {
+          "name": "avi_shap_start_lost",
+          "type": "float32",
+          "nullable": true,
+          "source": "alphagenome_avi_breakdown"
+        },
+        {
+          "name": "avi_shap_stop_lost",
+          "type": "float32",
+          "nullable": true,
+          "source": "alphagenome_avi_breakdown"
+        },
+        {
+          "name": "avi_shap_phastcons_470way",
+          "type": "float32",
+          "nullable": true,
+          "source": "alphagenome_avi_breakdown"
+        },
+        {
+          "name": "alphagenome_splicing",
+          "type": "float32",
+          "nullable": true,
+          "source": "alphagenome_splicing"
+        },
+        {
           "name": "qual",
           "type": "float64",
           "nullable": true

@@ -15,7 +15,8 @@ params {
     proband: String?
     with_sv: Boolean = false
     // What ANNOTATE_FAMILIES takes beside the family: whether the run has the steps of the structural variants, and
-    // its settings. The run reuses an annotation, so it names no source and nothing of the Annotator's.
+    // its settings. The run reuses an annotation, so it names no source and nothing of the Annotator's. It can name
+    // any of the archives of AlphaGenome's scores.
     annotates_sv: Boolean = false
     group: String
     reference: Path
@@ -23,6 +24,9 @@ params {
     annotation_data: Path
     annotated: Path
     gnomad_joint: Path
+    alphagenome_avi: Path?
+    alphagenome_avi_breakdown: Path?
+    alphagenome_splicing: Path?
     // A name to add to the settings, and the name of a setting to give as null, for the runs that ANNOTATE_FAMILIES
     // refuses for them.
     unknown_setting: String?
@@ -45,6 +49,9 @@ workflow {
         license_secret: null,
         annotated: params.annotated,
         gnomad_joint: params.gnomad_joint,
+        alphagenome_avi: params.alphagenome_avi,
+        alphagenome_avi_breakdown: params.alphagenome_avi_breakdown,
+        alphagenome_splicing: params.alphagenome_splicing,
     ]
     families = MADE_FAMILY(params.with_sv).map { vcf, ped, sv -> tuple(params.family, vcf, ped, params.proband, sv, [], []) }
     annotated = ANNOTATE_FAMILIES(

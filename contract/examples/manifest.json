@@ -183,8 +183,66 @@
       }
     ]
   },
+  "alphagenome_avi": {
+    "archive": "alphagenome_avi.invented.zip",
+    "bytes": 2000000,
+    "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "echtvar_version": "0.2.4",
+    "fields": [
+      {
+        "field": "raw_score",
+        "alias": "avi_raw",
+        "ftype": "Float",
+        "multiplier": 1000000,
+        "missing_value": 2139095041,
+        "missing_string": "MISSING"
+      },
+      {
+        "field": "PHRED",
+        "alias": "avi_phred",
+        "ftype": "Float",
+        "multiplier": 1000000,
+        "missing_value": 2139095041,
+        "missing_string": "MISSING"
+      }
+    ]
+  },
+  "alphagenome_avi_breakdown": null,
+  "alphagenome_splicing": {
+    "archive": "alphagenome_splicing.invented.zip",
+    "bytes": 1000000,
+    "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "echtvar_version": "0.2.4",
+    "fields": [
+      {
+        "field": "alphagenome_splicing",
+        "alias": "alphagenome_splicing",
+        "ftype": "Float",
+        "multiplier": 10000000,
+        "missing_value": 2139095041,
+        "missing_string": "MISSING"
+      }
+    ],
+    "terms": "By using this information, you agree to AlphaGenome Output Terms of Use found at https://deepmind.google.com/science/alphagenome/output-terms"
+  },
   "omitted_columns": [
-    "rsids"
+    "rsids",
+    "avi_shap_splicing",
+    "avi_shap_atac",
+    "avi_shap_contact_maps",
+    "avi_shap_dnase",
+    "avi_shap_chip_tf",
+    "avi_shap_chip_histone",
+    "avi_shap_cage",
+    "avi_shap_procap",
+    "avi_shap_rna_seq",
+    "avi_shap_polyadenylation",
+    "avi_shap_alphamissense",
+    "avi_shap_cactus_241way",
+    "avi_shap_protein_termination",
+    "avi_shap_start_lost",
+    "avi_shap_stop_lost",
+    "avi_shap_phastcons_470way"
   ],
   "sv_annotation": {
     "annotator": "Invented Annotator 1.0",

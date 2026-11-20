@@ -1,6 +1,7 @@
 // Writes the family tables (docs/annotation.md) of the families that share one source selection: each family's VCF is
 // normalised, the union of their sites is annotated once with Illumina's Annotator and converted into tables, the
-// union's gnomAD joint values are read from an echtvar archive, and each family's tables are cut from both. The union
+// union's values from echtvar archives are read (gnomAD's joint values, and AlphaGenome's scores where the run names
+// their archives), and each family's tables are cut from both. The union
 // and what annotates it reveal every family's alleles, so they are published under annotation-unions/<group>/ and never
 // beside a family's tables, which go to annotations/<family>/. The Annotator's output has a folder of its own there,
 // which a later run can reuse in place of annotating again. A family whose row also names VCFs of its larger variants
@@ -14,7 +15,7 @@
 // Including the workflow in another pipeline). The entry workflow reads the families from a sheet and the settings
 // from params, and publishes what ANNOTATE_FAMILIES emits.
 
-include { FAMILY_CHECK ; NORMALISE_FAMILY ; NORMALISE_SV ; UNION_SITES ; SV_SITES ; SV_UNION ; GNOMAD_JOINT ; ANNOTATION_TABLES ; SV_ANNOTATION_TABLES ; FAMILY_TABLES ; groupAnnotation ; svName ; svGroup } from './modules/family_tables'
+include { FAMILY_CHECK ; NORMALISE_FAMILY ; NORMALISE_SV ; UNION_SITES ; SV_SITES ; SV_UNION ; ECHTVAR_VALUES ; ANNOTATION_TABLES ; SV_ANNOTATION_TABLES ; FAMILY_TABLES ; groupAnnotation ; svName ; svGroup } from './modules/family_tables'
 include { ILLUMINA_ANNOTATE } from './modules/annotator'
 include { ILLUMINA_ANNOTATE as ILLUMINA_ANNOTATE_SV } from './modules/annotator'
 
@@ -53,6 +54,12 @@ params {
     // count and filtering allele frequency (docs/annotation.md); echtvar reads it afresh in every run, also one that
     // reuses an annotation.
     gnomad_joint: Path
+    // echtvar archives of AlphaGenome's scores of the single-base changes, each of which a run can leave out: the AVI
+    // score, the breakdown of that score by input, and the splicing score (docs/annotation.md). The tables of a run
+    // without an archive lack its columns. DeepMind offers the second and the third for non-commercial use only.
+    alphagenome_avi: Path?
+    alphagenome_avi_breakdown: Path?
+    alphagenome_splicing: Path?
     tools_container: String
     output_dir: String?
     arGuid: String?
@@ -191,7 +198,15 @@ workflow ANNOTATE_FAMILIES {
         sv_union = SV_UNION(settings.group, sv_group.map { g -> g.families }, sv_group.map { g -> g.sites })
     }
 
-    joint = GNOMAD_JOINT(union, settings.gnomad_joint)
+    // An archive of AlphaGenome's scores that the run does not name is an empty list, as a process takes an input
+    // that it can do without.
+    archive_values = ECHTVAR_VALUES(
+        union,
+        settings.gnomad_joint,
+        settings.alphagenome_avi ?: [],
+        settings.alphagenome_avi_breakdown ?: [],
+        settings.alphagenome_splicing ?: [],
+    )
 
     if (settings.annotated != null) {
         def reused = settings.annotated.resolve("out/${settings.group}.json.gz")
@@ -256,7 +271,7 @@ workflow ANNOTATE_FAMILIES {
             tuple(family, vcf, index, ped, proband, sv, cnv, repeats, alleles ?: [])
         },
         tables,
-        joint,
+        archive_values,
         sv_tables,
         sv_map,
         tablesVersion(),
@@ -265,7 +280,7 @@ workflow ANNOTATE_FAMILIES {
     sv_published = annotates_sv ? sv_union.union.map { _group, vcf, index -> [vcf, index] }.flatten().mix(sv_tables, sv_map) : channel.empty()
 
     emit:
-    union = union.map { _group, vcf, index -> [vcf, index] }.flatten().mix(tables, joint, sv_published)
+    union = union.map { _group, vcf, index -> [vcf, index] }.flatten().mix(tables, archive_values, sv_published)
     annotator = annotator
     family_tables = written.map { family, variants, transcripts, manifest, notes, larger ->
         [family: family, files: [variants, transcripts, manifest, notes] + larger]
@@ -273,7 +288,7 @@ workflow ANNOTATE_FAMILIES {
 }
 
 // A family's tables go under the family's id; the folder names the tables' version and the catalog.
-// The union's tables and its gnomAD joint values are folders. Nextflow's default replaces a published file whose
+// The union's tables and its values from the echtvar archives are folders. Nextflow's default replaces a published file whose
 // size or time differs, and compares a folder by its own, which an object store gives every folder alike: a run
 // into a folder that an earlier run wrote would keep that run's tables beside the families' new ones. The union is
 // therefore always replaced, which removes an earlier folder whole and leaves none of its parts among the new ones.
@@ -327,7 +342,7 @@ def pipelineVersion() {
 
 // The settings of ANNOTATE_FAMILIES, each of which the entry workflow takes as the param of the same name.
 def settingNames() {
-    return ['group', 'reference', 'catalog', 'annotation_data', 'sources', 'workers', 'annotator', 'annotator_version', 'license_secret', 'annotated', 'gnomad_joint']
+    return ['group', 'reference', 'catalog', 'annotation_data', 'sources', 'workers', 'annotator', 'annotator_version', 'license_secret', 'annotated', 'gnomad_joint', 'alphagenome_avi', 'alphagenome_avi_breakdown', 'alphagenome_splicing']
 }
 
 // The columns of the families sheet: four that every sheet has, and the optional ones of the larger variants.

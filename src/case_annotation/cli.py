@@ -12,8 +12,8 @@ from case_annotation import (
     alphagenome_archives,
     annotation_tables,
     contract,
+    echtvar_values,
     family_tables,
-    gnomad_joint,
     sv_annotation,
     sv_sites,
 )
@@ -201,26 +201,43 @@ def _sv_annotation_tables(args: argparse.Namespace) -> None:
     (args.output / 'annotation.json').write_text(info.model_dump_json(indent=2) + '\n')
 
 
-def _gnomad_joint_arguments(parser: argparse.ArgumentParser) -> None:
+def _echtvar_values_arguments(parser: argparse.ArgumentParser) -> None:
     path = pathlib.Path
     parser.add_argument(
-        '--annotated', type=path, required=True, help='the union as `echtvar anno` annotated it with the archive'
+        '--annotated',
+        type=path,
+        required=True,
+        help='the union as one `echtvar anno` call annotated it with every archive given',
     )
     parser.add_argument('--sites', type=path, required=True, help='the union, a sites-only VCF')
     parser.add_argument(
-        '--archive', type=path, required=True, help="the echtvar archive of gnomAD's joint release that annotated it"
+        '--archive',
+        nargs=2,
+        action='append',
+        required=True,
+        metavar=('SOURCE', 'ZIP'),
+        help=(
+            f'an echtvar archive that annotated it, after what it holds: one of {", ".join(echtvar_values.SOURCES)}; '
+            f'given once for {echtvar_values.REQUIRED.name}, which every run reads, and once for each other archive '
+            'of the run'
+        ),
     )
     parser.add_argument('--echtvar-version', required=True, help='the version of the echtvar that annotated it')
     parser.add_argument(
         '--output',
         type=path,
         required=True,
-        help=f'the folder to write {gnomad_joint.TABLE_NAME} and {gnomad_joint.INFO_NAME} into; it must not exist',
+        help=f'the folder to write {echtvar_values.TABLE_NAME} and {echtvar_values.INFO_NAME} into; it must not exist',
     )
 
 
-def _gnomad_joint(args: argparse.Namespace) -> None:
-    gnomad_joint.convert(args.annotated, args.sites, args.archive, args.echtvar_version, args.output)
+def _echtvar_values(args: argparse.Namespace) -> None:
+    archives: dict[str, pathlib.Path] = {}
+    for source, archive in args.archive:
+        if source in archives:
+            raise SystemExit(f'--archive is given twice for {source}')
+        archives[source] = pathlib.Path(archive)
+    echtvar_values.convert(args.annotated, args.sites, archives, args.echtvar_version, args.output)
 
 
 def _family_tables_arguments(parser: argparse.ArgumentParser) -> None:
@@ -250,7 +267,7 @@ def _family_tables_arguments(parser: argparse.ArgumentParser) -> None:
         '--sv-map', type=path, help="with --sv-annotation: sv-union's map from the families' records to the sites"
     )
     parser.add_argument('--annotation', type=path, required=True, help="annotation-tables' output folder of the union")
-    parser.add_argument('--gnomad-joint', type=path, required=True, help="gnomad-joint's output folder of the union")
+    parser.add_argument('--echtvar-values', type=path, required=True, help="echtvar-values' output folder of the union")
     parser.add_argument(
         '--schema-version',
         required=True,
@@ -277,7 +294,7 @@ def _family_tables(args: argparse.Namespace) -> None:
         args.vcf,
         args.ped,
         args.annotation,
-        args.gnomad_joint,
+        args.echtvar_values,
         args.output,
         proband=args.proband,
         structural=_structural(args),
@@ -395,10 +412,13 @@ _SUBCOMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Ca
         _sv_annotation_tables_arguments,
         _sv_annotation_tables,
     ),
-    'gnomad-joint': (
-        "writes gnomAD's joint values of a sites union from its echtvar annotation, with the archive's record",
-        _gnomad_joint_arguments,
-        _gnomad_joint,
+    'echtvar-values': (
+        (
+            "writes the values of a sites union from its echtvar annotation, which are gnomAD's joint values and, "
+            "where the run has their archives, AlphaGenome's scores, with each archive's record"
+        ),
+        _echtvar_values_arguments,
+        _echtvar_values,
     ),
     'family-tables': (
         (

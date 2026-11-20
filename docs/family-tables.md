@@ -109,6 +109,9 @@ erDiagram
         int gnomad_joint_ac
         int gnomad_joint_hom
         float gnomad_joint_faf95_max
+        float avi_phred "AlphaGenome's score, where the run read its archive"
+        float avi_shap_splicing "one of 16 shares of that score"
+        float alphagenome_splicing
         double alphamissense_max
         double revel
         double spliceai_max
@@ -1487,6 +1490,76 @@ In the worked example this returns both alleles, each with the HGNC id 99901. Fo
 it takes about 0.33 s. The same question takes 0.42 s through `transcripts`, and about 0.7 s when every allele's list is
 tested against the panel with `list_has_any`.
 
+### AlphaGenome's scores
+
+A run that was given archives of AlphaGenome's scores has up to 19 more columns in `variants`, all 32-bit floats
+([AlphaGenome's scores](annotation.md#alphagenomes-scores)). AlphaGenome is Google DeepMind's model of DNA sequence, and
+its Variant Impact (AVI) score rates every single-base change, inside a gene or far from one. The other scores of
+`variants` rate one kind of change each, as AlphaMissense and REVEL rate missense changes.
+
+| Column                  | Holds                                                                                                                                                            |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `avi_phred`             | the rank of the allele's AVI score among all single-base changes, on the PHRED scale: 20 is the top 1%, and a higher value a smaller top share                   |
+| `avi_raw`               | the AVI score itself, which is below 0 for more than half of the changes                                                                                         |
+| `avi_shap_`, 16 columns | the share of `avi_raw` that each input of the score contributes (its SHAP value), which can be below 0; the 16 add up to `avi_raw` plus a constant of about 0.05 |
+| `alphagenome_splicing`  | AlphaGenome's splicing score of the change, from 0 up. It has no published threshold and is not on SpliceAI's scale of 0 to 1: values above 4 occur              |
+
+The 16 contributions are named after the inputs as DeepMind's table lists them: `avi_shap_splicing`, `avi_shap_atac`,
+`avi_shap_contact_maps`, `avi_shap_dnase`, `avi_shap_chip_tf`, `avi_shap_chip_histone`, `avi_shap_cage`,
+`avi_shap_procap`, `avi_shap_rna_seq`, `avi_shap_polyadenylation`, `avi_shap_alphamissense`, `avi_shap_cactus_241way`,
+`avi_shap_protein_termination`, `avi_shap_start_lost`, `avi_shap_stop_lost` and `avi_shap_phastcons_470way`.
+
+A query has to allow for four things.
+
+- The scores are of single-base changes on chr1 to chr22, chrX and chrY. Every insertion, every deletion and every
+  allele on chrM has a null in all 19 columns, which a comparison drops: `avi_phred >= 20` never returns an indel.
+- The splicing scores cover stretches of the genome. A null in `alphagenome_splicing` on a single-base change says that
+  the change lies outside them, and not that it leaves splicing alone.
+- A run that was not given an archive has none of its columns, and a query that reads one fails. The manifest lists the
+  missing columns in `omitted_columns`, and has a null under the archive's key ([The manifest](#the-manifest)).
+- The 16 contributions are to be read together. Several inputs respond to the same change, so the input with the largest
+  share does not name the mechanism: a change in a polyadenylation signal can have its largest shares under
+  `avi_shap_rna_seq` or the two conservation inputs and little under `avi_shap_polyadenylation`.
+
+DeepMind offers the breakdown and the splicing scores for non-commercial use only, so a folder whose `variants` has the
+`avi_shap_` columns or `alphagenome_splicing` is under DeepMind's terms: its manifest holds the notice that the terms
+ask for as `terms`, under `alphagenome_avi_breakdown` and `alphagenome_splicing`
+([The terms of AlphaGenome's files](annotation.md#the-terms-of-alphagenomes-files)). The scores are predictions, and
+DeepMind's terms say of all of them that they are not validated for clinical use.
+
+The first query is for the proband's rare single-base changes that AlphaGenome ranks in the top 1%, the highest first.
+It needs the run to have had the archive `alphagenome_avi`.
+
+```python
+high_avi = con.sql(
+    """
+    SELECT variant_id, worst_consequence, proband.gt AS proband_gt, gnomad_joint_af, avi_phred, avi_raw
+    FROM trio
+    WHERE proband.carries
+      AND coalesce(gnomad_joint_af, 0) < $max_af
+      AND avi_phred >= $min_phred
+    ORDER BY avi_phred DESC
+    """,
+    params={'max_af': 0.001, 'min_phred': 20},
+).to_arrow_table()
+```
+
+The second query reads one allele's contributions as rows, the largest first, with the allele's raw score beside them.
+`UNPIVOT` turns the 16 columns into 16 rows, and returns none for an allele without a breakdown. It needs the archive
+`alphagenome_avi_breakdown` as well.
+
+```python
+contributions = con.sql(
+    """
+    SELECT replace(input, 'avi_shap_', '') AS input, contribution, avi_raw
+    FROM (SELECT avi_raw, COLUMNS('avi_shap_.*') FROM variants WHERE variant_id = $variant_id)
+        UNPIVOT (contribution FOR input IN (COLUMNS('avi_shap_.*')))
+    ORDER BY contribution DESC
+    """,
+    params={'variant_id': 'chr2-1234567-C-T'},
+).to_arrow_table()
+```
+
 ### A de novo search
 
 The tables hold no de novo calls (see [De novo variants](annotation.md#de-novo-variants)), so a reader has to search for
@@ -2299,7 +2372,7 @@ The tables share these properties:
 | order of the rows  | sorted by chromosome (1 to 22, X, Y, M) and position; `sv` and `repeats` then by `end_pos` and their key, and `sv_transcripts` then by `end_pos`, `sv_id`, `variant_type` and `transcript_id`                                                                                                                                                                                                                                                                                                                                                               |
 | compression        | zstd, in row groups of 100,000 rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Bloom filters      | on the columns a lookup uses: in `variants` the variant id and the values of `hgnc_ids`; in `transcripts` the variant id, the transcript id, the gene symbol and id and the HGNC id; `sv_id` in `sv` and in `sv_transcripts`, which also has them on its transcript id, its gene symbol and id and its HGNC id; and `repeat_id` in `repeats`. DuckDB 2.0 does not use the one of `hgnc_ids` ([Variants in a gene](#variants-in-a-gene)), and a reader that tests a list's values against a filter can                                                       |
-| key-value metadata | the tables' version (`schema_version`), the table's name, the family, and the annotation's provenance (`annotation` and `gnomad_joint`, as in the manifest); `sv` and `sv_transcripts` carry the provenance of the annotation of the structural variants instead (`annotation`, which is the manifest's `sv_annotation`), and `repeats` none, since nothing annotated it                                                                                                                                                                                    |
+| key-value metadata | the tables' version (`schema_version`), the table's name, the family, and the annotation's provenance (`annotation`, `gnomad_joint` and the three `alphagenome_` keys, as in the manifest); `sv` and `sv_transcripts` carry the provenance of the annotation of the structural variants instead (`annotation`, which is the manifest's `sv_annotation`), and `repeats` none, since nothing annotated it                                                                                                                                                     |
 | variant id         | `<chrom>-<pos>-<ref>-<alt>` with the VCF's contig name, such as `chr2-1234567-C-T`                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | shared columns     | a column that means the same thing has the same name and type in every table ([Shared column names](#shared-column-names))                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | a missing value    | a null. That holds for the list columns `rsids`, `hgnc_ids`, `breakpoint_hgnc_ids`, `genes`, `regulatory_features`, `clinvar_records`, `clinvar_other_alleles`, `clinvar_conditions`, `clinvar_pubmed_ids`, `amino_acid_conservation`, `gnomad_sv_matches`, `fusion_partners`, `pl` and `ft` too, and for `cipos`, `ciend` and the lists of a repeat's genotype: an allele without an rsID has no `rsids`, not an empty list. `filters` differs: in every table it holds the VCF record's FILTER values, and an empty list for a record whose FILTER is `.` |
@@ -2312,21 +2385,24 @@ say about a gene is knowledge that the reader brings.
 `manifest.json` describes the folder: its tables, the family and what annotated the alleles and the structural variants.
 Every manifest holds every key below, also the manifest of a family without the optional tables.
 
-| Key                  | Holds                                                                                                                                                                                                                                                                                                   |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema_version`     | the tables' version, such as `0.5.0`                                                                                                                                                                                                                                                                    |
-| `pipeline_version`   | the release of the pipeline that wrote the folder, such as `0.3.0`: the version of the workflow and of the tools image at once, because the workflow gives its own version to the step that writes the folder, which refuses to write with tools of another. It is the same in every run of one release |
-| `family`             | the family's id                                                                                                                                                                                                                                                                                         |
-| `members`            | the pedigree: each member with its `sample_id`, `father`, `mother`, `sex`, `affected` (empty where the PED file gives the phenotype as unknown), `sequenced` (whether `variants` has its column, and `sv` and `repeats` where the family has them) and `role`                                           |
-| `notes`              | the notes on the tables in the folder: the `path`, which is `tables.md`, with the file's size in `bytes` and its `sha256`, as an entry of `tables` gives a table's                                                                                                                                      |
-| `tables`             | each table the folder holds, with its rows, size and SHA-256: `variants` and `transcripts`, then `sv`, `sv_transcripts` and `repeats` where the family has them                                                                                                                                         |
-| `sv_callers`         | the callers whose records `sv` holds: `sv`, `cnv` or both, and an empty list in a family without the table. A named caller with no row of `sv` reported nothing                                                                                                                                         |
-| `alleles`            | the number of alleles, which is the number of rows of `variants`                                                                                                                                                                                                                                        |
-| `annotation`         | what annotated the alleles: the Annotator, the catalog, the sources named and the versions they pinned, the data sources the JSON header records, and the bundle's sources the run left out, each with its reason: `dated`, `not_applicable`, `current` or `unplaced`                                   |
-| `gnomad_joint`       | the archive of gnomAD's joint values: its file name, its size and SHA-256 as the run read it, echtvar's version, and each field the archive's embedded configuration declares, with gnomAD's name for it, the archive's alias, its type, its multiplier and the value that stands for a missing one     |
-| `omitted_columns`    | the columns of `variants` that the run left out because it did not name their dated source                                                                                                                                                                                                              |
-| `sv_annotation`      | what annotated the structural variants and copy number segments, in the form of `annotation`: the second Annotator run, which has the catalog and the sources of the first; null in a family without `sv`                                                                                               |
-| `sv_omitted_columns` | the columns of `sv` that the run left out because it did not name their dated source; an empty list in a family without `sv`                                                                                                                                                                            |
+| Key                         | Holds                                                                                                                                                                                                                                                                                                   |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema_version`            | the tables' version, such as `0.5.0`                                                                                                                                                                                                                                                                    |
+| `pipeline_version`          | the release of the pipeline that wrote the folder, such as `0.3.0`: the version of the workflow and of the tools image at once, because the workflow gives its own version to the step that writes the folder, which refuses to write with tools of another. It is the same in every run of one release |
+| `family`                    | the family's id                                                                                                                                                                                                                                                                                         |
+| `members`                   | the pedigree: each member with its `sample_id`, `father`, `mother`, `sex`, `affected` (empty where the PED file gives the phenotype as unknown), `sequenced` (whether `variants` has its column, and `sv` and `repeats` where the family has them) and `role`                                           |
+| `notes`                     | the notes on the tables in the folder: the `path`, which is `tables.md`, with the file's size in `bytes` and its `sha256`, as an entry of `tables` gives a table's                                                                                                                                      |
+| `tables`                    | each table the folder holds, with its rows, size and SHA-256: `variants` and `transcripts`, then `sv`, `sv_transcripts` and `repeats` where the family has them                                                                                                                                         |
+| `sv_callers`                | the callers whose records `sv` holds: `sv`, `cnv` or both, and an empty list in a family without the table. A named caller with no row of `sv` reported nothing                                                                                                                                         |
+| `alleles`                   | the number of alleles, which is the number of rows of `variants`                                                                                                                                                                                                                                        |
+| `annotation`                | what annotated the alleles: the Annotator, the catalog, the sources named and the versions they pinned, the data sources the JSON header records, and the bundle's sources the run left out, each with its reason: `dated`, `not_applicable`, `current` or `unplaced`                                   |
+| `gnomad_joint`              | the archive of gnomAD's joint values: its file name, its size and SHA-256 as the run read it, echtvar's version, and each field the archive's embedded configuration declares, with gnomAD's name for it, the archive's alias, its type, its multiplier and the value that stands for a missing one     |
+| `alphagenome_avi`           | the archive of AlphaGenome's AVI scores, which `avi_phred` and `avi_raw` come from, in the form of `gnomad_joint`; null in a run that was not given it                                                                                                                                                  |
+| `alphagenome_avi_breakdown` | the archive of the breakdown of the AVI score, which the `avi_shap_` columns come from, in the same form, with the notice that DeepMind's terms ask for as `terms`; null in a run that was not given it                                                                                                 |
+| `alphagenome_splicing`      | the archive of AlphaGenome's splicing scores, which `alphagenome_splicing` comes from, in the form of `alphagenome_avi_breakdown`; null in a run that was not given it                                                                                                                                  |
+| `omitted_columns`           | the columns of `variants` that the run left out because it did not name their source: those of its dated sources, then those of the archives of AlphaGenome's scores that it was not given                                                                                                              |
+| `sv_annotation`             | what annotated the structural variants and copy number segments, in the form of `annotation`: the second Annotator run, which has the catalog and the sources of the first; null in a family without `sv`                                                                                               |
+| `sv_omitted_columns`        | the columns of `sv` that the run left out because it did not name their dated source; an empty list in a family without `sv`                                                                                                                                                                            |
 
 The reasons, under `annotation.omitted`, follow the groups of sources in [Dated sources](annotation.md#dated-sources):
 `dated` for a dated source, `not_applicable` for one that does not apply to germline small variants, `current` for a

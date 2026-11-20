@@ -1,17 +1,18 @@
 """A family's annotation tables: its alleles from the union's tables, with its members' calls (docs/family-tables.md).
 
 The input is the family's normalised VCF (one allele per record, primary chromosomes only, each allele carried by some
-member), its PED file, the proband that the run's sheet names for it, if any, and the tables and the gnomAD joint values
-of the union that its alleles were annotated in. The output folder holds two Parquet files, a manifest and the notes on
-the tables:
+member), its PED file, the proband that the run's sheet names for it, if any, and the tables and the values from the
+echtvar archives of the union that its alleles were annotated in. The output folder holds two Parquet files, a manifest
+and the notes on the tables:
 
 - `variants.parquet`: one row per allele. It holds the union's `variants` row of the allele, less the columns of the
-  dated sources the run did not name, gnomAD's joint values of it, the family's own QUAL and FILTER and, as in a VCF,
-  one column per sequenced member, named as the member's sample in the VCF and in the VCF's order, with that member's
-  own call of the allele;
+  dated sources the run did not name, its values from the archives that the run read (gnomAD's joint values, and
+  AlphaGenome's scores where the run names their archives), the family's own QUAL and FILTER and, as in a VCF, one
+  column per sequenced member, named as the member's sample in the VCF and in the VCF's order, with that member's own
+  call of the allele;
 - `transcripts.parquet`: the union's `transcripts` rows of the family's alleles;
 - `manifest.json`: the tables, the pedigree with the roles of the named proband and its parents, and what annotated the
-  alleles: the Annotator's run and the archive of gnomAD's joint values;
+  alleles: the Annotator's run and each echtvar archive that the run read;
 - `tables.md`: a copy of the notes on the tables in this package (NOTES), which the manifest names.
 
 A family whose sheet row also names VCFs of its structural variants, its copy-number segments or its members' repeats
@@ -50,7 +51,7 @@ import pysam
 
 from case_annotation import (
     annotation_tables,
-    gnomad_joint,
+    echtvar_values,
     pedigree,
     repeat_tables,
     sv_annotation,
@@ -104,10 +105,24 @@ CALL = pa.struct(
 # The family's own record of an allele: the QUAL and FILTER of its record of the VCF.
 _RECORD = (pa.field('qual', pa.float64()), pa.field('filters', pa.list_(_STRING)))
 # The columns of the variants table that describe the allele, in the table's order: the union's annotation of it,
-# gnomAD's joint values and the family's record. The members' columns follow them.
+# its values from each echtvar archive and the family's record. The members' columns follow them.
 ALLELE = pa.schema(
-    [*annotation_tables.VARIANTS, *(gnomad_joint.TABLE.field(column) for column in gnomad_joint.COLUMNS), *_RECORD]
+    [
+        *annotation_tables.VARIANTS,
+        *(field for source in echtvar_values.SOURCES.values() for field in source.fields),
+        *_RECORD,
+    ]
 )
+# The columns of the variants table that a run can leave out, by the source that it then did not name: a dated source
+# of the annotation, by its name in a run config, or an echtvar archive that a run need not read, by its param's name.
+VARIANT_SOURCES: Mapping[str, tuple[str, ...]] = {
+    **annotation_tables.SOURCE_COLUMNS,
+    **{
+        source.name: tuple(source.columns)
+        for source in echtvar_values.SOURCES.values()
+        if source is not echtvar_values.REQUIRED
+    },
+}
 
 
 def variants_schema(samples: Sequence[str], omitted: Collection[str] = ()) -> pa.Schema:
@@ -163,8 +178,9 @@ class Table:
 
     `columns` are the columns that say what a row is of, in the file's order. In a table that holds the members' calls
     a column of each sequenced member follows them, named as the member's sample, in the order of the family's VCF and
-    never null, and `member` is the type of each. `sources` gives the columns that hold a dated source's data, by the
-    source's name in a run config: the table of a run that did not name the source lacks them.
+    never null, and `member` is the type of each. `sources` gives the columns that hold the data of a source that a
+    run can leave out, by the source's name: a dated source by its name in a run config, and an echtvar archive that a
+    run need not read by its param's name. The table of a run that did not name the source lacks them.
     """
 
     columns: pa.Schema
@@ -176,7 +192,7 @@ class Table:
 # union's rows of the family's alleles, with no declared schema to cast them to (_write), so its file declares every
 # column nullable, also the ones that hold a value in every row.
 TABLES: Mapping[str, Table] = {
-    'variants': Table(ALLELE, CALL, annotation_tables.SOURCE_COLUMNS),
+    'variants': Table(ALLELE, CALL, VARIANT_SOURCES),
     'transcripts': Table(pa.schema([f.with_nullable(True) for f in annotation_tables.TRANSCRIPTS]), None, {}),
     'sv': Table(sv_schema(()), sv_tables.CALL, sv_annotation.SOURCE_COLUMNS),
     'sv_transcripts': Table(sv_tables.transcripts_schema(sv_annotation.TRANSCRIPT_COLUMNS), None, {}),
@@ -323,8 +339,14 @@ class FamilyManifest(pydantic.BaseModel, frozen=True, extra='forbid'):
     sv_callers: tuple[sv_tables.Caller, ...]
     alleles: int
     annotation: annotation_tables.AnnotationInfo
-    gnomad_joint: gnomad_joint.GnomadJointInfo  # the archive the gnomad_joint_ columns come from
-    omitted_columns: tuple[str, ...]  # variants columns of the dated sources the run did not name
+    gnomad_joint: echtvar_values.ArchiveInfo  # the archive the gnomad_joint_ columns come from
+    # The archives of AlphaGenome's scores that the avi_ columns and alphagenome_splicing come from, each None in a
+    # run that was not given it. The two that are not for permissive use carry the notice their terms ask for.
+    alphagenome_avi: echtvar_values.ArchiveInfo | None
+    alphagenome_avi_breakdown: echtvar_values.NoticedArchiveInfo | None
+    alphagenome_splicing: echtvar_values.NoticedArchiveInfo | None
+    # The variants columns of the sources the run did not name: its dated sources, then the archives it need not read.
+    omitted_columns: tuple[str, ...]
     # What annotated the family's structural variants and copy-number segments, and the sv columns of the dated
     # sources that run did not name; None and no columns in a family without the sv table.
     sv_annotation: annotation_tables.AnnotationInfo | None
@@ -740,7 +762,7 @@ def assemble(
     vcf_path: pathlib.Path,
     ped_path: pathlib.Path,
     annotation: pathlib.Path,
-    joint: pathlib.Path,
+    archive_values: pathlib.Path,
     output: pathlib.Path,
     proband: str | None,
     structural: Structural,
@@ -752,10 +774,10 @@ def assemble(
     """Writes the family's tables and manifest into the output folder.
 
     The inputs are its normalised VCF, its PED file, the union's tables (annotation_tables.convert's output folder),
-    the union's gnomAD joint values (gnomad_joint.convert's output folder), the sample id of the proband that the
-    run's sheet names, or None for a family in which it designates none (member_roles), and the VCFs of its larger
-    variants that the sheet names, with the normalised sequences of its structural variants where it names their VCF
-    (read_sv_alleles) and the annotation of the group's structural variants where it names a caller's VCF
+    the union's values from the echtvar archives (echtvar_values.convert's output folder), the sample id of the proband
+    that the run's sheet names, or None for a family in which it designates none (member_roles), and the VCFs of its
+    larger variants that the sheet names, with the normalised sequences of its structural variants where it names their
+    VCF (read_sv_alleles) and the annotation of the group's structural variants where it names a caller's VCF
     (SvAnnotation). That annotation must be of the same catalog and sources as the union's, since one run makes both.
     """
     ped = pedigree.read(ped_path)
@@ -772,7 +794,7 @@ def assemble(
             f"the group's structural variants were annotated with catalog {sv_info.catalog} and the sources "
             f'{list(sv_info.sources)}, and its alleles with catalog {info.catalog} and {list(info.sources)}'
         )
-    joint_info = gnomad_joint.read_info(joint)
+    archives = echtvar_values.read_info(archive_values)
     output.mkdir(parents=True)
     with tempfile.TemporaryDirectory(dir=scratch) as tmp:
         work = pathlib.Path(tmp)
@@ -783,38 +805,44 @@ def assemble(
         con.read_parquet(str(work / 'records.parquet')).create_view('records')
         con.read_parquet(str(annotation / 'variants' / '*.parquet')).create_view('union_variants')
         con.read_parquet(str(annotation / 'transcripts' / '*.parquet')).create_view('union_transcripts')
-        con.read_parquet(str(joint / gnomad_joint.TABLE_NAME)).create_view('union_joint')
+        con.read_parquet(str(archive_values / echtvar_values.TABLE_NAME)).create_view('union_archives')
         for problem, query in {
             'the VCF repeats alleles': 'SELECT variant_id FROM records GROUP BY 1 HAVING count(*) > 1',
             "alleles the union's annotation lacks": (
                 'SELECT variant_id FROM records ANTI JOIN union_variants USING (variant_id)'
             ),
-            "alleles the union's gnomAD joint values lack": (
-                'SELECT variant_id FROM records ANTI JOIN union_joint USING (variant_id)'
+            "alleles the union's values from the echtvar archives lack": (
+                'SELECT variant_id FROM records ANTI JOIN union_archives USING (variant_id)'
             ),
         }.items():
             if found := [r[0] for r in con.sql(f'{query} ORDER BY 1 LIMIT 5').fetchall()]:
                 raise ValueError(f'{vcf_path}: {problem}, such as {found}')
+        named = {*info.sources, *(source.name for source in archives.given())}
         omitted = tuple(
-            column
-            for source, columns in annotation_tables.SOURCE_COLUMNS.items()
-            if source not in info.sources
-            for column in columns
+            column for source, columns in VARIANT_SOURCES.items() if source not in named for column in columns
         )
+        from_archives = [column for source in archives.given() for column in source.columns]
         sv_omitted = tuple(
             column
             for source, columns in sv_annotation.SOURCE_COLUMNS.items()
             if sv_info is not None and source not in sv_info.sources
             for column in columns
         )
-        exclude = f' EXCLUDE ({", ".join(omitted)})' if omitted else ''
+        # The union's variants hold the columns of every dated source, and its values from the archives only the
+        # columns of the archives that the run read.
+        dated = [column for column in omitted if column in annotation_tables.VARIANTS.names]
+        exclude = f' EXCLUDE ({", ".join(dated)})' if dated else ''
         own = {'schema_version': SCHEMA_VERSION, 'family': family}
-        annotated = {**own, 'annotation': info.model_dump_json(), 'gnomad_joint': joint_info.model_dump_json()}
+        # Each archive's record under its source's name, as in the manifest, and a JSON null for one the run lacks.
+        records = {
+            name: 'null' if record is None else record.model_dump_json() for name, record in archives.records().items()
+        }
+        annotated = {**own, 'annotation': info.model_dump_json(), **records}
         # A record's columns after its id are the family's QUAL and FILTER and the members' calls, as variants ends.
         queries = {
             'variants': (
-                f'SELECT v.*{exclude}, {", ".join(f"g.{c}" for c in gnomad_joint.COLUMNS)}, r.* EXCLUDE (variant_id) '  # noqa: S608 (column names of this package's own)
-                'FROM union_variants v JOIN records r USING (variant_id) JOIN union_joint g USING (variant_id) '
+                f'SELECT v.*{exclude}, {", ".join(f"a.{c}" for c in from_archives)}, r.* EXCLUDE (variant_id) '  # noqa: S608 (column names of this package's own)
+                'FROM union_variants v JOIN records r USING (variant_id) JOIN union_archives a USING (variant_id) '
                 'ORDER BY chrom_rank(v.chrom), v.pos, v.ref, v.alt'
             ),
             'transcripts': (
@@ -862,7 +890,10 @@ def assemble(
         sv_callers=tuple(caller for caller, _vcf in structural.callers),
         alleles=next(f.rows for f in files if f.table == 'variants'),
         annotation=info,
-        gnomad_joint=joint_info,
+        gnomad_joint=archives.gnomad_joint,
+        alphagenome_avi=archives.alphagenome_avi,
+        alphagenome_avi_breakdown=archives.alphagenome_avi_breakdown,
+        alphagenome_splicing=archives.alphagenome_splicing,
         omitted_columns=omitted,
         sv_annotation=sv_info,
         sv_omitted_columns=sv_omitted,
