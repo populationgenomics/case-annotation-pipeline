@@ -359,7 +359,8 @@
     "aparent2_max",
     "aparent2_ref_usage",
     "genomic_constraint_z",
-    "mpc_max"
+    "mpc_max",
+    "branch_points"
   ],
   "transcripts_omitted_columns": [
     "mpc"

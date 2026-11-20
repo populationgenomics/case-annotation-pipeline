@@ -105,7 +105,7 @@ jobs:
             stub/annotated/out/stub-group.sv.json.gz stub/annotated/run.json stub/gnomad-joint.zip \
             stub/alphagenome-avi.zip stub/alphagenome-avi-breakdown.zip stub/alphagenome-splicing.zip \
             stub/gnomad-mito.vcf.bgz stub/mitotip.txt stub/gencode-polya.gtf.gz stub/aparent2.csv.gz \
-            stub/genomic-constraint.txt.gz stub/mcr.tsv stub/mpc.tsv.bgz stub/strchive.json
+            stub/genomic-constraint.txt.gz stub/mcr.tsv stub/mpc.tsv.bgz stub/branch-points.tsv.gz stub/strchive.json
           # The folder of prepared gene models with its eight files, and one that lacks an index.
           mkdir -p stub/gene-models stub/gene-models-unindexed
           touch stub/gene-models/{ensembl.gff3.gz,ensembl.gff3.gz.tbi,refseq.gff.gz,refseq.gff.gz.tbi} \
@@ -263,12 +263,12 @@ jobs:
             test -L "stub/${run}/${union}/echtvar_values"
             test -L "stub/${run}/annotations/fam-a/tables-0.5.0-illumina-202610/variants.parquet"
           done
-          # A run names any of the seven public files that are joined to the alleles: here all of them, and then
+          # A run names any of the eight files that are joined to the alleles: here all of them, and then
           # APARENT2's alone. The step that joins them runs in each, as it does in a run that names none.
           joined=(--gnomad_mito /src/stub/gnomad-mito.vcf.bgz --mitotip /src/stub/mitotip.txt
             --gencode_polya /src/stub/gencode-polya.gtf.gz --aparent2 /src/stub/aparent2.csv.gz
             --genomic_constraint /src/stub/genomic-constraint.txt.gz --mcr /src/stub/mcr.tsv
-            --mpc /src/stub/mpc.tsv.bgz)
+            --mpc /src/stub/mpc.tsv.bgz --branch_points /src/stub/branch-points.tsv.gz)
           family_run --families /src/stub/families.csv --annotated "/src/${results}/${annotation}" "${joined[@]}" \
             --output_dir /src/stub/joined > joined.log
           family_run --families /src/stub/families.csv --annotated "/src/${results}/${annotation}" "${joined[@]:6:2}" \
@@ -414,7 +414,7 @@ jobs:
                 "$@"
           }
           family=(--family fam-c --proband A3)
-          # The run names one of the three archives of AlphaGenome's scores, one of the seven files that are joined
+          # The run names one of the three archives of AlphaGenome's scores, one of the eight files that are joined
           # to the alleles and a release of STRchive with its name and date, and leaves the other settings of the
           # first two null.
           included_run "${family[@]}" --with_sv --annotates_sv --alphagenome_avi /src/stub/alphagenome-avi.zip \

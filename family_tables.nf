@@ -66,9 +66,10 @@ params {
     alphagenome_splicing: Path?
     // Public files that are joined to the union's alleles, each of which a run can leave out (docs/annotation.md):
     // gnomAD's sites VCF of the mitochondrial genome, MitoTIP's table of scores, GENCODE's GTF of polyadenylation
-    // features, APARENT2's table of the effects of single-base changes on polyadenylation, and gnomAD's tables of
-    // genomic constraint by window, of regions of missense constraint and of MPC scores. The tables of a run without a
-    // file lack its columns.
+    // features, APARENT2's table of the effects of single-base changes on polyadenylation, gnomAD's tables of genomic
+    // constraint by window, of regions of missense constraint and of MPC scores, and the catalogue of branch points
+    // that `case-annotation branch-points` prepared from the datasets of Zhang et al. (PNAS 2022). The tables of a
+    // run without a file lack its columns.
     gnomad_mito: Path?
     mitotip: Path?
     gencode_polya: Path?
@@ -76,6 +77,7 @@ params {
     genomic_constraint: Path?
     mcr: Path?
     mpc: Path?
+    branch_points: Path?
     // The loci of one release of STRchive, a JSON file, whose size ranges go into each family's repeats table, and
     // which a run can leave out (docs/annotation.md). STRchive is a dated source and its file states neither its
     // release nor a date, so a run that gives the file states both: the release, such as v2.28.0, and the day on
@@ -270,6 +272,7 @@ workflow ANNOTATE_FAMILIES {
         settings.genomic_constraint ?: [],
         settings.mcr ?: [],
         settings.mpc ?: [],
+        settings.branch_points ?: [],
     )
     // VEP reads the union's alleles in the exons of the prepared gene models, with their positive controls.
     vep_sites = VEP_SITES(union, settings.gene_models.resolve('exons.bed'), settings.gene_models.resolve('controls.vcf'))
@@ -422,7 +425,7 @@ def pipelineVersion() {
 
 // The settings of ANNOTATE_FAMILIES, each of which the entry workflow takes as the param of the same name.
 def settingNames() {
-    return ['group', 'reference', 'catalog', 'annotation_data', 'sources', 'workers', 'annotator', 'annotator_version', 'license_secret', 'annotated', 'gnomad_joint', 'alphagenome_avi', 'alphagenome_avi_breakdown', 'alphagenome_splicing', 'gnomad_mito', 'mitotip', 'gencode_polya', 'aparent2', 'genomic_constraint', 'mcr', 'mpc', 'strchive', 'strchive_release', 'strchive_release_date', 'gene_models']
+    return ['group', 'reference', 'catalog', 'annotation_data', 'sources', 'workers', 'annotator', 'annotator_version', 'license_secret', 'annotated', 'gnomad_joint', 'alphagenome_avi', 'alphagenome_avi_breakdown', 'alphagenome_splicing', 'gnomad_mito', 'mitotip', 'gencode_polya', 'aparent2', 'genomic_constraint', 'mcr', 'mpc', 'branch_points', 'strchive', 'strchive_release', 'strchive_release_date', 'gene_models']
 }
 
 // The files of a folder of prepared gene models (docs/annotation.md): the two gene model files with their indexes,

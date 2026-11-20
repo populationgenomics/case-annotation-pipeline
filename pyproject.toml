@@ -5,7 +5,7 @@ description = "The Python steps of the case annotation pipeline, which write a f
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.12"
-dependencies = ["duckdb>=2.0.0", "pyarrow>=26.0.0", "pydantic>=2.11", "pysam>=0.24.1"]
+dependencies = ["duckdb>=2.0.0", "pyarrow>=26.0.0", "pydantic>=2.11", "pyliftover>=0.4.1", "pysam>=0.24.1"]
 
 [project.scripts]
 case-annotation = "case_annotation.cli:main"

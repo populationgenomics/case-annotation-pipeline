@@ -35,6 +35,7 @@ params {
     genomic_constraint: Path?
     mcr: Path?
     mpc: Path?
+    branch_points: Path?
     strchive: Path?
     strchive_release: String?
     strchive_release_date: String?
@@ -71,6 +72,7 @@ workflow {
         genomic_constraint: params.genomic_constraint,
         mcr: params.mcr,
         mpc: params.mpc,
+        branch_points: params.branch_points,
         strchive: params.strchive,
         strchive_release: params.strchive_release,
         strchive_release_date: params.strchive_release_date,

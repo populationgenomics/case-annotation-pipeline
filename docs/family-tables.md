@@ -1381,14 +1381,15 @@ splicing_of_variant = con.sql(
 `COLUMNS('^spliceai_')` stands for every column whose name starts that way: `spliceai_max`, which is the highest of the
 four scores, and the four with their distances.
 
-An allele deep in an intron can change splicing too, for example at the branch point before an acceptor site, and a
-search for such alleles asks how far each lies from the nearest exon. `intron_offset_start` and `intron_offset_end` in
-`transcripts` hold that distance as numbers. They are the intron offsets that the row's `hgvsc` writes for its first and
-for its last position: `c.123+5G>A` has 5 in both columns, and the deletion `c.124-30_124-25del` has -30 and -25. An
-offset counts from the exon's edge in the transcript's direction, whatever the strand of the gene. It is positive after
-the end of an exon, on the donor side of the intron, and negative before the start of an exon, so negative before an
-acceptor site. This query returns the rows of one gene whose allele has an end 18 to 44 bases before an exon of the
-row's transcript, which is the window where most known branch points lie:
+An allele deep in an intron can change splicing too, for example at the branch point before an acceptor site
+([Catalogued branch points](#catalogued-branch-points)), and a search for such alleles asks how far each lies from the
+nearest exon. `intron_offset_start` and `intron_offset_end` in `transcripts` hold that distance as numbers. They are the
+intron offsets that the row's `hgvsc` writes for its first and for its last position: `c.123+5G>A` has 5 in both
+columns, and the deletion `c.124-30_124-25del` has -30 and -25. An offset counts from the exon's edge in the
+transcript's direction, whatever the strand of the gene. It is positive after the end of an exon, on the donor side of
+the intron, and negative before the start of an exon, so negative before an acceptor site. This query returns the rows
+of one gene whose allele has an end 18 to 44 bases before an exon of the row's transcript, which is the window where
+most known branch points lie:
 
 ```python
 in_branch_point_window = con.sql(
@@ -2068,6 +2069,140 @@ intronic allele in a region with a ratio of 0.15, a missense allele in a transcr
 ratio of 0.9. The second returned three Ensembl rows: that allele, the one without a region, which has an MPC score of
 2.6, and the one with a ratio of 0.5. With `t.is_mane_select` in place of the two conditions on the transcript it
 returned no row.
+
+### Catalogued branch points
+
+A run that was given the prepared catalogue of branch points has one more column in `variants`, `branch_points`
+([The catalogue of branch points](annotation.md#the-catalogue-of-branch-points)). A branch point is the base inside an
+intron that the spliceosome joins the start of the intron to, most often an adenine 18 to 44 bases before the acceptor
+site. It sits in a short motif, and a variant that changes the branch point or the base two before it can leave the
+intron unspliced or the next exon skipped. The Annotator gives such a variant the consequence `intron_variant` alone.
+
+The catalogue is that of Zhang et al. (PNAS 2022,
+[doi:10.1073/pnas.2211194119](https://doi.org/10.1073/pnas.2211194119)): 546,559 branch points that experiments mapped
+or models predicted, of which the tables hold those that lift from GRCh37 to GRCh38. The paper's tool, BPHunter, reports
+a variant that changes a base at positions -2, -1 or 0 of a catalogued branch point, where 0 is the branch point and -2
+the base two before it on the strand of the intron. `branch_points` holds the same match: a list with an entry for each
+row of the catalogue whose three bases the allele changes. An allele that changes none has no list. The tables hold what
+the catalogue says and neither the tool's score nor its high-risk flag.
+
+| Field of an entry    | Holds                                                                                                                                                                                                                                                                                                                        |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`               | the paper's name of the branch point, with its position on GRCh38: the kind of support, the chromosome, the position, the strand and the base on that strand, as in `mBP_chr1_1601_+_A`. The kind is `e` for experimental sources alone, `c` for predicted ones alone, which the paper calls computational, and `m` for both |
+| `pos`, `strand`      | the branch point's position on GRCh38 and the strand of its intron                                                                                                                                                                                                                                                           |
+| `hit`                | the positions among -2, -1 and 0 whose base the allele changes, as a list of 8-bit integers in that order: `[0]` for a change of the branch point, `[-2, -1, 0]` for a deletion of all three                                                                                                                                 |
+| `acceptor_offset`    | the paper's distance from the branch point to the acceptor site, as a negative 32-bit integer: -24 is a branch point 24 bases before the first base of the exon, counted as `transcripts.intron_offset_start` counts                                                                                                         |
+| `rank`, `total`      | the branch point's rank among the catalogued branch points of the intron, and how many the intron has. Rank 1 is the one nearest to the acceptor site                                                                                                                                                                        |
+| `sources`            | the names of the sets that hold the branch point, as a list of text. The experimental ones are `eBP_Mercer`, `eBP_Taggart`, `eBP_Pineda`, `eBP_Talhouarne`, `eBP_Briese` and `eBP_BPHunter`, and the predicted ones `cBP_BPP`, `cBP_Branchpointer`, `cBP_LaBranchoR` and `cBP_BPHunter`                                      |
+| `consensus`          | the most specific motif that the bases around the branch point match, from position -3 to +1, where Y is C or T and N any base: `1:YTNAY`, `2:YTNA`, `3:TNA`, `4:YNA`, or `0:none`. The A of a motif is the branch point                                                                                                     |
+| `gene`               | the gene symbol of the intron in the paper's gene models                                                                                                                                                                                                                                                                     |
+| `transcript_introns` | the transcripts of those models that have the intron, each as Ensembl's id without a version and the intron's number, such as `ENST00000000001_IVS2`, as a list of text                                                                                                                                                      |
+| `intron_type`        | `major` for an intron of the major spliceosome and `minor` for one of the minor spliceosome                                                                                                                                                                                                                                  |
+| `intron_length`      | the intron's length in bases                                                                                                                                                                                                                                                                                                 |
+
+The fields from `acceptor_offset` on, other than `sources`, come from the paper's table of the branch points by intron.
+That table holds a branch point 3 to 100 bases before the acceptor site of an intron of the paper's gene models, which
+are the protein-coding transcripts of GENCODE on GRCh37. A branch point that the paper lists without such an intron has
+an entry with its name, its place and its sources, and a null in each of those fields.
+
+A query has to allow for these things.
+
+- A run that was not given the catalogue has no `branch_points` column, and a query that reads it fails. The manifest
+  lists the column in `omitted_columns`.
+- An allele often has several entries. A branch point that lies before the acceptors of two introns has an entry for
+  each, with the same `name` and another `acceptor_offset`: about 26,600 of the catalogued branch points do. Two branch
+  points can also lie within two bases of each other, so that one base is position 0 of the first and position -2 of the
+  second: 18% of the catalogued positions have such a neighbour on their strand. The entries are in the order of
+  position, and those of one branch point with the nearest acceptor site first.
+- 29% of the catalogued branch points have no intron in the paper's table, and their entries have a null `rank`,
+  `acceptor_offset` and `consensus`. A condition such as `b.rank = 1` drops them without saying so. Most of them lie 3
+  to 100 bases before the acceptor site of a transcript that the paper's gene models lack: 132,044 of 159,842 before
+  that of some transcript of Ensembl 115, and 19,642 before that of a MANE Select transcript. The offsets of
+  `transcripts` say so for the allele at hand.
+- The branch point is not always an adenine: 9.6% of the catalogued ones are another base, and 8.2% of those with an
+  intron. The last letter of `name` is the base, and every branch point of the classes `1:YTNAY` to `4:YNA` is an A.
+- An insertion between two of the three bases changes none of them. Its entry has an empty `hit`, which `len(b.hit) = 0`
+  finds. An insertion right before position -2 or right after position 0 has no entry. The paper advises to look at
+  single-base changes and deletions first, because what an insertion does to splicing is hard to predict from the
+  catalogue.
+- `hit` does not say what the allele changes a base to, and the allele's `ref` and `alt` do. The paper suggests giving
+  less weight to a change between C and T at position -2, which keeps a pyrimidine there.
+- The catalogue dates from 2022 and its positions were lifted from GRCh37. A branch point in a stretch that GRCh38
+  turned around is on the other strand than in the paper, and its `name` has the new strand. Where two branch points of
+  GRCh37 came to one position of GRCh38, an allele has an entry for each.
+- `gene`, `transcript_introns`, `rank` and `total` are those of the paper's gene models, not of the transcripts in
+  `transcripts`. Measured against Ensembl 115, 99.9% of the catalogue's rows with an intron lie in an intron on their
+  strand whose acceptor site is at `acceptor_offset`, and 98.4% against RefSeq. The labels fare worse: 5.0% of them name
+  a transcript that Ensembl 115 no longer has, and 2.1% an intron that has another number today. A join on the
+  transcript id therefore misses rows, and no label names a RefSeq transcript. The second query below finds the rows of
+  `transcripts` by the distance instead.
+- An entry says that the allele changes a base of a catalogued motif, and not that splicing changes. 68% of the introns
+  of the paper's table have more than one branch point, which `total` shows.
+- An allele without an entry can still change a branch point, because the catalogue holds only the branch points that
+  its sources found. An allele can also create an AG between a branch point and the acceptor site, which changes
+  splicing in another way and overlaps no catalogued base: 8 of the 48 published variants that the paper collected are
+  of that kind.
+- `spliceai_max` is often low or null for an allele at a branch point. The paper ran SpliceAI on the 40 published
+  variants that its tool reports: none reached 0.8, and five reached 0.5. A search for alleles at branch points
+  therefore reads `branch_points` beside the SpliceAI columns and does not require a score.
+- `branch_points` is a list of structs like `genes`, so a condition on a field of an entry is written with `unnest`,
+  `list_filter` or `list_transform` and cannot skip a row group ([An allele's genes](#an-alleles-genes)).
+
+The first query is for the proband's rare alleles that change a base of a branch point which is the nearest to its
+acceptor site and has at least two sources, with one row for each such entry. It needs the run to have had the file
+`branch_points`.
+
+```python
+at_branch_points = con.sql(
+    """
+    SELECT v.variant_id, v.proband.gt AS proband_gt, v.gnomad_joint_af, v.spliceai_max,
+           b.name, b.hit, b.acceptor_offset, b.rank, b.total, b.sources, b.consensus
+    FROM trio v CROSS JOIN unnest(v.branch_points) AS u(b)
+    WHERE v.proband.carries
+      AND coalesce(v.gnomad_joint_af, 0) < $max_af
+      AND b.rank = 1
+      AND len(b.sources) >= $min_sources
+    ORDER BY v.pos, v.variant_id, b.pos
+    """,
+    params={'max_af': 0.001, 'min_sources': 2},
+).to_arrow_table()
+```
+
+The second query finds, for the alleles of a region, the rows of `transcripts` whose transcript has its acceptor site
+where the catalogue places it. A base at position `h` of a branch point lies at the intron offset `acceptor_offset + h`,
+so the three bases have the offsets from `acceptor_offset - 2` to `acceptor_offset`, and the row belongs to the entry
+where the allele's two offsets reach into that range. The rows are of Ensembl's and of RefSeq's transcripts alike.
+
+```python
+transcripts_at_branch_points = con.sql(
+    """
+    SELECT v.variant_id, b.name, b.acceptor_offset, t.transcript_id, t.hgvsc, t.is_mane_select,
+           t.spliceai_acceptor_loss
+    FROM variants v CROSS JOIN unnest(v.branch_points) AS u(b)
+    JOIN transcripts t USING (variant_id)
+    WHERE v.chrom = $chrom AND v.pos BETWEEN $start AND $end
+      AND t.intron_offset_start <= b.acceptor_offset
+      AND t.intron_offset_end >= b.acceptor_offset - 2
+    ORDER BY v.pos, v.variant_id, b.pos, t.transcript_id
+    """,
+    params={'chrom': 'chr2', 'start': 1_200_000, 'end': 1_300_000},
+).to_arrow_table()
+```
+
+Both queries were run on toy tables of eight invented alleles. The first returned four rows: a change of a branch point
+with three sources that is the only one of its intron; a change of the base two before a branch point, whose second
+entry, of a neighbouring branch point without an intron, the condition on `rank` dropped; an insertion between two of
+the three bases, with an empty `hit`; and an allele with entries for two introns, of which the row is of the intron
+where the branch point is the nearest. It left out a branch point of rank 3 with one source, a common deletion, an
+allele without an entry, and one that the proband does not carry. The second returned five rows, two of them for one
+allele, on an Ensembl and on a RefSeq transcript whose `hgvsc` both write the offset -24. It returned no row of a
+transcript in which the allele lies in an exon, and none of one whose acceptor site lies seven bases further on.
+
+An entry for which the second query finds no row has a distance that fits no transcript of `transcripts`: it has no
+intron in the paper's table, or its intron is not in the tables' gene models, or the allele is an insertion or a
+deletion that `hgvsc` places elsewhere in a repeat
+([Splice sites, promoters, regulatory features and conservation](#splice-sites-promoters-regulatory-features-and-conservation)).
+The offsets of the allele's rows then say how far it lies from the acceptor sites of today's transcripts.
 
 ### A de novo search
 

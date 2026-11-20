@@ -268,9 +268,9 @@ process ECHTVAR_VALUES {
 
 // The values of the union's alleles that come from public files which a run joins by allele or by position, each of
 // which a run need not have (docs/annotation.md): gnomAD's sites VCF of the mitochondrial genome, MitoTIP's table of
-// scores, GENCODE's polyadenylation features, APARENT2's table of effects on polyadenylation, and gnomAD's tables of
-// genomic constraint by window, of regions of missense constraint and of MPC scores. A file that the run does not have
-// is an empty list. gnomAD's VCF is matched by position, REF and ALT, so bcftools first normalises it as
+// scores, GENCODE's polyadenylation features, APARENT2's table of effects on polyadenylation, gnomAD's tables of
+// genomic constraint by window, of regions of missense constraint and of MPC scores, and the prepared catalogue of
+// branch points. A file that the run does not have is an empty list. gnomAD's VCF is matched by position, REF and ALT, so bcftools first normalises it as
 // NORMALISE_FAMILY normalises a family's VCF, one allele per record and left-aligned against the reference, and stops
 // at a REF that is not the reference's. case-annotation writes the values as a table keyed by variant id, and those
 // that a file gives for an allele and one transcript as a second table keyed by variant id and transcript id, and
@@ -297,13 +297,14 @@ process JOINED_VALUES {
     path genomic_constraint, stageAs: 'genomic_constraint/*'
     path mcr, stageAs: 'mcr/*'
     path mpc, stageAs: 'mpc/*'
+    path branch_points, stageAs: 'branch_points/*'
 
     output:
     path 'joined_values'
 
     script:
     // Each file of the run under the name that case-annotation knows it by, which is its param's.
-    def given = [gnomad_mito: gnomad_mito, mitotip: mitotip, gencode_polya: gencode_polya, aparent2: aparent2, genomic_constraint: genomic_constraint, mcr: mcr, mpc: mpc].findAll { _source, joined -> joined }
+    def given = [gnomad_mito: gnomad_mito, mitotip: mitotip, gencode_polya: gencode_polya, aparent2: aparent2, genomic_constraint: genomic_constraint, mcr: mcr, mpc: mpc, branch_points: branch_points].findAll { _source, joined -> joined }
     // The files that are VCFs of alleles, each of which is read as bcftools norm rewrote it.
     def allele_vcfs = given.findAll { source, _joined -> source == 'gnomad_mito' }
     """

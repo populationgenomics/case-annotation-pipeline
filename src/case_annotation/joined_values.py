@@ -1,11 +1,12 @@
 """Values of a sites union that are joined to its alleles from public files, as Parquet tables (docs/annotation.md).
 
 Some values of an allele come from a public file that is neither a source of Illumina's bundle nor an echtvar archive:
-a VCF of sites, an annotation of intervals or a table of scores. This module joins each such file to the union's
-alleles with DuckDB, by allele or by position, and writes one row per allele, keyed by variant id as `variants` is,
-with a record of each file beside it. Some files give a value for an allele and one transcript. Those values go into a
-second table, keyed by variant id and by Ensembl's transcript id without its version, with a row only for an allele
-and a transcript that has a value.
+a VCF of sites, an annotation of intervals, a table of scores, or the catalogue of branch points that this package
+prepares from a paper's datasets (branch_points). This module joins each such file to the union's alleles with DuckDB,
+by allele or by position, and writes one row per allele, keyed by variant id as `variants` is, with a record of each
+file beside it. Some files give a value for an allele and one transcript. Those values go into a second table, keyed by
+variant id and by Ensembl's transcript id without its version, with a row only for an allele and a transcript that has
+a value.
 
 A Source describes one file: its columns and the function that reads it. A run gives any of the files and none is
 needed, so the tables of a run hold the columns of the files that it was given. A reader checks the file as it reads
@@ -39,7 +40,7 @@ import pyarrow.parquet as pq
 import pydantic
 import pysam
 
-from case_annotation import annotation_tables, sv_sites
+from case_annotation import annotation_tables, branch_points, sv_sites
 
 TABLE_NAME = 'joined_values.parquet'
 TRANSCRIPTS_NAME = 'joined_transcript_values.parquet'
@@ -151,22 +152,29 @@ def changed_span(pos: int, ref: str, alt: str) -> tuple[int, int]:
     return pos - 1 + shared, pos - 1 + len(ref)
 
 
-def _overlapping(intervals: str) -> str:
-    """A query of the variant ids of the union's alleles that overlap an interval of a table.
+def _overlaps(intervals: str, selected: str) -> str:
+    """A query of what is selected of each allele of the union, as `a`, and each interval of a table that it overlaps.
 
-    The table holds `chrom` and the half-open interval `start0` to `end0` of 0-based positions. An allele overlaps an
-    interval that holds a base it changes. An insertion overlaps an interval that holds the base on each side of it,
-    which the same comparison gives for its empty interval, and none that begins or ends where it lies.
+    The table holds `chrom` and the half-open interval `start0` to `end0` of 0-based positions, and the interval is
+    `i` in what is selected. An allele overlaps an interval that holds a base it changes. An insertion overlaps an
+    interval that holds the base on each side of it, which the same comparison gives for its empty interval, and none
+    that begins or ends where it lies. An allele and an interval that share several stretches meet once in each, so
+    the query gives what is selected once, however often it is found.
     """
     return (
-        'SELECT DISTINCT a.variant_id FROM ('  # noqa: S608 (a table name of this module's own)
+        f'SELECT DISTINCT {selected} FROM ('  # noqa: S608 (a table name and column names of this module's own)
         'SELECT variant_id, chrom, changed_start, changed_end, '
         f'unnest(range(changed_start // {_STRETCH}, greatest(changed_end - 1, changed_start) // {_STRETCH} + 1)) '
         'AS stretch FROM alleles) a '
-        f'JOIN (SELECT chrom, start0, end0, unnest(range(start0 // {_STRETCH}, (end0 - 1) // {_STRETCH} + 1)) '
+        f'JOIN (SELECT *, unnest(range(start0 // {_STRETCH}, (end0 - 1) // {_STRETCH} + 1)) '
         f'AS stretch FROM {intervals}) i '
         'ON a.chrom = i.chrom AND a.stretch = i.stretch AND a.changed_start < i.end0 AND a.changed_end > i.start0'
     )
+
+
+def _overlapping(intervals: str) -> str:
+    """A query of the variant ids of the union's alleles that overlap an interval of a table (_overlaps)."""
+    return _overlaps(intervals, 'a.variant_id')
 
 
 def _gzipped(path: pathlib.Path) -> bool:
@@ -174,10 +182,13 @@ def _gzipped(path: pathlib.Path) -> bool:
         return f.read(2) == b'\x1f\x8b'
 
 
-def _text_rows(path: pathlib.Path, columns: Sequence[str], *, header: bool, comment: str | None = None) -> str:
+def _text_rows(
+    path: pathlib.Path, columns: Sequence[str], *, header: bool, comment: str | None = None, skip: int = 0
+) -> str:
     """A table function that reads a tab-separated file, gzipped or not, with every field as text.
 
-    No field is quoted, and a row with another number of fields than the columns fails when the rows are read.
+    No field is quoted, and a row with another number of fields than the columns fails when the rows are read. The
+    file's first `skip` lines are not read.
     """
     declared = ', '.join(f"'{name}': 'VARCHAR'" for name in columns)
     options = [
@@ -192,6 +203,8 @@ def _text_rows(path: pathlib.Path, columns: Sequence[str], *, header: bool, comm
     ]
     if comment is not None:
         options.append(f"comment = '{comment}'")
+    if skip:
+        options.append(f'skip = {skip}')
     quoted = str(path).replace("'", "''")
     return f"read_csv('{quoted}', {', '.join(options)})"
 
@@ -228,6 +241,8 @@ class _Layout:
     what: str  # what a message calls the file, such as "APARENT2's table of effects"
     whose: str  # whose header it is, such as "APARENT2's"
     header: tuple[str, ...]
+    # What each line before the header starts with, in a file that says of itself what it was made from.
+    preamble: str | None = None
 
 
 def _read_rows(
@@ -248,15 +263,20 @@ def _read_rows(
     text. `malformed` is the condition on the table's columns under which a row is refused, and a row for which it is
     null is refused too. The table holds every row, or with `keep` the rows that meet that condition, so that the
     whole file is checked while only those rows are held. A refusal shows the `shown` columns of some refused rows as
-    the file writes them, and says that they are not what is `required`.
+    the file writes them, and says that they are not what is `required`. The lines before the header that start with
+    the layout's preamble, where it has one, are passed over.
 
     Raises:
         ValueError: if the header is not the layout's, a row has another number of fields, a gzip stream is cut off,
             or a row is malformed.
     """
+    before = 0
     try:
         with gzip.open(path, 'rb') if _gzipped(path) else path.open('rb') as f:
             header = f.readline().decode('utf-8', 'replace').rstrip('\r\n')
+            while layout.preamble is not None and header.startswith(layout.preamble):
+                before += 1
+                header = f.readline().decode('utf-8', 'replace').rstrip('\r\n')
     # A gzip stream that ends within the header raises an EOFError, which is no OSError.
     except (OSError, EOFError) as unreadable:
         raise ValueError(f'{path}: not {layout.what}: {unreadable}') from unreadable
@@ -270,7 +290,7 @@ def _read_rows(
         con,
         table,
         'WITH parsed AS ('  # noqa: S608 (a file's path, quoted, and expressions of this module)
-        f'SELECT {selected}, [{text}] AS text FROM {_text_rows(path, layout.header, header=True)}'
+        f'SELECT {selected}, [{text}] AS text FROM {_text_rows(path, layout.header, header=True, skip=before)}'
         f'), checked AS (SELECT {columns}, text, coalesce({malformed}, true) AS malformed FROM parsed) '
         f'SELECT {columns}, malformed, CASE WHEN malformed THEN text END AS text FROM checked'
         + ('' if keep is None else f' WHERE malformed OR ({keep})'),
@@ -788,6 +808,139 @@ def _mpc(con: duckdb.DuckDBPyConnection, path: pathlib.Path) -> Values:
     )
 
 
+# The prepared catalogue of branch points (branch_points): one row for a branch point and an intron of the paper's
+# gene models, or one row for a branch point that the paper gives no intron. An allele is matched to the three bases at
+# positions -2 to 0 of a branch point, along the branch point's strand.
+_CATALOGUE = _Layout(
+    what='the prepared catalogue of branch points',
+    whose="the catalogue's",
+    header=branch_points.COLUMNS,
+    preamble=branch_points.PREAMBLE,
+)
+# The columns that a row of the paper's table by intron fills and a row without an intron leaves empty.
+_INTRON_COLUMNS = branch_points.COLUMNS[branch_points.COLUMNS.index('gene') :]
+_BRANCH_POINT = pa.struct(
+    [
+        pa.field('name', _STRING, nullable=False),
+        pa.field('pos', _INT, nullable=False),
+        pa.field('strand', _STRING, nullable=False),
+        pa.field('hit', pa.list_(pa.int8()), nullable=False),
+        pa.field('acceptor_offset', _INT),
+        pa.field('rank', _INT),
+        pa.field('total', _INT),
+        pa.field('sources', pa.list_(_STRING), nullable=False),
+        pa.field('consensus', _STRING),
+        pa.field('gene', _STRING),
+        pa.field('transcript_introns', pa.list_(_STRING)),
+        pa.field('intron_type', _STRING),
+        pa.field('intron_length', _INT),
+    ]
+)
+
+
+def _listed(text: str, entry: str) -> str:
+    """A list from a text column that holds entries of a pattern with commas between, or null for any other text."""
+    return f"CASE WHEN regexp_full_match({text}, '{entry}(,{entry})*') THEN string_split({text}, ',') END"
+
+
+def _one_of(values: Sequence[str]) -> str:
+    return '(' + ', '.join(f"'{value}'" for value in values) + ')'
+
+
+def _branch_points(con: duckdb.DuckDBPyConnection, path: pathlib.Path) -> Values:
+    """Reads the prepared catalogue and gives each allele the branch points whose motif it changes.
+
+    An allele has an entry for each row of the catalogue whose three bases it overlaps (_overlaps), with the positions
+    among -2, -1 and 0 whose base it changes. An insertion between two of the three bases changes none of them and has
+    an entry without such a position. The entries of an allele are in the order of position, strand and name, and
+    those of one branch point with the intron whose acceptor is nearest first.
+
+    Raises:
+        ValueError: if the header is not the catalogue's, a row has another number of fields or lacks a primary
+            chromosome, a position, a strand, a name of that chromosome, position and strand, a name as the paper
+            wrote it with the same kind and base, or a list of sources; fills some of the columns of an intron and
+            not all, or fills them with something other than a list of a transcript's introns, a kind of intron, a
+            length, a negative distance to the acceptor, a rank that is at most its total and a class of consensus;
+            two rows hold one branch point in the same introns; or the file holds no row.
+    """
+    quoted = {column: f'"{column}"' for column in branch_points.COLUMNS}
+    filled = ' + '.join(f'({quoted[column]} IS NOT NULL)::INTEGER' for column in _INTRON_COLUMNS)
+    _read_rows(
+        con,
+        path,
+        _CATALOGUE,
+        'branch_point_rows',
+        parsed={
+            'chrom': 'chrom',
+            'pos': _whole('pos'),
+            'strand': 'strand',
+            'name': '"name"',
+            'grch37_name': 'grch37_name',
+            'sources': _listed('sources', branch_points.SOURCE),
+            'gene': 'gene',
+            'transcript_introns': _listed('transcript_introns', branch_points.TRANSCRIPT_INTRON),
+            'intron_type': 'intron_type',
+            'intron_length': _whole('intron_length'),
+            'acceptor_offset': (
+                "CASE WHEN regexp_full_match(acceptor_offset, '-[1-9][0-9]*') "
+                'THEN TRY_CAST(acceptor_offset AS INTEGER) END'
+            ),
+            'rank': _whole('"rank"'),
+            'total': _whole('total'),
+            'consensus': 'consensus',
+            'filled': filled,
+        },
+        malformed=(
+            f"chrom NOT IN {_PRIMARY} OR pos IS NULL OR strand NOT IN ('+', '-') "
+            f"""OR NOT regexp_full_match("name", '{branch_points.NAME}') """
+            f"""OR NOT regexp_full_match(grch37_name, '{branch_points.NAME}') """
+            """OR "name" != concat("name"[1], 'BP_', chrom, '_', pos, '_', strand, '_', "name"[-1]) """
+            'OR "name"[1] != grch37_name[1] OR "name"[-1] != grch37_name[-1] OR sources IS NULL '
+            f'OR filled NOT IN (0, {len(_INTRON_COLUMNS)}) '
+            f'OR (filled = {len(_INTRON_COLUMNS)} AND (transcript_introns IS NULL '
+            f'OR intron_type NOT IN {_one_of(branch_points.INTRON_TYPES)} OR intron_length IS NULL '
+            'OR acceptor_offset IS NULL OR "rank" IS NULL OR total IS NULL OR "rank" > total '
+            f'OR consensus NOT IN {_one_of(branch_points.CONSENSUS)}))'
+        ),
+        shown=branch_points.COLUMNS,
+        required=(
+            'a primary chromosome, a position, a strand, a name of the three with a kind and a base, the name as the '
+            'paper wrote it with that kind and base, and sources, and then either nothing or a gene, the introns of '
+            'transcripts, a kind of intron, a length, a negative distance to the acceptor, a rank that is at most '
+            'its total, and a class of consensus'
+        ),
+    )
+    _unique(con, path, 'branch_point_rows', ('grch37_name', 'transcript_introns'), 'branch point and its introns')
+    # The three bases of a row as an interval: the branch point's base and the two before it on its strand.
+    con.execute(
+        'CREATE TEMP TABLE branch_point_motifs AS SELECT *, row_number() OVER () AS entry, '
+        "CASE strand WHEN '+' THEN 1 ELSE -1 END AS step, "
+        "CASE strand WHEN '+' THEN pos - 3 ELSE pos - 1 END AS start0, "
+        "CASE strand WHEN '+' THEN pos ELSE pos + 2 END AS end0 FROM branch_point_rows"
+    )
+    if not con.sql('SELECT 1 FROM branch_point_motifs LIMIT 1').fetchall():
+        raise ValueError(f'{path}: no branch point, and the prepared catalogue holds some')
+    # The 1-based position p is of a base that the allele changes where changed_start < p <= changed_end.
+    hit = (
+        'CAST(list_filter([-2, -1, 0], lambda k: o.changed_start < m.pos + k * m.step '
+        'AND m.pos + k * m.step <= o.changed_end) AS TINYINT[])'
+    )
+    fields = {
+        'name': 'm."name"',
+        'pos': 'm.pos',
+        'strand': 'm.strand',
+        'hit': hit,
+        **{name: f'm."{name}"' for name in _BRANCH_POINT.names[4:]},
+    }
+    entry = ', '.join(f"'{name}': {value}" for name, value in fields.items())
+    found = _overlaps('branch_point_motifs', 'a.variant_id, a.changed_start, a.changed_end, i.entry')
+    return Values(
+        f'SELECT o.variant_id, list({{{entry}}} ORDER BY m.pos, m.strand, m."name", '  # noqa: S608 (names of this module's own)
+        'm.acceptor_offset DESC NULLS LAST, m.transcript_introns, m.grch37_name) AS branch_points '
+        f'FROM ({found}) o JOIN branch_point_motifs m USING (entry) GROUP BY o.variant_id'
+    )
+
+
 GNOMAD_MITO = Source(name='gnomad_mito', fields=_MITO_FIELDS, read=_gnomad_mito, normalised=True)
 GENCODE_POLYA = Source(
     name='gencode_polya',
@@ -833,10 +986,16 @@ MPC = Source(
     read=_mpc,
     transcript_fields=(pa.field('mpc', _FLOAT),),
 )
+BRANCH_POINTS = Source(
+    name='branch_points',
+    fields=(pa.field('branch_points', pa.list_(_BRANCH_POINT)),),
+    read=_branch_points,
+)
 
 # Every file that a run can join, in the order of their columns in the tables. A run reads any of them, or none.
 SOURCES: Mapping[str, Source] = {
-    source.name: source for source in (GNOMAD_MITO, MITOTIP, GENCODE_POLYA, APARENT2, GENOMIC_CONSTRAINT, MCR, MPC)
+    source.name: source
+    for source in (GNOMAD_MITO, MITOTIP, GENCODE_POLYA, APARENT2, GENOMIC_CONSTRAINT, MCR, MPC, BRANCH_POINTS)
 }
 
 

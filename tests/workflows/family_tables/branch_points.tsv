@@ -1,0 +1,8 @@
+##invented branch points, in the layout of the catalogue that case-annotation branch-points prepares
+##chain: invented
+chrom	pos	strand	name	grch37_name	sources	gene	transcript_introns	intron_type	intron_length	acceptor_offset	rank	total	consensus
+chr1	200	+	mBP_chr1_200_+_G	mBP_chr1_200_+_G	eBP_Invented,cBP_Invented	INVENTED1	ENST01_IVS2	major	900	-24	1	1	1:YTNAY
+chr1	402	-	cBP_chr1_402_-_A	cBP_chr1_402_-_A	cBP_Invented								
+chr2	92	+	eBP_chr2_92_+_A	eBP_chr2_92_+_A	eBP_Invented	INVENTED2	ENST01_IVS4	minor	85	-20	1	2	0:none
+chr2	92	+	eBP_chr2_92_+_A	eBP_chr2_92_+_A	eBP_Invented	INVENTED2	ENST02_IVS1,ENST03_IVS1	major	4000	-31	2	2	3:TNA
+chr2	94	+	cBP_chr2_94_+_C	cBP_chr2_94_+_C	cBP_Invented								
