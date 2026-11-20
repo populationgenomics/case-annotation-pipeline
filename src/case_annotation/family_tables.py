@@ -401,6 +401,9 @@ class PluginMatching(pydantic.BaseModel, frozen=True, extra='forbid'):
     source: gene_models.Source
     # The plugins' rows of the family's alleles on a transcript that the allele has no row of in `transcripts`.
     rows_without_transcript: int
+    # The plugins' rows of the family's alleles on a feature whose id is no transcript id of `transcripts`
+    # (vep_plugins.TRANSCRIPT_ID), which no row can match.
+    rows_of_other_ids: int
     # The `transcripts` rows with the consequence 5_prime_UTR_variant that have no value of UTRannotator's.
     utr5_transcripts_without_values: int
 
@@ -408,8 +411,8 @@ class PluginMatching(pydantic.BaseModel, frozen=True, extra='forbid'):
 class VepPlugins(pydantic.BaseModel, frozen=True, extra='forbid'):
     """What the columns of VEP's two plugins come from, and how its rows met the family's.
 
-    `run` is the record of the union's VEP run, so its counts are the union's: the alleles that VEP read, and the rows
-    that each gene model file gave. `matching` is of this family's tables.
+    `run` is the record of the VEP run, which holds nothing of the union's alleles, and `matching` is of this family's
+    tables.
     """
 
     run: vep_plugins.VepPluginsInfo
@@ -879,18 +882,22 @@ def _plugin_matching(con: duckdb.DuckDBPyConnection, source: gene_models.Source)
     The connection has the family's `records`, the union's table of the plugins as `union_plugins` and the family's
     transcripts table as it was written, as `written_transcripts`.
     """
-    counts = {
-        'rows_without_transcript': (
-            'SELECT count(*) FROM (SELECT * FROM union_plugins SEMI JOIN records USING (variant_id)) p '
-            'ANTI JOIN written_transcripts USING (variant_id, transcript_id) WHERE p.source = ?'
-        ),
-        'utr5_transcripts_without_values': (
-            "SELECT count(*) FROM written_transcripts WHERE list_contains(consequences, '5_prime_UTR_variant') "
-            'AND utr5_existing_uorfs IS NULL AND source = ?'
-        ),
-    }
+    unmatched = (
+        'SELECT count(*) FILTER (WHERE regexp_full_match(p.transcript_id, ?)), count(*) '
+        'FROM (SELECT * FROM union_plugins SEMI JOIN records USING (variant_id)) p '
+        'ANTI JOIN written_transcripts USING (variant_id, transcript_id) WHERE p.source = ?'
+    )
+    without_transcript, without_row = con.execute(unmatched, [vep_plugins.TRANSCRIPT_ID.pattern, source]).fetchall()[0]
+    (without_values,) = con.execute(
+        "SELECT count(*) FROM written_transcripts WHERE list_contains(consequences, '5_prime_UTR_variant') "
+        'AND utr5_existing_uorfs IS NULL AND source = ?',
+        [source],
+    ).fetchall()[0]
     return PluginMatching(
-        source=source, **{name: con.execute(query, [source]).fetchall()[0][0] for name, query in counts.items()}
+        source=source,
+        rows_without_transcript=without_transcript,
+        rows_of_other_ids=without_row - without_transcript,
+        utr5_transcripts_without_values=without_values,
     )
 
 
@@ -977,6 +984,9 @@ def assemble(
             ),
             "alleles of the union's table of VEP's plugins that its annotation lacks, so the table is of another "
             'union': 'SELECT variant_id FROM union_plugins ANTI JOIN union_variants USING (variant_id)',
+            "alleles with a transcript twice in the union's table of VEP's plugins": (
+                'SELECT variant_id FROM union_plugins GROUP BY variant_id, transcript_id HAVING count(*) > 1'
+            ),
         }.items():
             if found := [r[0] for r in con.sql(f'{query} ORDER BY 1 LIMIT 5').fetchall()]:
                 raise ValueError(f'{vcf_path}: {problem}, such as {found}')

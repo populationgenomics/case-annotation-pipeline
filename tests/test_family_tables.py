@@ -473,12 +473,9 @@ _PLUGINS_INFO = vep_plugins.VepPluginsInfo(
             source=source,
             file=vep_plugins.FileRecord(name=gene_models.FILES[source], bytes=1, sha256='3' * 64),
             prepared_from=gene_models.PublicFile(name=f'invented.{source}.gz', bytes=1, sha256='4' * 64, stated=()),
-            rows=2,
-            skipped_transcript_ids=0,
         )
         for source in gene_models.FILES
     ),
-    alleles=3,
 )
 
 
@@ -489,8 +486,9 @@ def _uorf(consequence: str, **fields: object) -> dict[str, Any]:
 
 # The rows of the union's table of VEP's plugins, each as (variant id, transcript id, source, columns). The second
 # allele has two kinds of effect on its transcript of `transcripts`, with two records of one kind, and a row on a
-# RefSeq transcript that `transcripts` lacks. The third allele ends a reading frame, and the NMD plugin evaluated it
-# without a flag. The other family's allele has a row too.
+# RefSeq transcript that `transcripts` lacks, and one on a feature of RefSeq's file whose id is no transcript id. The
+# third allele ends a reading frame, and the NMD plugin evaluated it without a flag. The other family's allele has a
+# row too.
 _GAINED = _uorf('uAUG_gained', type='inFrame_oORF', kozak_context='GCCATGG', kozak_strength='Strong', distance_to_cds=9)
 _SHIFTED = (
     _uorf('uFrameShift', ref_type='uORF', alt_type='OutOfFrame_oORF', ref_start_distance_to_cds=95, evidence=True),
@@ -505,6 +503,7 @@ _PLUGINS: tuple[tuple[str, str, str, dict[str, Any]], ...] = (
         _COUNTED | {'utr5_consequences': ['uAUG_gained', 'uFrameShift'], 'utr5_uorfs': [_GAINED, *_SHIFTED]},
     ),
     (_ALLELES[1], 'NM_77.1', 'RefSeq', _COUNTED | {'utr5_consequences': ['uSTOP_lost'], 'utr5_uorfs': None}),
+    (_ALLELES[1], 'rna-INV-GTT27-1', 'RefSeq', dict(_COUNTED)),
     (_ALLELES[2], 'ENST01.1', 'Ensembl', {'nmd_escaping': False}),
     ('chr2-500-C-A', 'ENST01.1', 'Ensembl', _COUNTED | {'utr5_consequences': ['uAUG_lost']}),
 )
@@ -913,13 +912,18 @@ def test_the_manifest_counts_the_rows_that_did_not_meet(tmp_path: pathlib.Path) 
     ensembl, refseq = manifest.vep_plugins.matching
     # The second allele's transcript has UTRannotator's counts, and the row of the other family's allele is not
     # this family's to count.
-    assert (ensembl.rows_without_transcript, ensembl.utr5_transcripts_without_values) == (0, 2)
-    # The plugins' row on the RefSeq transcript that `transcripts` lacks.
-    assert (refseq.rows_without_transcript, refseq.utr5_transcripts_without_values) == (1, 0)
+    assert ensembl == family_tables.PluginMatching(
+        source='Ensembl', rows_without_transcript=0, rows_of_other_ids=0, utr5_transcripts_without_values=2
+    )
+    # The plugins' row on the RefSeq transcript that `transcripts` lacks, and its row on a feature that is none.
+    assert refseq == family_tables.PluginMatching(
+        source='RefSeq', rows_without_transcript=1, rows_of_other_ids=1, utr5_transcripts_without_values=0
+    )
     written = json.loads((tmp_path / 'out' / 'manifest.json').read_text())
     assert written['vep_plugins']['matching'][1] == {
         'source': 'RefSeq',
         'rows_without_transcript': 1,
+        'rows_of_other_ids': 1,
         'utr5_transcripts_without_values': 0,
     }
     # Both tables of the alleles carry the run's record.
@@ -932,6 +936,26 @@ def test_a_plugins_table_of_another_union_is_refused(tmp_path: pathlib.Path) -> 
     other = ('chr3-77-A-C', 'ENST01.1', 'Ensembl', {'nmd_escaping': True})
     with pytest.raises(ValueError, match=r"so the table is of another union, such as \['chr3-77-A-C'\]"):
         family_tables.assemble(**_inputs(tmp_path, plugins=(*_PLUGINS, other)))
+
+
+def test_a_plugins_table_with_a_transcript_twice_for_an_allele_is_refused(tmp_path: pathlib.Path) -> None:
+    # Each would give the allele's row of `transcripts` a second row.
+    with pytest.raises(
+        ValueError, match=rf"a transcript twice in the union's table of VEP's plugins, such as \['{_ALLELES[2]}'\]"
+    ):
+        family_tables.assemble(**_inputs(tmp_path, plugins=(*_PLUGINS, _PLUGINS[3])))
+
+
+def test_the_tables_of_a_family_do_not_change_with_the_other_alleles_of_the_union(tmp_path: pathlib.Path) -> None:
+    first, second = tmp_path / 'first', tmp_path / 'second'
+    first.mkdir()
+    second.mkdir()
+    family_tables.assemble(**_inputs(first))
+    # The same family in a union whose plugins' table has rows of one more allele of another family.
+    more = ('chr2-500-C-A', 'ENST09.1', 'Ensembl', {'nmd_escaping': True})
+    family_tables.assemble(**_inputs(second, plugins=(*_PLUGINS, more)))
+    for table in _ALLELE_TABLES:
+        assert (first / 'out' / f'{table}.parquet').read_bytes() == (second / 'out' / f'{table}.parquet').read_bytes()
 
 
 def test_an_alleles_dbsnp_ids_are_a_list_and_an_allele_without_any_has_none(tmp_path: pathlib.Path) -> None:

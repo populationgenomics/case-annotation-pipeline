@@ -935,10 +935,10 @@ assert (record['consequence'], record['ref_type'], record['new_stop_distance_to_
     'uSTOP_gained', 'InFrame_oORF', 12, False), record
 assert record['type'] is None and record['distance_to_cds'] is None, record
 ran = manifest['vep_plugins']
-assert (ran['run']['vep_version'], ran['run']['alleles']) == ('116.3', 5), ran
+assert ran['run']['vep_version'] == '116.3', ran
 assert ran['matching'] == [
-    {'source': 'Ensembl', 'rows_without_transcript': 0, 'utr5_transcripts_without_values': 0},
-    {'source': 'RefSeq', 'rows_without_transcript': 4, 'utr5_transcripts_without_values': 0},
+    {'source': 'Ensembl', 'rows_without_transcript': 0, 'rows_of_other_ids': 0, 'utr5_transcripts_without_values': 0},
+    {'source': 'RefSeq', 'rows_without_transcript': 4, 'rows_of_other_ids': 0, 'utr5_transcripts_without_values': 0},
 ], ran
 assert json.loads(variants.schema.metadata[b'vep_plugins']) == ran['run'], variants.schema.metadata
 EOF

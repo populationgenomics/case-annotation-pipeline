@@ -1388,17 +1388,18 @@ for every union that the same image and gene models annotate. The step writes th
 
 `FAMILY_TABLES` matches a row of the plugins' table to the row of `transcripts` with the same variant id and the same
 transcript id, version included. VEP's files and the Annotator's are the same releases, and the two still do not always
-agree, so two kinds of row find no partner. Neither stops a run, and a family's manifest counts both for each source of
+agree, so some rows find no partner. That stops no run, and a family's manifest counts such rows for each source of
 transcripts, under `vep_plugins.matching`.
 
-| Count                             | The rows                                                                                                                                  |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `rows_without_transcript`         | the plugins' rows of the family's alleles on a transcript that the allele has no row of in `transcripts`; they are left out               |
-| `utr5_transcripts_without_values` | the rows of `transcripts` with the consequence `5_prime_UTR_variant` that have no value of UTRannotator's; their `utr5_` columns are null |
+| Count                             | The rows                                                                                                                                                 |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rows_without_transcript`         | the plugins' rows of the family's alleles on a transcript that the allele has no row of in `transcripts`; they are left out                              |
+| `rows_of_other_ids`               | the plugins' rows of the family's alleles on a feature whose id is not `ENST`, `NM_`, `NR_`, `XM_` or `XR_` with digits and a version; they are left out |
+| `utr5_transcripts_without_values` | the rows of `transcripts` with the consequence `5_prime_UTR_variant` that have no value of UTRannotator's; their `utr5_` columns are null                |
 
-A large second count for one source can mean that the gene model file of that source is of another release than the
+A large last count for one source can mean that the gene model file of that source is of another release than the
 catalog's. `FAMILY_TABLES` fails only where the plugins' table holds an allele that the union's annotation lacks, which
-is a table of another union.
+is a table of another union, or a transcript twice for an allele.
 
 Neither plugin reads a [dated source](#dated-sources). The gene models are the Annotator's own releases, and
 UTRannotator's file of translated reading frames is a list that its authors curated from sorfs.org, which records

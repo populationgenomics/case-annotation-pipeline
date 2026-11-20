@@ -416,8 +416,6 @@ def _example_plugins() -> family_tables.VepPlugins:
             prepared_from=gene_models.PublicFile(
                 name=public[source], bytes=80_000_000 + number, sha256='d' * 64, stated=('#!invented release 1',)
             ),
-            rows=40_000 * number,
-            skipped_transcript_ids=number - 1,
         )
         for number, source in enumerate(gene_models.FILES, start=1)
     )
@@ -429,11 +427,13 @@ def _example_plugins() -> family_tables.VepPlugins:
         options=('--gff', '--fasta', '--synonyms', '--json', '--safe', '--transcript_version'),
         environment=('PERL_HASH_SEED=0', 'PERL_PERTURB_KEYS=0'),
         gene_models=models,
-        alleles=600_000,
     )
     matching = tuple(
         family_tables.PluginMatching(
-            source=source, rows_without_transcript=30 * number, utr5_transcripts_without_values=20 * number
+            source=source,
+            rows_without_transcript=30 * number,
+            rows_of_other_ids=number - 1,
+            utr5_transcripts_without_values=20 * number,
         )
         for number, source in enumerate(gene_models.FILES, start=1)
     )

@@ -252,6 +252,31 @@
       "title": "FamilyMember",
       "type": "object"
     },
+    "FileRecord": {
+      "description": "A file as a run read it.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "bytes",
+        "sha256"
+      ],
+      "title": "FileRecord",
+      "type": "object"
+    },
     "FrequencyArchive": {
       "description": "The echtvar archive that gave each site its frequency, and the echtvar that read it.",
       "properties": {
@@ -284,6 +309,27 @@
         "field"
       ],
       "title": "FrequencyArchive",
+      "type": "object"
+    },
+    "GeneModelAnnotated": {
+      "description": "One gene model file of a run: the file as the run read it, and the public file that it was prepared from.",
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/Source"
+        },
+        "file": {
+          "$ref": "#/$defs/FileRecord"
+        },
+        "prepared_from": {
+          "$ref": "#/$defs/PublicFile"
+        }
+      },
+      "required": [
+        "source",
+        "file",
+        "prepared_from"
+      ],
+      "title": "GeneModelAnnotated",
       "type": "object"
     },
     "JoinedFile": {
@@ -437,6 +483,66 @@
       "title": "OmittedSource",
       "type": "object"
     },
+    "PluginMatching": {
+      "description": "How the rows of VEP's plugins met the family's `transcripts` rows of one source of transcripts.\n\nVEP reads its own files of the gene models, so a transcript, or a version of one, can be in VEP's file and not\namong the Annotator's, or the other way round, and the two can place a variant differently at the edge of a 5' UTR.\nNeither stops a run.",
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/Source"
+        },
+        "rows_without_transcript": {
+          "title": "Rows Without Transcript",
+          "type": "integer"
+        },
+        "rows_of_other_ids": {
+          "title": "Rows Of Other Ids",
+          "type": "integer"
+        },
+        "utr5_transcripts_without_values": {
+          "title": "Utr5 Transcripts Without Values",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "source",
+        "rows_without_transcript",
+        "rows_of_other_ids",
+        "utr5_transcripts_without_values"
+      ],
+      "title": "PluginMatching",
+      "type": "object"
+    },
+    "PublicFile": {
+      "description": "A public file as the preparation read it.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "stated": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Stated",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "bytes",
+        "sha256",
+        "stated"
+      ],
+      "title": "PublicFile",
+      "type": "object"
+    },
     "Reason": {
       "const": "no informative site",
       "type": "string"
@@ -534,6 +640,13 @@
         "male",
         "female",
         "unknown"
+      ],
+      "type": "string"
+    },
+    "Source": {
+      "enum": [
+        "Ensembl",
+        "RefSeq"
       ],
       "type": "string"
     },
@@ -662,6 +775,78 @@
       ],
       "title": "Trio",
       "type": "object"
+    },
+    "VepPlugins": {
+      "description": "What the columns of VEP's two plugins come from, and how its rows met the family's.\n\n`run` is the record of the VEP run, which holds nothing of the union's alleles, and `matching` is of this family's\ntables.",
+      "properties": {
+        "run": {
+          "$ref": "#/$defs/VepPluginsInfo"
+        },
+        "matching": {
+          "items": {
+            "$ref": "#/$defs/PluginMatching"
+          },
+          "title": "Matching",
+          "type": "array"
+        }
+      },
+      "required": [
+        "run",
+        "matching"
+      ],
+      "title": "VepPlugins",
+      "type": "object"
+    },
+    "VepPluginsInfo": {
+      "description": "The VEP run that the columns of the two plugins come from (INFO_NAME).",
+      "properties": {
+        "vep_version": {
+          "title": "Vep Version",
+          "type": "string"
+        },
+        "utrannotator_commit": {
+          "title": "Utrannotator Commit",
+          "type": "string"
+        },
+        "uorf_evidence": {
+          "$ref": "#/$defs/FileRecord"
+        },
+        "nmd_plugin": {
+          "$ref": "#/$defs/FileRecord"
+        },
+        "options": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Options",
+          "type": "array"
+        },
+        "environment": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Environment",
+          "type": "array"
+        },
+        "gene_models": {
+          "items": {
+            "$ref": "#/$defs/GeneModelAnnotated"
+          },
+          "title": "Gene Models",
+          "type": "array"
+        }
+      },
+      "required": [
+        "vep_version",
+        "utrannotator_commit",
+        "uorf_evidence",
+        "nmd_plugin",
+        "options",
+        "environment",
+        "gene_models"
+      ],
+      "title": "VepPluginsInfo",
+      "type": "object"
     }
   },
   "properties": {
@@ -748,6 +933,9 @@
       "title": "Joined Files",
       "type": "array"
     },
+    "vep_plugins": {
+      "$ref": "#/$defs/VepPlugins"
+    },
     "omitted_columns": {
       "items": {
         "type": "string"
@@ -815,6 +1003,7 @@
     "alphagenome_avi_breakdown",
     "alphagenome_splicing",
     "joined_files",
+    "vep_plugins",
     "omitted_columns",
     "transcripts_omitted_columns",
     "sv_annotation",
