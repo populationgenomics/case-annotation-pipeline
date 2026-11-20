@@ -72,6 +72,55 @@ def _promoterai(transcript: str, score: float, distance: int, **extra: object) -
     return {'transcriptId': transcript, 'score': score, 'distanceFromTss': distance, **extra}
 
 
+def _gnomad(coverage: int, **groups: tuple[float, int, int, int]) -> dict[str, Any]:
+    """A gnomAD entry: its coverage, and of each group named its frequency, count, number and homozygotes."""
+    entry: dict[str, Any] = {'coverage': coverage}
+    for group, values in groups.items():
+        entry |= dict(zip((f'{group}Af', f'{group}Ac', f'{group}An', f'{group}Hc'), values, strict=True))
+    return entry
+
+
+def _clinvar_record(
+    accession: str,
+    status: str | None,
+    evaluated: str,
+    classification: str,
+    updated: str = '2099-06-01',
+    cited: tuple[str, ...] = (),
+    submissions: tuple[tuple[str, ...], ...] = (),
+) -> dict[str, Any]:
+    """An invented ClinVar record of the allele C>T.
+
+    `cited` are the PubMed ids of its germline classification, and `submissions` those of each of its submissions.
+    """
+    germline = {
+        'classification': classification,
+        'reviewStatus': status,
+        'dateLastEvaluated': evaluated,
+        'conditions': [{'traits': [{'name': {'value': f'condition of {accession}'}}]}],
+        **({'pubMedIds': list(cited)} if cited else {}),
+    }
+    return {
+        'accession': accession,
+        'version': 1,
+        'recordType': 'classified',
+        'refAllele': 'C',
+        'altAllele': 'T',
+        'isAlleleSpecific': True,
+        'dateLastUpdated': updated,
+        'classifications': {'germlineClassification': germline} if status else {},
+        'clinicalAssertions': [
+            {'accession': f'SCV{index}'} | ({'pubMedIds': list(ids)} if ids else {})
+            for index, ids in enumerate(submissions)
+        ],
+    }
+
+
+def _other_allele(record: dict[str, Any], alt: str) -> dict[str, Any]:
+    """The invented ClinVar record as the Annotator lists it on an allele that it is not of."""
+    return {key: value for key, value in record.items() if key != 'isAlleleSpecific'} | {'altAllele': alt}
+
+
 def _position(chrom: str, pos: int, ref: str, alt: str, **variant: object) -> dict[str, Any]:
     return {
         'chromosome': chrom,
@@ -106,17 +155,32 @@ def _rich_position() -> dict[str, Any]:
         variantType='SNV',
         hgvsg='NC_000002.12:g.100A>G',
         dbsnp=['rs1', 'rs2'],
-        gnomad={'allAf': 0.001, 'allAc': 2, 'allAn': 2000, 'allHc': 0, 'failedFilter': True},
+        inLowComplexityRegion=True,
+        gnomad=_gnomad(31, all=(0.001, 2, 2000, 0), afr=(0.004, 2, 500, 0), male=(0.002, 2, 1000, 1))
+        | {'failedFilter': True},
         transcripts=[
             _transcript('ENST01.1', 'Ensembl', 'GENEA', 'ENSG01', 'intron_variant'),
-            _transcript('ENST02.3', 'Ensembl', 'GENEA', 'ENSG01', 'missense_variant', isCanonical=True),
+            _transcript(
+                'ENST02.3',
+                'Ensembl',
+                'GENEA',
+                'ENSG01',
+                'missense_variant',
+                isCanonical=True,
+                aminoAcidConservation={'scores': [0.34]},
+            ),
             _transcript(
                 'NM_01.2', 'RefSeq', 'GENEA', '1001', 'missense_variant', isManeSelect=True, hgvsp='NP_01.2:p.(K1E)'
             ),
             _transcript('ENST03.1', 'Ensembl', 'GENEB', 'ENSG02', 'upstream_gene_variant'),
         ],
         alphaMissense=[
-            {'transcriptId': 'ENST02.2', 'pathogenicity': 0.9, 'classification': 'likely_pathogenic'},
+            {
+                'transcriptId': 'ENST02.2',
+                'pathogenicity': 0.9,
+                'classification': 'likely_pathogenic',
+                'isIsoform': True,
+            },
             {'transcriptId': 'ENST01.1', 'pathogenicity': 0.2, 'classification': 'likely_benign'},
         ],
         spliceAI=[
@@ -136,7 +200,17 @@ def _rich_position() -> dict[str, Any]:
             {'id': 'R02', 'type': 'promoter', 'consequence': ['regulatory_region_variant']},
             {'id': 'R01', 'type': 'enhancer', 'consequence': ['regulatory_region_variant']},
         ],
-        **{'primateAI-3D': [{'score': 0.7, 'ensemblTranscriptId': 'ENST02.3', 'refSeqTranscriptId': 'NM_01.1'}]},
+        **{
+            'primateAI-3D': [
+                {
+                    'score': 0.7,
+                    'scorePercentile': 0.81,
+                    'classification': 'pathogenic',
+                    'ensemblTranscriptId': 'ENST02.3',
+                    'refSeqTranscriptId': 'NM_01.1',
+                }
+            ]
+        },
         revel={'score': 0.5},
         dannScore=0.9,
         phylopScore=3.1,
@@ -145,17 +219,35 @@ def _rich_position() -> dict[str, Any]:
         clinvar=[
             {
                 'accession': 'VCV000000002',
+                'refAllele': 'A',
+                'altAllele': 'G',
                 'isAlleleSpecific': True,
+                'dateLastUpdated': '2099-02-01',
                 'classifications': {
                     'germlineClassification': {
                         'classification': 'Uncertain significance',
                         'reviewStatus': 'criteria provided, single submitter',
                         'dateLastEvaluated': '2099-01-01',
                         'conditions': [{'traits': [{'name': {'value': 'invented condition'}}]}],
+                        'pubMedIds': ['990000002'],
+                    }
+                },
+                'clinicalAssertions': [{'accession': 'SCV000000001', 'pubMedIds': ['990000001']}],
+            },
+            {
+                'accession': 'VCV000000003',
+                'refAllele': 'A',
+                'altAllele': 'T',
+                'dateLastUpdated': '2099-03-01',
+                'classifications': {
+                    'germlineClassification': {
+                        'classification': 'Pathogenic',
+                        'reviewStatus': 'reviewed by expert panel',
+                        'dateLastEvaluated': '2098-06-01',
+                        'conditions': [{'traits': [{'name': {'value': 'another invented condition'}}]}],
                     }
                 },
             },
-            {'accession': 'VCV000000003', 'refAllele': 'A', 'altAllele': 'T'},
         ],
     )
 
@@ -274,7 +366,146 @@ def test_an_allele_without_a_primate_phylop_score_has_none() -> None:
     assert (row['phylop'], row['phylop_primate']) == (1.5, None)
 
 
+def _groups(row: dict[str, Any], kind: str) -> dict[str, tuple[float, int, int, int]]:
+    """The groups that a row of `variants` holds of gnomAD's genomes or exomes, each with its four values."""
+    held = row[f'gnomad_{kind}_groups']
+    return {group: tuple(values.values()) for group, values in held.items() if values is not None}
+
+
+def test_an_allele_has_gnomads_coverage_and_the_values_of_each_group_that_the_annotator_gives() -> None:
+    exomes = _gnomad(52, all=(0.5, 4, 8, 1), nfe=(0.5, 2, 4, 1), remaining=(0, 0, 2, 0), female=(0.25, 1, 4, 0))
+    position = _rich_position()
+    position['variants'][0]['gnomad-exome'] = exomes
+    row, _, _ = _position_rows(position)
+    assert (row['gnomad_genomes_coverage'], row['gnomad_exomes_coverage']) == (31, 52)
+    # A group has its four values under the names of the all-sample columns, and a group that the entry leaves out
+    # has none. The all-sample values are no group: they stay in their own columns.
+    assert _groups(row, 'genomes') == {'afr': (0.004, 2, 500, 0), 'male': (0.002, 2, 1000, 1)}
+    assert _groups(row, 'exomes') == {'nfe': (0.5, 2, 4, 1), 'remaining': (0, 0, 2, 0), 'female': (0.25, 1, 4, 0)}
+    assert row['gnomad_genomes_groups']['male'] == {'af': 0.002, 'ac': 2, 'an': 1000, 'hom': 1}
+    assert (row['gnomad_genomes_af'], row['gnomad_exomes_af']) == (0.001, 0.5)
+
+    table = pa.Table.from_pylist([row], schema=annotation_tables.VARIANTS)
+    fields = {kind: table.schema.field(f'gnomad_{kind}_groups').type for kind in ('genomes', 'exomes')}
+    # The exomes have the groups of the genomes without `ami`.
+    assert 'ami' in [f.name for f in fields['genomes']]
+    assert [f.name for f in fields['exomes']] == [f.name for f in fields['genomes'] if f.name != 'ami']
+    assert {f.type for kind in fields.values() for f in kind} == {annotation_tables.GNOMAD_GROUP}
+    assert [(f.name, f.type) for f in annotation_tables.GNOMAD_GROUP] == [
+        ('af', pa.float32()),
+        ('ac', pa.int32()),
+        ('an', pa.int32()),
+        ('hom', pa.int32()),
+    ]
+    assert table.schema.field('gnomad_genomes_coverage').type == pa.int32()
+    (written,) = table.select(['gnomad_exomes_groups']).to_pylist()
+    assert written['gnomad_exomes_groups']['afr'] is None
+    assert written['gnomad_exomes_groups']['female'] == {'af': 0.25, 'ac': 1, 'an': 4, 'hom': 0}
+
+
+@pytest.mark.parametrize(('key', 'kind'), [('gnomad', 'genomes'), ('gnomad-exome', 'exomes')])
+def test_every_field_of_gnomads_groups_is_a_group_under_the_name_of_its_keys(key: str, kind: str) -> None:
+    names = [f.name for f in annotation_tables.VARIANTS.field(f'gnomad_{kind}_groups').type]
+    # An entry with the four keys of every field's name is accepted and fills every field with its own values.
+    given = {name: (index / 100, index, 100, 0) for index, name in enumerate(names)}
+    row, _, _ = _position_rows(_position('chr1', 5, 'C', 'T', **{key: _gnomad(20, all=(0.1, 1, 10, 0), **given)}))
+    assert _groups(row, kind) == given
+
+
+def test_an_allele_that_gnomad_lacks_has_neither_coverage_nor_groups() -> None:
+    row, _, _ = _position_rows(_position('chr1', 5, 'C', 'T', gnomad=_gnomad(18, all=(0.1, 1, 10, 0))))
+    # In the genomes without a group, and not in the exomes at all.
+    assert row['gnomad_genomes_coverage'] == 18
+    assert _groups(row, 'genomes') == {}
+    assert not {'gnomad_exomes_coverage', 'gnomad_exomes_groups'} & set(row)
+    table = pa.Table.from_pylist([row], schema=annotation_tables.VARIANTS)
+    (written,) = table.select(['gnomad_exomes_coverage', 'gnomad_exomes_groups']).to_pylist()
+    assert written == {'gnomad_exomes_coverage': None, 'gnomad_exomes_groups': None}
+
+
+def test_an_allele_is_in_a_low_complexity_region_only_where_the_annotator_says_so() -> None:
+    inside, _, _ = _position_rows(_position('chr1', 5, 'C', 'T', inLowComplexityRegion=True))
+    outside, _, _ = _position_rows(_position('chr1', 5, 'C', 'T'))
+    # The Annotator writes the flag only where it is true, so an allele without it is outside, not unknown.
+    assert (inside['in_low_complexity_region'], outside['in_low_complexity_region']) == (True, False)
+    assert annotation_tables.VARIANTS.field('in_low_complexity_region').type == pa.bool_()
+
+
+def test_a_primateai3d_score_has_the_percentile_and_the_class_of_its_own_entry() -> None:
+    transcripts = [
+        _transcript('ENST01.1', 'Ensembl', 'GENEA', 'ENSG01', 'missense_variant'),
+        _transcript('ENST02.1', 'Ensembl', 'GENEA', 'ENSG01', 'inframe_deletion'),
+        _transcript('ENST03.1', 'Ensembl', 'GENEA', 'ENSG01', 'intron_variant'),
+    ]
+    entries = [
+        {'score': 0.3, 'scorePercentile': 0.4, 'classification': 'benign', 'ensemblTranscriptId': 'ENST01.1'},
+        {'score': 0.8, 'scorePercentile': 0.95, 'classification': 'pathogenic', 'ensemblTranscriptId': 'ENST01.1'},
+        # An entry with a score alone, as the Annotator writes some.
+        {'score': 0.6, 'ensemblTranscriptId': 'ENST02.1', 'indelType': 'deletion'},
+    ]
+    for primateai3d in (entries, entries[::-1]):
+        row, rows, _ = _position_rows(
+            _position('chr1', 5, 'C', 'T', transcripts=transcripts, **{'primateAI-3D': primateai3d})
+        )
+        assert (row['primateai3d_max'], row['primateai3d_max_percentile'], row['primateai3d_max_class']) == (
+            0.8,
+            0.95,
+            'pathogenic',
+        )
+        held = {
+            r['transcript_id']: (r['primateai3d_score'], r['primateai3d_percentile'], r['primateai3d_class'])
+            for r in rows
+        }
+        assert held == {
+            'ENST01.1': (0.8, 0.95, 'pathogenic'),
+            'ENST02.1': (0.6, None, None),
+            'ENST03.1': (None, None, None),
+        }
+
+    alone, _, _ = _position_rows(_position('chr1', 5, 'C', 'T', **{'primateAI-3D': entries[2:]}))
+    assert (alone['primateai3d_max'], alone['primateai3d_max_percentile'], alone['primateai3d_max_class']) == (
+        0.6,
+        None,
+        None,
+    )
+
+
+def test_an_alphamissense_score_says_whether_it_is_of_an_isoform() -> None:
+    _, transcripts, _ = _position_rows(_rich_position())
+    held = {t['transcript_id']: t['alphamissense_is_isoform'] for t in transcripts}
+    # True where the entry says so, false for an entry without the flag, and nothing for a transcript without an
+    # entry.
+    assert held == {'ENST02.3': True, 'ENST01.1': False, 'NM_01.2': None, 'ENST03.1': None}
+    assert annotation_tables.TRANSCRIPTS.field('alphamissense_is_isoform').type == pa.bool_()
+
+
+def test_a_transcript_has_the_amino_acid_conservation_scores_as_the_annotator_lists_them() -> None:
+    transcripts = [
+        _transcript('ENST01.1', 'Ensembl', 'GENEA', 'ENSG01', 'missense_variant'),
+        _transcript(
+            'ENST02.1', 'Ensembl', 'GENEA', 'ENSG01', 'inframe_deletion', aminoAcidConservation={'scores': [0.9, 0.12]}
+        ),
+        _transcript('ENST03.1', 'Ensembl', 'GENEA', 'ENSG01', 'missense_variant', aminoAcidConservation={'scores': []}),
+    ]
+    _, rows, _ = _position_rows(_position('chr1', 5, 'C', 'T', transcripts=transcripts))
+    held = {r['transcript_id']: r['amino_acid_conservation'] for r in rows}
+    # In the Annotator's order, and no list for a transcript without a score rather than an empty one.
+    assert held == {'ENST01.1': None, 'ENST02.1': [0.9, 0.12], 'ENST03.1': None}
+    table = pa.Table.from_pylist(rows, schema=annotation_tables.TRANSCRIPTS)
+    assert table.schema.field('amino_acid_conservation').type == pa.list_(pa.float64())
+    assert table.column('amino_acid_conservation').to_pylist() == [None, [0.9, 0.12], None]
+
+
 _SCORED = {'geneId': 'ENSG01', 'donorGainScore0': 0.5, 'donorGainDistance0': 2}
+_CONSERVED = _transcript('ENST01.1', 'Ensembl', 'GENEA', 'ENSG01', 'missense_variant', aminoAcidConservation={})
+_OWN = _clinvar_record('VCV1', 'criteria provided, single submitter', '2099-01-01', 'Benign')
+_OTHER = _other_allele(_OWN, 'G')
+
+
+def _without(entry: dict[str, Any], key: str) -> dict[str, Any]:
+    return {name: value for name, value in entry.items() if name != key}
+
+
 ENTRIES_REFUSED = {
     'a SpliceAI entry with a score of a second set': (
         {'spliceAI': [_SCORED | {'donorGainScore1': 0.2, 'donorGainDistance1': 9}]},
@@ -307,6 +538,46 @@ ENTRIES_REFUSED = {
     'a regulatory entry without a type': (
         {'regulatoryRegions': [{'id': 'R01', 'consequence': ['regulatory_region_variant']}]},
         r"chr1:5: a regulatory entry without \['type'\]",
+    ),
+    'a gnomAD entry without its coverage': (
+        {'gnomad': _without(_gnomad(31, all=(0.1, 1, 10, 0)), 'coverage')},
+        r"chr1:5: a gnomad entry without \['coverage'\]",
+    ),
+    'a gnomAD exomes entry without its coverage': (
+        {'gnomad-exome': _without(_gnomad(31, all=(0.1, 1, 10, 0)), 'coverage')},
+        r"chr1:5: a gnomad-exome entry without \['coverage'\]",
+    ),
+    'a gnomAD entry with a group that the columns have no field for': (
+        {'gnomad': _gnomad(31, all=(0.1, 1, 10, 0), oth=(0.5, 1, 2, 0))},
+        r"chr1:5: a gnomad entry with the keys \['othAc', 'othAf', 'othAn', 'othHc'\]",
+    ),
+    'a gnomAD exomes entry with a group that only the genomes have': (
+        {'gnomad-exome': _gnomad(31, all=(0.1, 1, 10, 0), ami=(0.5, 1, 2, 0))},
+        r"chr1:5: a gnomad-exome entry with the keys \['amiAc', 'amiAf', 'amiAn', 'amiHc'\]",
+    ),
+    'a gnomAD group without one of its four values': (
+        {'gnomad': _without(_gnomad(31, all=(0.1, 1, 10, 0), male=(0.2, 1, 5, 0)), 'maleHc')},
+        "chr1:5: a gnomad entry with some of the four values of 'male' and not the others",
+    ),
+    'an amino-acid conservation entry without scores': (
+        {'transcripts': [_CONSERVED]},
+        r"chr1:5: a transcript aminoAcidConservation entry without \['scores'\]",
+    ),
+    'a ClinVar record of the allele without the date of its last update': (
+        {'clinvar': [_without(_OWN, 'dateLastUpdated')]},
+        r"chr1:5: a ClinVar entry without \['dateLastUpdated'\]",
+    ),
+    'a ClinVar record of another allele without its accession': (
+        {'clinvar': [_without(_OTHER, 'accession')]},
+        r"chr1:5: a ClinVar entry without \['accession'\]",
+    ),
+    'a ClinVar record of another allele without its reference allele': (
+        {'clinvar': [_without(_OTHER, 'refAllele')]},
+        r"chr1:5: a ClinVar entry without \['refAllele'\]",
+    ),
+    'a ClinVar record of another allele without its alternate allele': (
+        {'clinvar': [_without(_OTHER, 'altAllele')]},
+        r"chr1:5: a ClinVar entry without \['altAllele'\]",
     ),
 }
 
@@ -463,22 +734,6 @@ def test_a_position_of_two_variants_fails() -> None:
         _position_rows(position)
 
 
-def _clinvar_record(accession: str, status: str | None, evaluated: str, classification: str) -> dict[str, Any]:
-    germline = {
-        'classification': classification,
-        'reviewStatus': status,
-        'dateLastEvaluated': evaluated,
-        'conditions': [{'traits': [{'name': {'value': f'condition of {accession}'}}]}],
-    }
-    return {
-        'accession': accession,
-        'version': 1,
-        'recordType': 'classified',
-        'isAlleleSpecific': True,
-        'classifications': {'germlineClassification': germline} if status else {},
-    }
-
-
 def test_every_clinvar_record_of_the_allele_is_kept_and_the_best_reviewed_summarises() -> None:
     records = [
         _clinvar_record('VCV3', None, '2099-03-01', 'Pathogenic'),  # no germline classification: last
@@ -494,6 +749,79 @@ def test_every_clinvar_record_of_the_allele_is_kept_and_the_best_reviewed_summar
     # The records survive the table's schema.
     table = pa.Table.from_pylist([row], schema=annotation_tables.VARIANTS)
     assert len(table.column('clinvar_records')[0]) == 4
+
+
+def test_the_summarised_clinvar_record_gives_its_last_update_and_the_pubmed_ids_it_cites() -> None:
+    records = [
+        _clinvar_record(
+            'VCV2', 'criteria provided, single submitter', '2099-01-01', 'Benign', '2099-04-01', ('990001',)
+        ),
+        _clinvar_record(
+            'VCV4',
+            'reviewed by expert panel',
+            '2098-01-01',
+            'Pathogenic',
+            '2099-05-01',
+            cited=('990003', '990002'),
+            submissions=(('990004', '990002'), (), ('990001',)),
+        ),
+    ]
+    for entries in (records, records[::-1]):
+        row, _, _ = _position_rows(_position('chr1', 5, 'C', 'T', clinvar=entries))
+        # The record that the other summary columns are of, wherever it stands among the entries. Its ids are those
+        # of its classification and of its submissions, each once.
+        assert (row['clinvar_accession'], row['clinvar_last_updated']) == ('VCV4', '2099-05-01')
+        assert row['clinvar_pubmed_ids'] == ['990001', '990002', '990003', '990004']
+    table = pa.Table.from_pylist([row], schema=annotation_tables.VARIANTS)
+    assert table.schema.field('clinvar_pubmed_ids').type == pa.list_(pa.string())
+    assert table.column('clinvar_pubmed_ids').to_pylist() == [row['clinvar_pubmed_ids']]
+
+    # A record that cites nothing has no list rather than an empty one.
+    uncited = _clinvar_record('VCV1', 'criteria provided, single submitter', '2099-01-01', 'Benign', submissions=((),))
+    row, _, _ = _position_rows(_position('chr1', 5, 'C', 'T', clinvar=[uncited]))
+    assert (row['clinvar_last_updated'], row['clinvar_pubmed_ids']) == ('2099-06-01', None)
+
+
+def test_the_clinvar_records_of_other_alleles_at_the_position_are_listed_apart_from_the_alleles_own() -> None:
+    own = _clinvar_record('VCV1', 'criteria provided, single submitter', '2099-02-01', 'Uncertain significance')
+    others = [
+        _other_allele(_clinvar_record('VCV7', 'criteria provided, single submitter', '2099-01-01', 'Benign'), 'G'),
+        _other_allele(_clinvar_record('VCV8', 'reviewed by expert panel', '2098-01-01', 'Pathogenic'), 'A'),
+    ]
+    row, _, _ = _position_rows(_position('chr1', 5, 'C', 'T', clinvar=[others[0], own, others[1]]))
+    # The allele's own columns are as without the other records, and the other records are ordered by their review.
+    alone, _, _ = _position_rows(_position('chr1', 5, 'C', 'T', clinvar=[own]))
+    assert 'clinvar_other_alleles' not in alone
+    assert {name: value for name, value in row.items() if name != 'clinvar_other_alleles'} == alone
+    assert [r['accession'] for r in row['clinvar_records']] == ['VCV1']
+    held = [
+        (r['accession'], r['ref_allele'], r['alt_allele'], r['classification'], r['stars'], r['conditions'])
+        for r in row['clinvar_other_alleles']
+    ]
+    assert held == [
+        ('VCV8', 'C', 'A', 'Pathogenic', 3, ['condition of VCV8']),
+        ('VCV7', 'C', 'G', 'Benign', 1, ['condition of VCV7']),
+    ]
+    table = pa.Table.from_pylist([row, alone], schema=annotation_tables.VARIANTS)
+    assert table.schema.field('clinvar_other_alleles').type == pa.list_(annotation_tables.CLINVAR_OTHER_ALLELE)
+    assert table.column('clinvar_other_alleles').to_pylist() == [row['clinvar_other_alleles'], None]
+    # An entry of the list has every field of an entry of `clinvar_records`, under the same name and type.
+    assert list(annotation_tables.CLINVAR_OTHER_ALLELE)[: len(annotation_tables.CLINVAR_RECORD)] == list(
+        annotation_tables.CLINVAR_RECORD
+    )
+
+    # An allele that ClinVar has no record of, at a position where it has one of another allele.
+    unrecorded, _, _ = _position_rows(_position('chr1', 5, 'C', 'T', clinvar=others))
+    assert [r['accession'] for r in unrecorded['clinvar_other_alleles']] == ['VCV8', 'VCV7']
+    assert not {'clinvar_accession', 'clinvar_records', 'clinvar_last_updated'} & set(unrecorded)
+
+
+def test_every_column_that_clinvar_fills_is_one_that_a_run_without_clinvar_leaves_out() -> None:
+    with_clinvar, _, _ = _position_rows(_rich_position())
+    without, _, _ = _position_rows(_without_clinvar(_rich_position()))
+    filled = set(with_clinvar) - set(without)
+    assert filled == set(annotation_tables.SOURCE_COLUMNS['clinvar'])
+    assert {'clinvar_last_updated', 'clinvar_pubmed_ids', 'clinvar_other_alleles'} <= filled
 
 
 def test_repeated_entries_of_one_transcript_or_gene_keep_the_highest_score() -> None:

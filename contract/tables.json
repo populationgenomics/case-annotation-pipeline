@@ -152,6 +152,11 @@
           }
         },
         {
+          "name": "in_low_complexity_region",
+          "type": "bool",
+          "nullable": true
+        },
+        {
           "name": "gnomad_genomes_af",
           "type": "float32",
           "nullable": true
@@ -175,6 +180,342 @@
           "name": "gnomad_genomes_failed_filter",
           "type": "bool",
           "nullable": true
+        },
+        {
+          "name": "gnomad_genomes_coverage",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_genomes_groups",
+          "type": "struct",
+          "nullable": true,
+          "fields": [
+            {
+              "name": "afr",
+              "type": "struct",
+              "nullable": true,
+              "fields": [
+                {
+                  "name": "af",
+                  "type": "float32",
+                  "nullable": true
+                },
+                {
+                  "name": "ac",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "an",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "hom",
+                  "type": "int32",
+                  "nullable": true
+                }
+              ]
+            },
+            {
+              "name": "ami",
+              "type": "struct",
+              "nullable": true,
+              "fields": [
+                {
+                  "name": "af",
+                  "type": "float32",
+                  "nullable": true
+                },
+                {
+                  "name": "ac",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "an",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "hom",
+                  "type": "int32",
+                  "nullable": true
+                }
+              ]
+            },
+            {
+              "name": "amr",
+              "type": "struct",
+              "nullable": true,
+              "fields": [
+                {
+                  "name": "af",
+                  "type": "float32",
+                  "nullable": true
+                },
+                {
+                  "name": "ac",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "an",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "hom",
+                  "type": "int32",
+                  "nullable": true
+                }
+              ]
+            },
+            {
+              "name": "asj",
+              "type": "struct",
+              "nullable": true,
+              "fields": [
+                {
+                  "name": "af",
+                  "type": "float32",
+                  "nullable": true
+                },
+                {
+                  "name": "ac",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "an",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "hom",
+                  "type": "int32",
+                  "nullable": true
+                }
+              ]
+            },
+            {
+              "name": "eas",
+              "type": "struct",
+              "nullable": true,
+              "fields": [
+                {
+                  "name": "af",
+                  "type": "float32",
+                  "nullable": true
+                },
+                {
+                  "name": "ac",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "an",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "hom",
+                  "type": "int32",
+                  "nullable": true
+                }
+              ]
+            },
+            {
+              "name": "fin",
+              "type": "struct",
+              "nullable": true,
+              "fields": [
+                {
+                  "name": "af",
+                  "type": "float32",
+                  "nullable": true
+                },
+                {
+                  "name": "ac",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "an",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "hom",
+                  "type": "int32",
+                  "nullable": true
+                }
+              ]
+            },
+            {
+              "name": "mid",
+              "type": "struct",
+              "nullable": true,
+              "fields": [
+                {
+                  "name": "af",
+                  "type": "float32",
+                  "nullable": true
+                },
+                {
+                  "name": "ac",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "an",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "hom",
+                  "type": "int32",
+                  "nullable": true
+                }
+              ]
+            },
+            {
+              "name": "nfe",
+              "type": "struct",
+              "nullable": true,
+              "fields": [
+                {
+                  "name": "af",
+                  "type": "float32",
+                  "nullable": true
+                },
+                {
+                  "name": "ac",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "an",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "hom",
+                  "type": "int32",
+                  "nullable": true
+                }
+              ]
+            },
+            {
+              "name": "sas",
+              "type": "struct",
+              "nullable": true,
+              "fields": [
+                {
+                  "name": "af",
+                  "type": "float32",
+                  "nullable": true
+                },
+                {
+                  "name": "ac",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "an",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "hom",
+                  "type": "int32",
+                  "nullable": true
+                }
+              ]
+            },
+            {
+              "name": "remaining",
+              "type": "struct",
+              "nullable": true,
+              "fields": [
+                {
+                  "name": "af",
+                  "type": "float32",
+                  "nullable": true
+                },
+                {
+                  "name": "ac",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "an",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "hom",
+                  "type": "int32",
+                  "nullable": true
+                }
+              ]
+            },
+            {
+              "name": "female",
+              "type": "struct",
+              "nullable": true,
+              "fields": [
+                {
+                  "name": "af",
+                  "type": "float32",
+                  "nullable": true
+                },
+                {
+                  "name": "ac",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "an",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "hom",
+                  "type": "int32",
+                  "nullable": true
+                }
+              ]
+            },
+            {
+              "name": "male",
+              "type": "struct",
+              "nullable": true,
+              "fields": [
+                {
+                  "name": "af",
+                  "type": "float32",
+                  "nullable": true
+                },
+                {
+                  "name": "ac",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "an",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "hom",
+                  "type": "int32",
+                  "nullable": true
+                }
+              ]
+            }
+          ]
         },
         {
           "name": "gnomad_exomes_af",
@@ -202,6 +543,315 @@
           "nullable": true
         },
         {
+          "name": "gnomad_exomes_coverage",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "gnomad_exomes_groups",
+          "type": "struct",
+          "nullable": true,
+          "fields": [
+            {
+              "name": "afr",
+              "type": "struct",
+              "nullable": true,
+              "fields": [
+                {
+                  "name": "af",
+                  "type": "float32",
+                  "nullable": true
+                },
+                {
+                  "name": "ac",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "an",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "hom",
+                  "type": "int32",
+                  "nullable": true
+                }
+              ]
+            },
+            {
+              "name": "amr",
+              "type": "struct",
+              "nullable": true,
+              "fields": [
+                {
+                  "name": "af",
+                  "type": "float32",
+                  "nullable": true
+                },
+                {
+                  "name": "ac",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "an",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "hom",
+                  "type": "int32",
+                  "nullable": true
+                }
+              ]
+            },
+            {
+              "name": "asj",
+              "type": "struct",
+              "nullable": true,
+              "fields": [
+                {
+                  "name": "af",
+                  "type": "float32",
+                  "nullable": true
+                },
+                {
+                  "name": "ac",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "an",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "hom",
+                  "type": "int32",
+                  "nullable": true
+                }
+              ]
+            },
+            {
+              "name": "eas",
+              "type": "struct",
+              "nullable": true,
+              "fields": [
+                {
+                  "name": "af",
+                  "type": "float32",
+                  "nullable": true
+                },
+                {
+                  "name": "ac",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "an",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "hom",
+                  "type": "int32",
+                  "nullable": true
+                }
+              ]
+            },
+            {
+              "name": "fin",
+              "type": "struct",
+              "nullable": true,
+              "fields": [
+                {
+                  "name": "af",
+                  "type": "float32",
+                  "nullable": true
+                },
+                {
+                  "name": "ac",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "an",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "hom",
+                  "type": "int32",
+                  "nullable": true
+                }
+              ]
+            },
+            {
+              "name": "mid",
+              "type": "struct",
+              "nullable": true,
+              "fields": [
+                {
+                  "name": "af",
+                  "type": "float32",
+                  "nullable": true
+                },
+                {
+                  "name": "ac",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "an",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "hom",
+                  "type": "int32",
+                  "nullable": true
+                }
+              ]
+            },
+            {
+              "name": "nfe",
+              "type": "struct",
+              "nullable": true,
+              "fields": [
+                {
+                  "name": "af",
+                  "type": "float32",
+                  "nullable": true
+                },
+                {
+                  "name": "ac",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "an",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "hom",
+                  "type": "int32",
+                  "nullable": true
+                }
+              ]
+            },
+            {
+              "name": "sas",
+              "type": "struct",
+              "nullable": true,
+              "fields": [
+                {
+                  "name": "af",
+                  "type": "float32",
+                  "nullable": true
+                },
+                {
+                  "name": "ac",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "an",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "hom",
+                  "type": "int32",
+                  "nullable": true
+                }
+              ]
+            },
+            {
+              "name": "remaining",
+              "type": "struct",
+              "nullable": true,
+              "fields": [
+                {
+                  "name": "af",
+                  "type": "float32",
+                  "nullable": true
+                },
+                {
+                  "name": "ac",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "an",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "hom",
+                  "type": "int32",
+                  "nullable": true
+                }
+              ]
+            },
+            {
+              "name": "female",
+              "type": "struct",
+              "nullable": true,
+              "fields": [
+                {
+                  "name": "af",
+                  "type": "float32",
+                  "nullable": true
+                },
+                {
+                  "name": "ac",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "an",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "hom",
+                  "type": "int32",
+                  "nullable": true
+                }
+              ]
+            },
+            {
+              "name": "male",
+              "type": "struct",
+              "nullable": true,
+              "fields": [
+                {
+                  "name": "af",
+                  "type": "float32",
+                  "nullable": true
+                },
+                {
+                  "name": "ac",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "an",
+                  "type": "int32",
+                  "nullable": true
+                },
+                {
+                  "name": "hom",
+                  "type": "int32",
+                  "nullable": true
+                }
+              ]
+            }
+          ]
+        },
+        {
           "name": "alphamissense_max",
           "type": "float64",
           "nullable": true
@@ -224,6 +874,16 @@
         {
           "name": "primateai3d_max",
           "type": "float64",
+          "nullable": true
+        },
+        {
+          "name": "primateai3d_max_percentile",
+          "type": "float64",
+          "nullable": true
+        },
+        {
+          "name": "primateai3d_max_class",
+          "type": "string",
           "nullable": true
         },
         {
@@ -297,6 +957,22 @@
           "source": "clinvar"
         },
         {
+          "name": "clinvar_last_updated",
+          "type": "string",
+          "nullable": true,
+          "source": "clinvar"
+        },
+        {
+          "name": "clinvar_pubmed_ids",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "string",
+            "nullable": true
+          },
+          "source": "clinvar"
+        },
+        {
           "name": "clinvar_records",
           "type": "list",
           "nullable": true,
@@ -352,6 +1028,77 @@
                   "type": "string",
                   "nullable": true
                 }
+              }
+            ]
+          },
+          "source": "clinvar"
+        },
+        {
+          "name": "clinvar_other_alleles",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "struct",
+            "nullable": true,
+            "fields": [
+              {
+                "name": "accession",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "version",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "record_type",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "variant_type",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "classification",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "review_status",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "stars",
+                "type": "int8",
+                "nullable": true
+              },
+              {
+                "name": "last_evaluated",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "conditions",
+                "type": "list",
+                "nullable": true,
+                "element": {
+                  "type": "string",
+                  "nullable": true
+                }
+              },
+              {
+                "name": "ref_allele",
+                "type": "string",
+                "nullable": false
+              },
+              {
+                "name": "alt_allele",
+                "type": "string",
+                "nullable": false
               }
             ]
           },
@@ -606,6 +1353,15 @@
           "nullable": true
         },
         {
+          "name": "amino_acid_conservation",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "float64",
+            "nullable": true
+          }
+        },
+        {
           "name": "alphamissense_pathogenicity",
           "type": "float64",
           "nullable": true
@@ -616,8 +1372,23 @@
           "nullable": true
         },
         {
+          "name": "alphamissense_is_isoform",
+          "type": "bool",
+          "nullable": true
+        },
+        {
           "name": "primateai3d_score",
           "type": "float64",
+          "nullable": true
+        },
+        {
+          "name": "primateai3d_percentile",
+          "type": "float64",
+          "nullable": true
+        },
+        {
+          "name": "primateai3d_class",
+          "type": "string",
           "nullable": true
         },
         {
