@@ -23,7 +23,7 @@ lands. [Annotation](../../docs/annotation.md) explains what the workflows do.
 
 - The tools image is built from [containers/tools/Dockerfile](../../containers/tools/Dockerfile) at a release tag, and
   the Dockerfile shows the command. The params file pins it by digest, so a new tag means a new build and a new digest
-  there. The pinned image was built at the tag `v0.3.0`, which is the commit `a664595f3bbf96a2223837e6f001826f9c2b6974`,
+  there. The pinned image was built at the tag `v0.3.1`, which is the commit `52e0a6fa98493bcdf9c48201280468b7828b148d`,
   and the registry tags it with both. The image has to be of the release of the workflow that a run launches:
   `family_tables.nf` gives its own version to its first step and to the step that writes a family's folder, and each
   refuses to run with tools of another version, the first before anything is annotated. A run of a later release
@@ -124,7 +124,7 @@ sources: [<source>, <source>, ...]
 ```
 
 A run over a few regions takes `regions`, a BED file in a bucket, and a `label` for its folder. It cuts the VCF in the
-tools image, which the params file pins as built at the tag `v0.3.0`.
+tools image, which the params file pins as built at the tag `v0.3.1`.
 
 ## Family tables
 
@@ -139,7 +139,7 @@ and the VCFs of its larger variants where it has them
 writes one, and [contract/examples/families.csv](../../contract/examples/families.csv) is an invented one.
 
 The params are the ones that [contract/workflow.json](../../contract/workflow.json) lists for `family_tables.nf`. Every
-line of `test.annotator.params.yaml` is one of them, and its tools image is the one built at the tag `v0.3.0`. A run
+line of `test.annotator.params.yaml` is one of them, and its tools image is the one built at the tag `v0.3.1`. A run
 adds CPG's reference and archive, and its own sheet, group and catalog:
 
 ```sh
