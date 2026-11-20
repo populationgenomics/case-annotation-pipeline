@@ -489,7 +489,7 @@ def _uorf(consequence: str, **fields: object) -> dict[str, Any]:
 # RefSeq transcript that `transcripts` lacks, and one on a feature of RefSeq's file whose id is no transcript id. The
 # third allele ends a reading frame, and the NMD plugin evaluated it without a flag. The other family's allele has a
 # row too.
-_GAINED = _uorf('uAUG_gained', type='inFrame_oORF', kozak_context='GCCATGG', kozak_strength='Strong', distance_to_cds=9)
+_GAINED = _uorf('uAUG_gained', type='InFrame_oORF', kozak_context='GCCATGG', kozak_strength='Strong', distance_to_cds=9)
 _SHIFTED = (
     _uorf('uFrameShift', ref_type='uORF', alt_type='OutOfFrame_oORF', ref_start_distance_to_cds=95, evidence=True),
     _uorf('uFrameShift', ref_type='uORF', alt_type='uORF', ref_start_distance_to_cds=40, evidence=False),

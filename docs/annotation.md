@@ -1370,7 +1370,8 @@ transcript's id with its version, as `transcripts` is.
 - UTRannotator evaluates a transcript whose 5′ UTR the allele lies in. The row has the plugin's three counts of the
   reading frames that the UTR holds and, where the allele has an effect, the kinds of effect and one record for each
   upstream start codon that is affected. A value is the plugin's own, under a name in snake case: a distance is a whole
-  number, a flag is true or false, and what the plugin writes as `NA` or leaves empty is null.
+  number, a flag is true or false, what the plugin writes as `NA` or leaves empty is null, and the type of a reading
+  frame that the plugin writes in two spellings has one.
 - The NMD plugin writes a key only where it predicts an escape. It evaluates a variant that VEP calls `stop_gained`,
   `frameshift_variant`, `splice_donor_variant` or `splice_acceptor_variant` and that has a start and an end in the
   coding sequence. The table therefore reads these terms and the two coding positions of VEP's entry, for this purpose

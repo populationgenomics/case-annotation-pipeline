@@ -11,10 +11,11 @@ count of its alleles, so that it is the same for every union that the same image
 
 The plugins are run as they are, and nothing here classifies a variant. A value is the plugin's, under a name in snake
 case and with the type that the value has: UTRannotator writes its records as text, a number or `NA` for a distance and
-`True` or `False` for a flag. The one thing read beside the plugins' own keys is how VEP placed the variant: the NMD
-plugin writes a key only where it predicts an escape, so a row that it evaluated and did not flag is told by the
-consequence terms and coding positions that make the plugin evaluate a row (_NMD_TERMS). No other value of VEP's is
-kept.
+`True` or `False` for a flag. The one value that is respelled is the type of a reading frame, which the plugin writes
+in two spellings and the table in one (_TYPES). The one thing read beside the plugins' own keys is how VEP placed the
+variant: the NMD plugin writes a key only where it predicts an escape, so a row that it evaluated and did not flag is
+told by the consequence terms and coding positions that make the plugin evaluate a row (_NMD_TERMS). No other value of
+VEP's is kept.
 
 A run is refused unless its positive controls come back annotated (gene_models.Control), which is how a plugin that
 did not run is told from one that found nothing.
@@ -96,7 +97,15 @@ TABLE = pa.schema(
 # match one.
 TRANSCRIPT_ID = re.compile(r'(ENST|NM_|NR_|XM_|XR_)\d+\.\d+')
 
-_TYPES = frozenset({'uORF', 'inFrame_oORF', 'InFrame_oORF', 'OutOfFrame_oORF'})
+# The type of a reading frame: each spelling that the plugin writes, and the one label that the table holds for it. The
+# plugin writes the in-frame type with a small `i` in a uAUG_gained record and with a capital in every other record.
+# The table holds the capital for both, so that a condition on one label finds every record of the type.
+_TYPES: Mapping[str, str] = {
+    'uORF': 'uORF',
+    'OutOfFrame_oORF': 'OutOfFrame_oORF',
+    'InFrame_oORF': 'InFrame_oORF',
+    'inFrame_oORF': 'InFrame_oORF',
+}
 _STRENGTHS = frozenset({'Weak', 'Moderate', 'Strong'})
 _FRAMES = frozenset({'inFrame', 'outOfFrame'})
 
@@ -126,6 +135,13 @@ def _one_of(known: frozenset[str]) -> Callable[[str], str]:
     return read
 
 
+def _type(value: str) -> str:
+    """The type of a reading frame, under the table's one label for it."""
+    if value not in _TYPES:
+        raise ValueError(f'{value!r} is none of {sorted(_TYPES)}')
+    return _TYPES[value]
+
+
 def _context(value: str) -> str | None:
     """A Kozak context, which the plugin writes as `-` for a start codon within three bases of an end of the UTR."""
     if value == '-':
@@ -143,9 +159,9 @@ def _strength(value: str) -> str | None:
 # Each key of a record of UTRannotator, after the kind that prefixes it: the field of UORF that holds its value, and
 # how the plugin's text is read. `NA` is read only where the plugin's documentation says that it writes it.
 _KEYS: Mapping[str, tuple[str, Callable[[str], Any]]] = {
-    'type': ('type', _one_of(_TYPES)),
-    'ref_type': ('ref_type', _one_of(_TYPES)),
-    'alt_type': ('alt_type', _one_of(_TYPES)),
+    'type': ('type', _type),
+    'ref_type': ('ref_type', _type),
+    'alt_type': ('alt_type', _type),
     'KozakContext': ('kozak_context', _context),
     'KozakStrength': ('kozak_strength', _strength),
     'CapDistanceToStart': ('cap_distance_to_start', _whole),

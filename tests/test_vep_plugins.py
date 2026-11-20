@@ -121,11 +121,46 @@ def test_every_key_of_a_kind_has_a_field_and_every_field_a_key() -> None:
     assert all(set(_RECORDS[kind]) == vep_plugins.KINDS[kind] for kind in _RECORDS)
 
 
-def test_the_type_of_a_gained_start_keeps_the_spelling_that_the_plugin_writes() -> None:
+# Each key of a kind that holds the type of a reading frame.
+_TYPE_KEYS = [
+    ('uAUG_gained', 'type'),
+    ('uAUG_lost', 'type'),
+    ('uSTOP_gained', 'ref_type'),
+    ('uFrameShift', 'ref_type'),
+    ('uFrameShift', 'alt_type'),
+]
+
+
+def test_the_in_frame_type_has_one_spelling_where_the_plugin_writes_two() -> None:
     # The plugin writes the in-frame type with a small i for a gained start and with a capital for every other kind.
     (gained,) = vep_plugins.uorf_records('uAUG_gained', _text('uAUG_gained', type='inFrame_oORF'))
     (lost,) = vep_plugins.uorf_records('uAUG_lost', _text('uAUG_lost', type='InFrame_oORF'))
-    assert (gained['type'], lost['type']) == ('inFrame_oORF', 'InFrame_oORF')
+    assert gained['type'] == lost['type'] == 'InFrame_oORF'
+
+
+@pytest.mark.parametrize(('kind', 'key'), _TYPE_KEYS)
+def test_no_two_labels_of_a_type_differ_in_their_case_alone(kind: str, key: str) -> None:
+    labels = {
+        written: vep_plugins.uorf_records(kind, _text(kind, **{key: written}))[0][key] for written in vep_plugins._TYPES
+    }
+    # A label is a spelling that the plugin writes, changed in its case at most.
+    assert all(label in labels and label.lower() == written.lower() for written, label in labels.items())
+    assert len({label.lower() for label in labels.values()}) == len(set(labels.values()))
+
+
+def test_every_key_that_holds_a_type_is_read_as_one() -> None:
+    typed = {key for key, (_field, read) in vep_plugins._KEYS.items() if read is vep_plugins._type}
+    assert typed == {key for key in vep_plugins._KEYS if key == 'type' or key.endswith('_type')}
+    assert {(kind, key) for kind, keys in vep_plugins.KINDS.items() for key in keys & typed} == set(_TYPE_KEYS)
+
+
+@pytest.mark.parametrize(('kind', 'key'), _TYPE_KEYS)
+@pytest.mark.parametrize('written', ['inframe_oORF', 'Inframe_oORF', 'INFRAME_OORF', 'outOfFrame_oORF', 'UORF', ''])
+def test_a_type_in_a_spelling_that_the_plugin_is_not_known_to_write_is_refused(
+    kind: str, key: str, written: str
+) -> None:
+    with pytest.raises(ValueError, match=rf"{kind}_{key}: '{written}' is none of"):
+        vep_plugins.uorf_records(kind, _text(kind, **{key: written}))
 
 
 def test_several_kinds_and_several_records_of_one_kind_each_have_an_entry() -> None:

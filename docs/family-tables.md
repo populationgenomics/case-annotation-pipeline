@@ -514,11 +514,8 @@ its distance to it is a multiple of three, so `distance_to_cds % 3 = 0` gives th
 also of one whose frame ends inside the UTR. The Kozak strength is `Strong` where the base three before the `ATG` is `A`
 or `G` and the base after it is `G`, `Moderate` where one of the two holds and `Weak` otherwise.
 
-> [!WARNING]
->
-> The plugin writes the in-frame type as `inFrame_oORF`, with a small `i`, in a `uAUG_gained` entry, and as
-> `InFrame_oORF` in every other entry. The tables keep both spellings as the plugin writes them, so a condition
-> `u.type = 'InFrame_oORF'` finds no gained start, without an error. Compare `lower(u.type)`, or ask for both.
+The tables write the in-frame type as `InFrame_oORF` in every entry, where the plugin writes it as `inFrame_oORF`, with
+a small `i`, in a `uAUG_gained` record and as `InFrame_oORF` in every other.
 
 The plugin leaves these things out, and the tables add none of them.
 
@@ -1668,7 +1665,7 @@ evaluated = con.sql(
 On an invented table the first query returned the one allele whose new frame overlaps the coding sequence out of frame,
 on both transcripts that hold it, and not the same allele's row on a transcript with a shorter UTR, where the frame ends
 before the coding sequence. The third query gave one row for each gained start codon of the MANE Select transcript, with
-`in_frame` true for the entry of type `inFrame_oORF` alone.
+`in_frame` true for the entry of type `InFrame_oORF` alone.
 
 ### Variants that end a reading frame, by their escape from decay
 
