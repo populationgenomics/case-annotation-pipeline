@@ -2727,6 +2727,103 @@
           }
         ]
       }
+    },
+    {
+      "name": "roh",
+      "file": "roh.parquet",
+      "columns": [
+        {
+          "name": "member",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "chrom",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "pos",
+          "type": "int32",
+          "nullable": false
+        },
+        {
+          "name": "end_pos",
+          "type": "int32",
+          "nullable": false
+        },
+        {
+          "name": "length",
+          "type": "int32",
+          "nullable": false
+        },
+        {
+          "name": "markers",
+          "type": "int32",
+          "nullable": false
+        },
+        {
+          "name": "quality",
+          "type": "float32",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "upd",
+      "file": "upd.parquet",
+      "columns": [
+        {
+          "name": "member",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "chrom",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "pos",
+          "type": "int32",
+          "nullable": false
+        },
+        {
+          "name": "end_pos",
+          "type": "int32",
+          "nullable": false
+        },
+        {
+          "name": "outer_pos",
+          "type": "int32",
+          "nullable": false
+        },
+        {
+          "name": "outer_end_pos",
+          "type": "int32",
+          "nullable": false
+        },
+        {
+          "name": "origin",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "informative_sites",
+          "type": "int32",
+          "nullable": false
+        },
+        {
+          "name": "snps",
+          "type": "int32",
+          "nullable": false
+        },
+        {
+          "name": "opposite_sites",
+          "type": "int32",
+          "nullable": false
+        }
+      ]
     }
   ]
 }

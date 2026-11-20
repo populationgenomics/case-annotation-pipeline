@@ -19,6 +19,9 @@ manifest says who the proband is, and it lists the columns that the run left out
   also a row of `variants` names it in `sv.small_variant_id`, so a query over both tables keeps
   `sv.small_variant_id IS NULL`.
 - `repeats` has a row for every repeat of the catalogue, whatever the members' alleles: a row is not a finding.
+- `roh` and `upd` hold chr1 to chr22 alone. A long run with few `roh.markers` spans a gap at a centromere.
+- `upd` has dozens of small false regions in every trio: weigh a region's size and `upd.informative_sites`. It gives no
+  type: a region that runs of the same member in `roh` cover is an isodisomy or a deletion, any other a heterodisomy.
 
 ## A member's call
 

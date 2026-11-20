@@ -213,6 +213,9 @@
               "name": "transcripts.parquet"
             },
             {
+              "name": "roh.parquet"
+            },
+            {
               "name": "manifest.json"
             },
             {
@@ -237,6 +240,10 @@
               "row_names_any_of": [
                 "repeat_vcfs"
               ]
+            },
+            {
+              "name": "upd.parquet",
+              "some_child_has_both_parents_sequenced": true
             }
           ]
         },

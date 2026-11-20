@@ -1,5 +1,6 @@
 # The tools image for the pipeline's own steps: the case-annotation command (this repository's package, as locked),
-# bcftools and echtvar. It builds from the repository root, which holds the lock:
+# upd (as locked, from the commit of its tag in its Git repository), bcftools and echtvar. It builds from the repository
+# root, which holds the lock:
 #
 #   docker build --platform linux/amd64 -f containers/tools/Dockerfile -t <registry>/case-annotation-tools:<commit> .
 #
@@ -16,8 +17,12 @@
 
 FROM ghcr.io/astral-sh/uv:0.13.8@sha256:5cc1805e2426484abca4ad46ea783bab281fdb225fd82d8ce6d66a81254bac85 AS uv
 
-# The package without its sources or its dev groups. Its metadata names the README, so the build reads that too.
+# The package without its sources or its dev groups, and the lock's group `image`, which is upd. Its metadata names the
+# README, so the build reads that too. uv clones upd's repository with git, which only this stage holds.
 FROM python:3.12.16-slim-trixie@sha256:b18b261e1b4974b4f321451ad5251ded85abb22c2b8b262da527dda1d031ab30 AS python-packages
+RUN apt-get update -q \
+    && apt-get install -q -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_PYTHON_DOWNLOADS=never \
     UV_PYTHON=/usr/local/bin/python3.12 \
@@ -28,8 +33,8 @@ WORKDIR /src
 COPY pyproject.toml uv.lock README.md ./
 COPY src src
 RUN --mount=type=secret,id=ca-bundle,required=false \
-    if [ -f /run/secrets/ca-bundle ]; then export SSL_CERT_FILE=/run/secrets/ca-bundle; fi \
-    && uv sync --frozen --no-default-groups --no-editable
+    if [ -f /run/secrets/ca-bundle ]; then export SSL_CERT_FILE=/run/secrets/ca-bundle GIT_SSL_CAINFO=/run/secrets/ca-bundle; fi \
+    && uv sync --frozen --no-default-groups --group image --no-editable
 
 FROM python:3.12.16-slim-trixie@sha256:b18b261e1b4974b4f321451ad5251ded85abb22c2b8b262da527dda1d031ab30
 # bcftools as Debian packages it, with Debian's htslib, which reads gs:// and https:// inputs. Compiling a newer release
@@ -48,4 +53,4 @@ COPY --from=python-packages /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 
 # An image whose tools do not start is never pushed.
-RUN case-annotation --help >/dev/null && bcftools version && echtvar --version
+RUN case-annotation --help >/dev/null && bcftools version && echtvar --version && upd --version

@@ -252,6 +252,40 @@
       "title": "FamilyMember",
       "type": "object"
     },
+    "FrequencyArchive": {
+      "description": "The echtvar archive that gave each site its frequency, and the echtvar that read it.",
+      "properties": {
+        "archive": {
+          "title": "Archive",
+          "type": "string"
+        },
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "echtvar_version": {
+          "minLength": 1,
+          "title": "Echtvar Version",
+          "type": "string"
+        },
+        "field": {
+          "$ref": "#/$defs/ArchiveField"
+        }
+      },
+      "required": [
+        "archive",
+        "bytes",
+        "sha256",
+        "echtvar_version",
+        "field"
+      ],
+      "title": "FrequencyArchive",
+      "type": "object"
+    },
     "JoinedFile": {
       "description": "A file that a run joined to the union's alleles, as the run read it.",
       "properties": {
@@ -375,6 +409,78 @@
       "title": "OmittedSource",
       "type": "object"
     },
+    "RohUpdInfo": {
+      "description": "What made a family's roh and upd tables.",
+      "properties": {
+        "bcftools_version": {
+          "minLength": 1,
+          "title": "Bcftools Version",
+          "type": "string"
+        },
+        "upd_version": {
+          "minLength": 1,
+          "title": "Upd Version",
+          "type": "string"
+        },
+        "upd_commit": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Upd Commit",
+          "type": "string"
+        },
+        "preparation": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Preparation",
+          "type": "array"
+        },
+        "roh_command": {
+          "minLength": 1,
+          "title": "Roh Command",
+          "type": "string"
+        },
+        "upd_command": {
+          "minLength": 1,
+          "title": "Upd Command",
+          "type": "string"
+        },
+        "frequency_archive": {
+          "$ref": "#/$defs/FrequencyArchive"
+        },
+        "sites": {
+          "title": "Sites",
+          "type": "integer"
+        },
+        "roh_members": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Roh Members",
+          "type": "array"
+        },
+        "upd_children": {
+          "items": {
+            "$ref": "#/$defs/Trio"
+          },
+          "title": "Upd Children",
+          "type": "array"
+        }
+      },
+      "required": [
+        "bcftools_version",
+        "upd_version",
+        "upd_commit",
+        "preparation",
+        "roh_command",
+        "upd_command",
+        "frequency_archive",
+        "sites",
+        "roh_members",
+        "upd_children"
+      ],
+      "title": "RohUpdInfo",
+      "type": "object"
+    },
     "Role": {
       "enum": [
         "proband",
@@ -491,6 +597,30 @@
         "sha256"
       ],
       "title": "TableFile",
+      "type": "object"
+    },
+    "Trio": {
+      "description": "A child whose parents are both sequenced, by the three samples' names in the family's VCF.",
+      "properties": {
+        "child": {
+          "title": "Child",
+          "type": "string"
+        },
+        "mother": {
+          "title": "Mother",
+          "type": "string"
+        },
+        "father": {
+          "title": "Father",
+          "type": "string"
+        }
+      },
+      "required": [
+        "child",
+        "mother",
+        "father"
+      ],
+      "title": "Trio",
       "type": "object"
     }
   },
@@ -625,6 +755,9 @@
       },
       "title": "Repeats Omitted Columns",
       "type": "array"
+    },
+    "roh_upd": {
+      "$ref": "#/$defs/RohUpdInfo"
     }
   },
   "required": [
@@ -647,7 +780,8 @@
     "sv_annotation",
     "sv_omitted_columns",
     "strchive",
-    "repeats_omitted_columns"
+    "repeats_omitted_columns",
+    "roh_upd"
   ],
   "title": "FamilyManifest",
   "type": "object"

@@ -2,8 +2,9 @@
 // normalised, the union of their sites is annotated once with Illumina's Annotator and converted into tables, the
 // union's values from echtvar archives are read (gnomAD's joint values, and AlphaGenome's scores where the run names
 // their archives), the public files that the run names are joined to the union's alleles, and each family's tables are
-// cut from all three. The union
-// and what annotates it reveal every family's alleles, so they are published under annotation-unions/<group>/ and never
+// cut from all three. Each family's runs of homozygosity and regions of uniparental disomy come from its own VCF, which
+// two published tools read with gnomAD's frequencies from the same archive. The union and what annotates it reveal
+// every family's alleles, so they are published under annotation-unions/<group>/ and never
 // beside a family's tables, which go to annotations/<family>/. The Annotator's output has a folder of its own there,
 // which a later run can reuse in place of annotating again. A family whose row also names VCFs of its larger variants
 // (its structural variants, its copy-number segments or its members' repeats) gets tables of those too. The structural
@@ -17,7 +18,7 @@
 // Including the workflow in another pipeline). The entry workflow reads the families from a sheet and the settings
 // from params, and publishes what ANNOTATE_FAMILIES emits.
 
-include { FAMILY_CHECK ; NORMALISE_FAMILY ; NORMALISE_SV ; UNION_SITES ; SV_SITES ; SV_UNION ; ECHTVAR_VALUES ; JOINED_VALUES ; ANNOTATION_TABLES ; SV_ANNOTATION_TABLES ; FAMILY_TABLES ; groupAnnotation ; svName ; svGroup } from './modules/family_tables'
+include { FAMILY_CHECK ; NORMALISE_FAMILY ; NORMALISE_SV ; UNION_SITES ; SV_SITES ; SV_UNION ; ECHTVAR_VALUES ; JOINED_VALUES ; ANNOTATION_TABLES ; SV_ANNOTATION_TABLES ; ROH_UPD ; FAMILY_TABLES ; groupAnnotation ; svName ; svGroup } from './modules/family_tables'
 include { ILLUMINA_ANNOTATE } from './modules/annotator'
 include { ILLUMINA_ANNOTATE as ILLUMINA_ANNOTATE_SV } from './modules/annotator'
 
@@ -313,13 +314,19 @@ workflow ANNOTATE_FAMILIES {
         sv_tables = SV_ANNOTATION_TABLES(sv_union.union.combine(sv_json).combine(run_config), bundle_config, settings.catalog).first()
         sv_map = sv_union.map
     }
+    // Each family's runs of homozygosity and regions of uniparental disomy, from its VCF as it was given: the tools
+    // read sites of the family's own records, which the normalised VCF has split into alleles.
+    segments = ROH_UPD(
+        passed.map { family, vcf, ped, _proband, _sv, _cnv, _repeats -> tuple(family, vcf, ped) },
+        settings.gnomad_joint,
+    )
     // The PED file comes from the family as it was given rather than through NORMALISE_FAMILY: a task's input passed on
     // as its output is a link into that task's work directory, which another VM cannot follow to the file. The VCFs of
     // the larger variants come from there too. A family without a structural-variant VCF has no normalised sequences.
     written = FAMILY_TABLES(
         normalised.family.join(families.map { family, _vcf, ped, proband, sv, cnv, repeats -> [family, ped, proband, sv, cnv, repeats] }).join(sv_alleles, remainder: true).map { family, vcf, index, ped, proband, sv, cnv, repeats, alleles ->
             tuple(family, vcf, index, ped, proband, sv, cnv, repeats, alleles ?: [])
-        },
+        }.join(segments),
         tables,
         archive_values,
         joined_values,
@@ -336,8 +343,8 @@ workflow ANNOTATE_FAMILIES {
     emit:
     union = union.map { _group, vcf, index -> [vcf, index] }.flatten().mix(tables, archive_values, joined_values, sv_published)
     annotator = annotator
-    family_tables = written.map { family, variants, transcripts, manifest, notes, larger ->
-        [family: family, files: [variants, transcripts, manifest, notes] + larger]
+    family_tables = written.map { family, variants, transcripts, roh, manifest, notes, larger ->
+        [family: family, files: [variants, transcripts, roh, manifest, notes] + larger]
     }
 }
 

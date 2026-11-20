@@ -1,0 +1,3 @@
+trio-t	T1	0	0	1	1
+trio-t	T2	0	0	2	1
+trio-t	T3	T1	T2	2	2

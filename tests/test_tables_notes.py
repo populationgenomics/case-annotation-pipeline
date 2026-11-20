@@ -16,7 +16,7 @@ NOTES = importlib.resources.files(case_annotation).joinpath(family_tables.NOTES)
 
 # The most that the file holds, in characters: a reader takes it whole at the start of its work on a family, so it
 # holds what a query gets wrong without an error and no list of columns.
-LIMIT = 8_000
+LIMIT = 8_300
 # How the notes write a member's column, which each family names as its sample.
 MEMBER = '<member>'
 
@@ -92,7 +92,8 @@ def name_problems(text: str) -> list[str]:
                     found = found or _held(field, fields)
             if not found:
                 problems.append(f'{match[0]} is no column or field of {" or ".join(candidates)}')
-        bare = _WORD.findall(_HEADED.sub(' ', code))
+        # MEMBER written alone stands for a member's column and is no column's name, though `member` is one.
+        bare = _WORD.findall(_HEADED.sub(' ', code).replace(MEMBER, ' '))
         problems += [f'{word} is written without its table' for word in bare if word in every and word not in tables]
     return problems
 
@@ -120,6 +121,7 @@ NAMES_WRONG = {
     'a group of columns that the table lacks': ('`sv.gnomad_joint_*`', 'sv.gnomad_joint_* is no column or field of sv'),
     'a name inside a condition': ("`sv.kind = 'DEL'`", 'sv.kind is no column or field of sv'),
     'a column written without its table': ('`zygosity`', 'zygosity is written without its table'),
+    'a column that is spelt as the member placeholder': ('`member`', 'member is written without its table'),
     'a field of an entry written without its table': (
         '`ensembl_gene_id`',
         'ensembl_gene_id is written without its table',

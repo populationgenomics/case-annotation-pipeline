@@ -1,11 +1,12 @@
 // The steps of the family tables (family_tables.nf, docs/annotation.md) other than the Annotator's own: checking a
 // family's inputs, normalising its VCF and the sequences of its structural variants, taking the union of the families'
 // sites, reading the union's values from echtvar archives, joining public files to the union's alleles, converting the
-// union's annotation, and writing each family's tables. The structural variants and copy-number segments of a group
-// have a union of their own, which SV_SITES cuts from each family's VCFs, SV_UNION joins and SV_ANNOTATION_TABLES
-// converts the annotation of. NORMALISE_FAMILY, NORMALISE_SV, UNION_SITES and SV_SITES run bcftools alone,
-// ECHTVAR_VALUES echtvar and case-annotation, SV_UNION and JOINED_VALUES case-annotation and bcftools, and the others
-// case-annotation, all in the tools image (label 'tools').
+// union's annotation, finding each family's runs of homozygosity and regions of uniparental disomy, and writing each
+// family's tables. The structural variants and copy-number segments of a group have a union of their own, which
+// SV_SITES cuts from each family's VCFs, SV_UNION joins and SV_ANNOTATION_TABLES converts the annotation of.
+// NORMALISE_FAMILY, NORMALISE_SV, UNION_SITES and SV_SITES run bcftools alone, ECHTVAR_VALUES echtvar and
+// case-annotation, SV_UNION and JOINED_VALUES case-annotation and bcftools, ROH_UPD bcftools, echtvar, upd and
+// case-annotation, and the others case-annotation, all in the tools image (label 'tools').
 //
 // A family's structural-variant VCF, its copy-number VCF and its members' repeat VCFs are optional. A process takes
 // each as the files the sheet names with their indexes, staged in a folder of their own, or as an empty list.
@@ -393,6 +394,86 @@ process SV_ANNOTATION_TABLES {
     """
 }
 
+// A family's runs of homozygosity and regions of uniparental disomy, from two published tools that run as they are
+// (docs/annotation.md): `bcftools roh` for every sequenced member, and `upd regions` for each child whose parents are
+// both sequenced. case-annotation first reads the pedigree for those children and the archive of gnomAD's joint release
+// for the INFO field of an allele's frequency, and refuses a family with such a child whose VCF has no GQ. Both tools
+// read one prepared VCF, cut from the family's VCF as the sheet names it: the PASS sites on chr1 to chr22, each
+// alternate allele that no member carries removed, then the sites with one alternate allele of one base, without INFO
+// and with every genotype unphased, and with gnomAD's frequency of each allele from the archive. The alleles are
+// removed in a call of their own, since one call of bcftools view counts a site's alleles before it removes any. upd
+// stops at a site of several alleles, at an INFO header line with a key beside ID, Number, Type and Description and at
+// a frequency of `.`, and reads a phased genotype as no call. X, Y and M are left out: a haploid call is no genotype
+// that upd reads.
+// A prepared VCF without a record fails the task, and so does a tool that fails, whose output is then never read. upd
+// fails where it keeps no site of a child and its parents, which are the sites with a frequency of at least 0.05 and a
+// GQ of at least 30 in all three: a VCF with records and no such site is not one that upd can assess.
+// case-annotation writes the tools' output as tables, with a record of the commands that ran, which the step passes
+// from the arrays it ran them with. The archive is copied to the task's disk, which archivesDisk sizes. The prepared
+// VCF gets an index only because htslib reports a file it opens without one.
+process ROH_UPD {
+    tag "${family}"
+    label 'tools'
+    disk { archivesDisk([gnomad_joint]) }
+
+    input:
+    tuple val(family), path(vcf, stageAs: 'input/*'), path(ped, stageAs: 'input/*')
+    path gnomad_joint, stageAs: 'gnomad_joint/*'
+
+    output:
+    tuple val(family), path('roh_upd')
+
+    script:
+    """
+    set -o pipefail
+    tag=\$(case-annotation roh-upd-plan --family ${family} --ped ${ped} --vcf ${vcf} --archive ${gnomad_joint} --trios trios.tsv)
+    autosomes=\$(printf 'chr%s,' {1..22})
+    kept=(view -f PASS,. --trim-alt-alleles -t "\${autosomes%,}")
+    single=(view -m2 -M2 -v snps)
+    bare=(annotate -x INFO)
+    unphased=(-t a -n u)
+    bcftools "\${kept[@]}" --no-version -Ou ${vcf} \\
+        | bcftools "\${single[@]}" --no-version -Ou \\
+        | bcftools "\${bare[@]}" --no-version -Ou \\
+        | bcftools +setGT --no-version -Ob -o prepared.bcf -- "\${unphased[@]}"
+    sites=\$(bcftools view --no-version -H prepared.bcf | wc -l)
+    echo "\${sites} sites for bcftools roh and upd"
+    if [[ \${sites} -eq 0 ]]; then
+        echo "${family}: no PASS site with one alternate allele of one base on chr1 to chr22, so nothing for bcftools roh and upd to read" >&2
+        exit 1
+    fi
+    echtvar_version=\$(echtvar --version)
+    echtvar anno -e ${gnomad_joint} prepared.bcf prepared.vcf.gz
+    bcftools index -t prepared.vcf.gz
+    roh=(roh --AF-tag "\${tag}" -G30 -O r)
+    bcftools "\${roh[@]}" -o roh.txt prepared.vcf.gz
+    called=(--af-tag "\${tag}" regions)
+    mkdir upd
+    regions=()
+    while IFS=\$'\\t' read -r child mother father; do
+        if ! upd --vcf prepared.vcf.gz --proband "\${child}" --mother "\${mother}" --father "\${father}" "\${called[@]}" --out "upd/\${child}.bed"; then
+            echo "${family}: upd failed for \${child}; it also fails, with a TypeError, where no site has a frequency of at least 0.05 and a GQ of at least 30 in all three" >&2
+            exit 1
+        fi
+        regions+=(--regions "\${child}" "upd/\${child}.bed")
+    done < trios.tsv
+    case-annotation roh-upd --family ${family} --ped ${ped} --archive ${gnomad_joint} --prepared prepared.vcf.gz \\
+        --sites "\${sites}" --roh roh.txt "\${regions[@]}" \\
+        --bcftools-version "\$(bcftools --version | awk 'NR == 1 { print \$2 }')" \\
+        --echtvar-version "\${echtvar_version#echtvar }" \\
+        --preparation "bcftools \${kept[*]}" --preparation "bcftools \${single[*]}" \\
+        --preparation "bcftools \${bare[*]}" --preparation "bcftools +setGT -- \${unphased[*]}" \\
+        --preparation "echtvar anno" \\
+        --roh-command "bcftools \${roh[*]}" --upd-command "upd \${called[*]}" --output roh_upd
+    """
+
+    stub:
+    """
+    mkdir roh_upd
+    touch roh_upd/roh.parquet roh_upd/roh_upd.json
+    """
+}
+
 // One family's variants table, which holds a column of each member's calls, its transcripts table, its manifest and
 // the notes on the tables (tables.md, a copy of the file in the tools' package), from the union's tables and its values
 // from the echtvar archives and from the joined files. The manifest's roles are those of the proband the sheet names
@@ -405,6 +486,9 @@ process SV_ANNOTATION_TABLES {
 // such a family. strchive is the file of the loci of one release of STRchive, with the release's name and date as the
 // run states them, and an empty list and empty strings in a run without one: case-annotation checks the file for every
 // family and adds its size ranges to the repeats table of a family that has one.
+// Every family also gets roh, its members' runs of homozygosity, and one with a child whose parents are both sequenced
+// upd, such a child's regions of uniparental disomy, both from ROH_UPD's folder of the family (segments). The stub
+// cannot read a pedigree, so it writes no upd.
 process FAMILY_TABLES {
     tag "${family}"
     label 'tools'
@@ -414,7 +498,7 @@ process FAMILY_TABLES {
     disk 200.GB
 
     input:
-    tuple val(family), path(vcf), path(vcf_index), path(ped, stageAs: 'input/*'), val(proband), path(sv, stageAs: 'sv/*'), path(cnv, stageAs: 'cnv/*'), path(repeats, stageAs: 'repeats/*'), path(sv_alleles, stageAs: 'sv-alleles/*')
+    tuple val(family), path(vcf), path(vcf_index), path(ped, stageAs: 'input/*'), val(proband), path(sv, stageAs: 'sv/*'), path(cnv, stageAs: 'cnv/*'), path(repeats, stageAs: 'repeats/*'), path(sv_alleles, stageAs: 'sv-alleles/*'), path(segments)
     path tables
     path echtvar_values
     path joined_values
@@ -427,7 +511,7 @@ process FAMILY_TABLES {
     val pipeline_version
 
     output:
-    tuple val(family), path('variants.parquet'), path('transcripts.parquet'), path('manifest.json'), path('tables.md'), path('{sv,sv_transcripts,repeats}.parquet', arity: '0..3')
+    tuple val(family), path('variants.parquet'), path('transcripts.parquet'), path('roh.parquet'), path('manifest.json'), path('tables.md'), path('{sv,sv_transcripts,repeats,upd}.parquet', arity: '0..4')
 
     script:
     // Only a family with a caller's VCF reads the annotation of the group's structural variants.
@@ -438,6 +522,7 @@ process FAMILY_TABLES {
         ${structuralOptions(sv, cnv, repeats)} ${vcfs(sv_alleles).collect { f -> "--sv-alleles ${f}" }.join(' ')} \\
         ${annotated} ${ranges} \\
         --annotation ${tables} --echtvar-values ${echtvar_values} --joined-values ${joined_values} \\
+        --roh-upd ${segments} \\
         --schema-version ${schema_version} --pipeline-version ${pipeline_version} --output out --scratch /tmp
     mv out/* .
     """
@@ -445,7 +530,7 @@ process FAMILY_TABLES {
     stub:
     def larger = (vcfs(sv) + vcfs(cnv) ? ['sv.parquet', 'sv_transcripts.parquet'] : []) + (vcfs(repeats) ? ['repeats.parquet'] : [])
     """
-    touch variants.parquet transcripts.parquet manifest.json tables.md ${larger.join(' ')}
+    touch variants.parquet transcripts.parquet roh.parquet manifest.json tables.md ${larger.join(' ')}
     """
 }
 
