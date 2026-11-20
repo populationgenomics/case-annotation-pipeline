@@ -60,12 +60,8 @@ analysis-runner seqera --dataset rd-benchmark --access-level test \
 ```
 
 The analysis-runner launches with Nextflow's v2 syntax parser, which the pipeline needs. Access levels above `test` need
-the commit to be on `main`. The dataset has to allow this repository for the analysis-runner, and Seqera has to be able
-to clone the repository while it is private.
-
-Where the analysis-runner is not installed, `uvx --exclude-newer '7 days' analysis-runner@3.5.0` runs it in place of
-`analysis-runner` in these commands. The option is the repository's dependency age gate: `uvx` does not read `[tool.uv]`
-in `pyproject.toml`, so without it the tool's own dependencies would resolve to releases younger than seven days.
+the commit to be on `main`. The dataset has to allow this repository for the analysis-runner. The repository is public,
+so Seqera needs no credential to clone it.
 
 A run's input files are given as `gs://` paths that the dataset's accounts can read.
 
