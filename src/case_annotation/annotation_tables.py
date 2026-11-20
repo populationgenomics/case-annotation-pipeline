@@ -107,8 +107,17 @@ _STARS = {
     'no classifications from unflagged records': 0,
 }
 
-# The SpliceAI delta scores; Illumina's filtered release omits a score below its threshold.
-_SPLICEAI_SCORES = ('acceptorGainScore0', 'acceptorLossScore0', 'donorGainScore0', 'donorLossScore0')
+# The four SpliceAI delta scores by the name each has in a column, each with the Annotator's keys of the score and of
+# its distance. Illumina's filtered release omits a score below its threshold, and the score's distance with it.
+_SPLICEAI: Mapping[str, tuple[str, str]] = {
+    'acceptor_gain': ('acceptorGainScore0', 'acceptorGainDistance0'),
+    'acceptor_loss': ('acceptorLossScore0', 'acceptorLossDistance0'),
+    'donor_gain': ('donorGainScore0', 'donorGainDistance0'),
+    'donor_loss': ('donorLossScore0', 'donorLossDistance0'),
+}
+# Every key of a SpliceAI entry. Illumina's SpliceAI file holds a second set of scores, which the Annotator leaves
+# out. An entry with a key outside these is refused, so that a second set is never read as the first.
+_SPLICEAI_KEYS = frozenset({'geneId'}) | {key for keys in _SPLICEAI.values() for key in keys}
 
 
 def gnomad_fields(prefix: str) -> list[pa.Field]:
@@ -163,6 +172,14 @@ GENE = pa.struct(
     ]
 )
 
+# One regulatory feature that the allele overlaps: its id and its type, both as the Annotator gives them.
+REGULATORY_FEATURE = pa.struct(
+    [
+        pa.field('id', _STRING, nullable=False),
+        pa.field('type', _STRING, nullable=False),
+    ]
+)
+
 VARIANTS = pa.schema(
     [
         pa.field('chrom', _STRING, nullable=False),
@@ -177,6 +194,7 @@ VARIANTS = pa.schema(
         pa.field('worst_impact', _STRING),
         pa.field('hgnc_ids', pa.list_(_HGNC_ID)),
         pa.field('genes', pa.list_(GENE)),
+        pa.field('regulatory_features', pa.list_(REGULATORY_FEATURE)),
         *gnomad_fields('gnomad_genomes'),
         *gnomad_fields('gnomad_exomes'),
         pa.field('alphamissense_max', _FLOAT),
@@ -184,8 +202,11 @@ VARIANTS = pa.schema(
         pa.field('revel', _FLOAT),
         pa.field('spliceai_max', _FLOAT),
         pa.field('primateai3d_max', _FLOAT),
+        pa.field('promoterai_min', _FLOAT),
+        pa.field('promoterai_max', _FLOAT),
         pa.field('dann', _FLOAT),
         pa.field('phylop', _FLOAT),
+        pa.field('phylop_primate', _FLOAT),
         pa.field('gerp', _FLOAT),
         pa.field('clinvar_accession', _STRING),
         pa.field('clinvar_classification', _STRING),
@@ -227,7 +248,16 @@ TRANSCRIPTS = pa.schema(
         pa.field('alphamissense_class', _STRING),
         pa.field('primateai3d_score', _FLOAT),
         pa.field('spliceai_max', _FLOAT),
+        *(
+            field
+            for kind in _SPLICEAI
+            for field in (
+                pa.field(f'spliceai_{kind}', _FLOAT),
+                pa.field(f'spliceai_{kind}_distance', pa.int32()),
+            )
+        ),
         pa.field('promoterai_score', _FLOAT),
+        pa.field('promoterai_tss_distance', pa.int32()),
     ]
 )
 
@@ -395,9 +425,58 @@ def _max_by(entries: Iterable[Mapping[str, Any]], key: str) -> Mapping[str, Any]
     return max(scored, key=lambda e: e[key]) if scored else None
 
 
-def _spliceai_max(entry: Mapping[str, Any]) -> float | None:
-    scores = [entry[k] for k in _SPLICEAI_SCORES if entry.get(k) is not None]
-    return max(scores) if scores else None
+def _require(entry: Mapping[str, Any], keys: Sequence[str], what: str, where: str) -> None:
+    if missing := [key for key in keys if entry.get(key) is None]:
+        raise ValueError(f'{where}: a {what} entry without {missing}')
+
+
+def _spliceai_values(entry: Mapping[str, Any], where: str) -> dict[str, tuple[float, int]]:
+    """The scores of a SpliceAI entry by their kind (_SPLICEAI), each with its distance.
+
+    Fails on a key outside _SPLICEAI_KEYS, and on a score without its distance or a distance without its score.
+    """
+    if unknown := sorted(set(entry) - _SPLICEAI_KEYS):
+        raise ValueError(f'{where}: a SpliceAI entry with the keys {unknown}, which the conversion does not know')
+    values: dict[str, tuple[float, int]] = {}
+    for kind, (score_key, distance_key) in _SPLICEAI.items():
+        score, distance = entry.get(score_key), entry.get(distance_key)
+        if (score is None) != (distance is None):
+            raise ValueError(f'{where}: a SpliceAI entry with one of {score_key} and {distance_key} and not the other')
+        if score is not None and distance is not None:
+            values[kind] = (score, distance)
+    return values
+
+
+def _keep_highest(held: dict[str, tuple[float, int]], values: Mapping[str, tuple[float, int]]) -> None:
+    """Raises each kind's held SpliceAI score and distance to the given ones where those score higher.
+
+    Of two equal scores the one with the greater distance stays, so that the order of the entries decides nothing.
+    """
+    for kind, pair in values.items():
+        held[kind] = max(held.get(kind, pair), pair)
+
+
+def _spliceai_columns(values: Mapping[str, tuple[float, int]]) -> dict[str, float | int | None]:
+    """The SpliceAI columns of a transcript row: the highest of the scores, then each score with its distance."""
+    columns: dict[str, float | int | None] = {
+        'spliceai_max': max((score for score, _ in values.values()), default=None)
+    }
+    for kind in _SPLICEAI:
+        score, distance = values.get(kind, (None, None))
+        columns |= {f'spliceai_{kind}': score, f'spliceai_{kind}_distance': distance}
+    return columns
+
+
+def _regulatory_features(entries: Iterable[Mapping[str, Any]], where: str) -> list[dict[str, str]] | None:
+    """The regulatory features of an allele (REGULATORY_FEATURE) by id, and no list for an allele without one.
+
+    Fails on an entry without `id` or `type`.
+    """
+    features = []
+    for entry in entries:
+        _require(entry, ('id', 'type'), 'regulatory', where)
+        features.append({'id': entry['id'], 'type': entry['type']})
+    return sorted(features, key=lambda feature: (feature['id'], feature['type'])) or None
 
 
 def gnomad_values(prefix: str, data: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -570,12 +649,18 @@ def position_rows(
     `hgnc` holds each gene symbol of the document's genes section with its HGNC id (hgnc_ids). The section lists the
     gene of every transcript, so a transcript whose symbol it lacks fails. So does a transcript listed twice: with the
     allele it is the key of a row of `transcripts`, which an entry of `genes` names its transcripts by.
+
+    A SpliceAI score belongs to a gene, and a transcript row holds the highest score of each kind among the entries of
+    its genes, with that score's distance. A PromoterAI entry belongs to a transcript, and the allele's
+    `promoterai_min` and `promoterai_max` are over all its entries. The entries of both and of the regulatory features
+    are held to the keys this function reads (_spliceai_values, _require).
     """
     chrom, pos, ref = position['chromosome'], position['position'], position['refAllele']
     alts = position['altAlleles']
     variants = position.get('variants', [])
+    where = f'{chrom}:{pos}'
     if len(alts) != 1 or len(variants) > 1:
-        raise ValueError(f'{chrom}:{pos}: {len(alts)} alleles and {len(variants)} variants; the union holds one each')
+        raise ValueError(f'{where}: {len(alts)} alleles and {len(variants)} variants; the union holds one each')
     vid = variant_id(chrom, pos, ref, alts[0])
     row: dict[str, Any] = {'chrom': chrom, 'pos': pos, 'ref': ref, 'alt': alts[0], 'variant_id': vid}
     if not variants:
@@ -585,12 +670,15 @@ def position_rows(
 
     alphamissense = _highest(v.get('alphaMissense', ()), 'pathogenicity', 'transcriptId')
     primateai3d = _highest(v.get('primateAI-3D', ()), 'score', 'ensemblTranscriptId', 'refSeqTranscriptId')
+    for e in v.get('promoterAI', ()):
+        _require(e, ('score', 'distanceFromTss'), 'PromoterAI', where)
     promoterai = _highest(v.get('promoterAI', ()), 'score', 'transcriptId')
-    spliceai: dict[str, float | None] = {}
+    promoterai_scores = [e['score'] for e in v.get('promoterAI', ())]
+    spliceai: dict[str, dict[str, tuple[float, int]]] = {}
     for e in v.get('spliceAI', ()):
+        values = _spliceai_values(e, where)
         if e.get('geneId'):
-            scores = [x for x in (spliceai.get(e['geneId']), _spliceai_max(e)) if x is not None]
-            spliceai[e['geneId']] = max(scores) if scores else None
+            _keep_highest(spliceai.setdefault(e['geneId'], {}), values)
     transcripts = v.get('transcripts', [])
     # A RefSeq transcript's gene id is NCBI's; its symbol leads to the Ensembl genes of the same allele's transcripts.
     # A symbol can name more than one Ensembl gene (on X's and Y's pseudo-autosomal regions, for one).
@@ -609,20 +697,22 @@ def position_rows(
         genes = genes_of(t)
         return next(iter(genes)) if len(genes) == 1 else None
 
-    def gene_spliceai(t: Mapping[str, Any]) -> float | None:
-        scores = [score for g in genes_of(t) if (score := spliceai.get(g)) is not None]
-        return max(scores) if scores else None
+    def gene_spliceai(t: Mapping[str, Any]) -> dict[str, tuple[float, int]]:
+        best: dict[str, tuple[float, int]] = {}
+        for g in genes_of(t):
+            _keep_highest(best, spliceai.get(g, {}))
+        return best
 
     transcript_rows = []
     listed: set[str] = set()
     for t in transcripts:
         tid = t['transcript']
         if tid in listed:
-            raise ValueError(f'{chrom}:{pos}: the transcript {tid} twice')
+            raise ValueError(f'{where}: the transcript {tid} twice')
         listed.add(tid)
         symbol = t.get('hgnc')
         if symbol is not None and symbol not in hgnc:
-            raise ValueError(f'{chrom}:{pos}: the genes section lacks {symbol!r}, the gene of the transcript {tid}')
+            raise ValueError(f'{where}: the genes section lacks {symbol!r}, the gene of the transcript {tid}')
         consequences = by_severity(t['consequence'])
         am = alphamissense.get(_unversioned(tid))
         p3d = primateai3d.get(_unversioned(tid))
@@ -656,8 +746,9 @@ def position_rows(
                 'alphamissense_pathogenicity': am.get('pathogenicity') if am else None,
                 'alphamissense_class': am.get('classification') if am else None,
                 'primateai3d_score': p3d.get('score') if p3d else None,
-                'spliceai_max': gene_spliceai(t),
-                'promoterai_score': promoter.get('score') if promoter else None,
+                **_spliceai_columns(gene_spliceai(t)),
+                'promoterai_score': promoter['score'] if promoter else None,
+                'promoterai_tss_distance': promoter['distanceFromTss'] if promoter else None,
             }
         )
 
@@ -681,11 +772,12 @@ def position_rows(
         }
     top_am = _max_by(v.get('alphaMissense', ()), 'pathogenicity')
     top_p3d = _max_by(v.get('primateAI-3D', ()), 'score')
-    splice_scores = [s for s in spliceai.values() if s is not None]
+    splice_scores = [score for values in spliceai.values() for score, _ in values.values()]
     row |= {
         'variant_type': v.get('variantType'),
         'hgvsg': v.get('hgvsg'),
         'rsids': v.get('dbsnp') or None,
+        'regulatory_features': _regulatory_features(v.get('regulatoryRegions', ()), where),
         **gnomad_values('gnomad_genomes', v.get('gnomad')),
         **gnomad_values('gnomad_exomes', v.get('gnomad-exome')),
         'alphamissense_max': top_am['pathogenicity'] if top_am else None,
@@ -693,8 +785,11 @@ def position_rows(
         'revel': v.get('revel', {}).get('score'),
         'spliceai_max': max(splice_scores) if splice_scores else None,
         'primateai3d_max': top_p3d['score'] if top_p3d else None,
+        'promoterai_min': min(promoterai_scores, default=None),
+        'promoterai_max': max(promoterai_scores, default=None),
         'dann': v.get('dannScore'),
         'phylop': v.get('phylopScore'),
+        'phylop_primate': v.get('phyloPPrimateScore'),
         'gerp': v.get('gerpScore'),
         **allele_clinvar(v.get('clinvar', ())),
     }

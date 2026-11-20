@@ -114,6 +114,21 @@ def _float32(value: float) -> float:
 _RSIDS: tuple[list[str] | None, ...] = (['rs1', 'rs2'], None, ['rs3'], ['rs4'], ['rs5'], ['rs6'])
 # The invented HGNC ids of the genes of the union's alleles, in the alleles' order: one gene, two, none, then one each.
 _HGNC_IDS: tuple[list[int] | None, ...] = ([90001], [90001, 90002], None, [90002], [90001], [90003])
+# The invented regulatory features of the union's alleles, in the alleles' order: two on the first and none on the
+# others.
+_REGULATORY: tuple[list[dict[str, str]] | None, ...] = (
+    [{'id': 'R01', 'type': 'enhancer'}, {'id': 'R02', 'type': 'promoter'}],
+    *(None,) * 5,
+)
+# What a predictor says of the one transcript of each allele of the union: a SpliceAI score with its distance, and a
+# PromoterAI score with its distance from the transcript's start.
+_PREDICTED = {
+    'spliceai_max': 0.4,
+    'spliceai_donor_loss': 0.4,
+    'spliceai_donor_loss_distance': -3,
+    'promoterai_score': -0.2,
+    'promoterai_tss_distance': 150,
+}
 
 
 def _gene(symbol: str, hgnc_id: int | None) -> dict[str, Any]:
@@ -159,7 +174,9 @@ def _write_union(path: pathlib.Path, alleles: Sequence[str], info: annotation_ta
     (path / 'variants').mkdir(parents=True)
     (path / 'transcripts').mkdir()
     variants, transcripts = [], []
-    for vid, rsids, hgnc_ids, genes in zip([*alleles, 'chr2-500-C-A'], _RSIDS, _HGNC_IDS, _GENES, strict=True):
+    for vid, rsids, hgnc_ids, genes, regulatory in zip(
+        [*alleles, 'chr2-500-C-A'], _RSIDS, _HGNC_IDS, _GENES, _REGULATORY, strict=True
+    ):
         chrom, pos, ref, alt = vid.split('-')
         variants.append(
             {
@@ -170,6 +187,7 @@ def _write_union(path: pathlib.Path, alleles: Sequence[str], info: annotation_ta
                 'variant_id': vid,
                 'hgnc_ids': hgnc_ids,
                 'genes': genes,
+                'regulatory_features': regulatory,
                 'rsids': rsids,
                 'clinvar_accession': 'VCV1',
                 **_PER_TYPE,
@@ -187,6 +205,7 @@ def _write_union(path: pathlib.Path, alleles: Sequence[str], info: annotation_ta
                 'worst_consequence': 'intron_variant',
                 'is_mane_select': False,
                 'is_canonical': True,
+                **_PREDICTED,
             }
         )
     # Out of order across parts, as the workers write them.
@@ -385,6 +404,31 @@ def test_an_alleles_genes_are_a_list_of_structs_and_unnest_gives_a_row_for_each_
     held = [g['gene_symbol'] for genes in _GENES[: len(_ALLELES)] for g in genes or ()]
     assert {c['gene_symbol']: c['alleles'] for c in counted} == {symbol: held.count(symbol) for symbol in set(held)}
     assert {'GENEA', 'GENEX'} <= set(held)
+
+
+def test_an_alleles_regulatory_features_are_a_list_of_structs_and_an_allele_without_any_has_none(
+    tmp_path: pathlib.Path,
+) -> None:
+    family_tables.assemble(**_inputs(tmp_path))
+    path = tmp_path / 'out' / 'variants.parquet'
+    assert pq.read_schema(path).field('regulatory_features').type == pa.list_(annotation_tables.REGULATORY_FEATURE)
+    rows = {v['variant_id']: v['regulatory_features'] for v in _rows(path)}
+    assert rows == dict(zip(_ALLELES, _REGULATORY[: len(_ALLELES)], strict=True))
+    by_type = _rows(
+        path,
+        "SELECT variant_id FROM t WHERE len(list_filter(regulatory_features, lambda f: f.type = 'promoter')) > 0",
+    )
+    assert by_type == [{'variant_id': _ALLELES[0]}]
+
+
+def test_the_transcripts_table_has_the_columns_and_types_of_the_unions_with_their_values(
+    tmp_path: pathlib.Path,
+) -> None:
+    family_tables.assemble(**_inputs(tmp_path))
+    path = tmp_path / 'out' / 'transcripts.parquet'
+    # The table is written as DuckDB returns the union's rows, with no declared schema to cast them to.
+    assert pq.read_schema(path).equals(family_tables.TABLES['transcripts'].columns, check_metadata=False)
+    assert [{name: row[name] for name in _PREDICTED} for row in _rows(path)] == [_PREDICTED] * len(_ALLELES)
 
 
 def test_a_call_without_likelihoods_has_none(tmp_path: pathlib.Path) -> None:

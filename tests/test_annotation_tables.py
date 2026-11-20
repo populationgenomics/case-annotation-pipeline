@@ -68,6 +68,10 @@ def _transcript(tid: str, source: str, gene: str, gene_id: str, *consequences: s
     }
 
 
+def _promoterai(transcript: str, score: float, distance: int, **extra: object) -> dict[str, Any]:
+    return {'transcriptId': transcript, 'score': score, 'distanceFromTss': distance, **extra}
+
+
 def _position(chrom: str, pos: int, ref: str, alt: str, **variant: object) -> dict[str, Any]:
     return {
         'chromosome': chrom,
@@ -115,11 +119,28 @@ def _rich_position() -> dict[str, Any]:
             {'transcriptId': 'ENST02.2', 'pathogenicity': 0.9, 'classification': 'likely_pathogenic'},
             {'transcriptId': 'ENST01.1', 'pathogenicity': 0.2, 'classification': 'likely_benign'},
         ],
-        spliceAI=[{'geneId': 'ENSG01', 'donorGainScore0': 0.1, 'acceptorLossScore0': 0.4}],
+        spliceAI=[
+            {
+                'geneId': 'ENSG01',
+                'donorGainScore0': 0.1,
+                'donorGainDistance0': 12,
+                'acceptorLossScore0': 0.4,
+                'acceptorLossDistance0': -3,
+            }
+        ],
+        promoterAI=[
+            _promoterai('ENST02.2', -0.3, -120, geneId='ENSG01', strand=1),
+            _promoterai('ENST03.1', 0.2, 45, geneId='ENSG02', strand=-1),
+        ],
+        regulatoryRegions=[
+            {'id': 'R02', 'type': 'promoter', 'consequence': ['regulatory_region_variant']},
+            {'id': 'R01', 'type': 'enhancer', 'consequence': ['regulatory_region_variant']},
+        ],
         **{'primateAI-3D': [{'score': 0.7, 'ensemblTranscriptId': 'ENST02.3', 'refSeqTranscriptId': 'NM_01.1'}]},
         revel={'score': 0.5},
         dannScore=0.9,
         phylopScore=3.1,
+        phyloPPrimateScore=0.4,
         gerpScore=4.2,
         clinvar=[
             {
@@ -161,6 +182,7 @@ def test_a_position_gives_its_allele_and_its_transcripts() -> None:
     assert table.column('rsids').to_pylist() == [['rs1', 'rs2']]
     assert {table.schema.field(f'gnomad_{kind}_af').type for kind in ('genomes', 'exomes')} == {pa.float32()}
     assert (row['alphamissense_max'], row['spliceai_max'], row['primateai3d_max']) == (0.9, 0.4, 0.7)
+    assert (row['phylop'], row['phylop_primate']) == (3.1, 0.4)
     # Only the allele-specific ClinVar record is this allele's.
     assert row['clinvar_accession'] == 'VCV000000002'
     assert (row['clinvar_stars'], row['clinvar_conditions']) == (1, ['invented condition'])
@@ -169,7 +191,131 @@ def test_a_position_gives_its_allele_and_its_transcripts() -> None:
     assert by_id['NM_01.2']['primateai3d_score'] == 0.7
     assert by_id['NM_01.2']['spliceai_max'] == 0.4  # through the gene symbol
     assert by_id['ENST03.1']['spliceai_max'] is None
+    assert by_id['ENST02.3']['promoterai_score'] == -0.3  # matched without the version
     assert {'dbsnp', 'clinvar', 'transcripts'} <= keys
+
+
+def _spliceai(row: dict[str, Any]) -> dict[str, tuple[float, int]]:
+    """The SpliceAI scores a transcript row holds, each with its distance, by their kind."""
+    kinds = ('acceptor_gain', 'acceptor_loss', 'donor_gain', 'donor_loss')
+    held = {kind: (row[f'spliceai_{kind}'], row[f'spliceai_{kind}_distance']) for kind in kinds}
+    # A distance is null with its score, and the highest of the scores is the row's `spliceai_max`.
+    assert all((score is None) == (distance is None) for score, distance in held.values())
+    scores = [score for score, _ in held.values() if score is not None]
+    assert row['spliceai_max'] == (max(scores) if scores else None)
+    return {kind: pair for kind, pair in held.items() if pair[0] is not None}
+
+
+def test_a_transcript_has_each_spliceai_score_of_its_gene_with_that_scores_distance() -> None:
+    _, transcripts, _ = _position_rows(_rich_position())
+    by_id = {t['transcript_id']: _spliceai(t) for t in transcripts}
+    # The entry is of the Ensembl gene, and the RefSeq transcript of the same symbol has its values too.
+    of_genea = {'acceptor_loss': (0.4, -3), 'donor_gain': (0.1, 12)}
+    assert by_id == {'ENST01.1': of_genea, 'ENST02.3': of_genea, 'NM_01.2': of_genea, 'ENST03.1': {}}
+    table = pa.Table.from_pylist(transcripts, schema=annotation_tables.TRANSCRIPTS)
+    assert {table.schema.field(f'spliceai_{kind}_distance').type for kind in of_genea} == {pa.int32()}
+    assert table.column('spliceai_acceptor_loss_distance').to_pylist() == [-3, -3, -3, None]
+
+
+def test_equal_spliceai_scores_of_one_kind_give_the_same_distance_in_either_order() -> None:
+    entries = [
+        {'geneId': 'ENSG01', 'donorLossScore0': 0.3, 'donorLossDistance0': -8},
+        {'geneId': 'ENSG01', 'donorLossScore0': 0.3, 'donorLossDistance0': 20},
+    ]
+    transcripts = [_transcript('ENST01.1', 'Ensembl', 'GENEA', 'ENSG01', 'intron_variant')]
+    held = []
+    for spliceai in (entries, entries[::-1]):
+        _, (row,), _ = _position_rows(_position('chr1', 5, 'C', 'T', transcripts=transcripts, spliceAI=spliceai))
+        held.append(_spliceai(row))
+    assert held[0] == held[1] == {'donor_loss': (0.3, 20)}
+
+
+def test_an_allele_has_its_lowest_and_its_highest_promoterai_score_and_a_transcript_its_own_entry() -> None:
+    transcripts = [
+        _transcript('ENST01.1', 'Ensembl', 'GENEA', 'ENSG01', 'upstream_gene_variant'),
+        _transcript('ENST02.1', 'Ensembl', 'GENEA', 'ENSG01', 'upstream_gene_variant'),
+        _transcript('NM_01.1', 'RefSeq', 'GENEA', '1001', 'upstream_gene_variant'),
+    ]
+    entries = [_promoterai('ENST01', -0.4, -250), _promoterai('ENST02', 0.1, 30), _promoterai('ENST09', 0.3, 1000)]
+    row, rows, _ = _position_rows(_position('chr1', 5, 'C', 'T', transcripts=transcripts, promoterAI=entries))
+    # Both ends of the scores, also of an entry whose transcript the allele does not list: a filter on one signed
+    # summary would miss the scores of the other sign.
+    assert (row['promoterai_min'], row['promoterai_max']) == (-0.4, 0.3)
+    held = {r['transcript_id']: (r['promoterai_score'], r['promoterai_tss_distance']) for r in rows}
+    assert held == {'ENST01.1': (-0.4, -250), 'ENST02.1': (0.1, 30), 'NM_01.1': (None, None)}
+    table = pa.Table.from_pylist(rows, schema=annotation_tables.TRANSCRIPTS)
+    assert table.schema.field('promoterai_tss_distance').type == pa.int32()
+    assert table.column('promoterai_tss_distance').to_pylist() == [-250, 30, None]
+
+    one, _, _ = _position_rows(_position('chr1', 5, 'C', 'T', promoterAI=entries[:1]))
+    assert (one['promoterai_min'], one['promoterai_max']) == (-0.4, -0.4)
+    none, _, _ = _position_rows(_position('chr1', 5, 'C', 'T'))
+    assert (none['promoterai_min'], none['promoterai_max']) == (None, None)
+
+
+def test_an_alleles_regulatory_features_are_sorted_by_id_and_hold_the_id_and_the_type_alone() -> None:
+    row, _, _ = _position_rows(_rich_position())
+    assert row['regulatory_features'] == [{'id': 'R01', 'type': 'enhancer'}, {'id': 'R02', 'type': 'promoter'}]
+    table = pa.Table.from_pylist([row], schema=annotation_tables.VARIANTS)
+    assert table.schema.field('regulatory_features').type == pa.list_(annotation_tables.REGULATORY_FEATURE)
+    assert table.column('regulatory_features').to_pylist() == [row['regulatory_features']]
+
+
+@pytest.mark.parametrize('variant', [{}, {'regulatoryRegions': []}], ids=['no entry', 'an empty one'])
+def test_an_allele_without_regulatory_features_has_no_list_rather_than_an_empty_one(variant: dict[str, Any]) -> None:
+    row, _, _ = _position_rows(_position('chr1', 5, 'C', 'T', **variant))
+    assert row['regulatory_features'] is None
+    table = pa.Table.from_pylist([row], schema=annotation_tables.VARIANTS)
+    assert table.column('regulatory_features').to_pylist() == [None]
+
+
+def test_an_allele_without_a_primate_phylop_score_has_none() -> None:
+    row, _, _ = _position_rows(_position('chr1', 5, 'C', 'T', phylopScore=1.5))
+    assert (row['phylop'], row['phylop_primate']) == (1.5, None)
+
+
+_SCORED = {'geneId': 'ENSG01', 'donorGainScore0': 0.5, 'donorGainDistance0': 2}
+ENTRIES_REFUSED = {
+    'a SpliceAI entry with a score of a second set': (
+        {'spliceAI': [_SCORED | {'donorGainScore1': 0.2, 'donorGainDistance1': 9}]},
+        r"chr1:5: a SpliceAI entry with the keys \['donorGainDistance1', 'donorGainScore1'\]",
+    ),
+    'a SpliceAI entry with a key that is no score': (
+        {'spliceAI': [_SCORED | {'transcriptId': 'ENST01.1'}]},
+        r"chr1:5: a SpliceAI entry with the keys \['transcriptId'\]",
+    ),
+    'a SpliceAI score without its distance': (
+        {'spliceAI': [_SCORED | {'acceptorGainScore0': 0.2}]},
+        'chr1:5: a SpliceAI entry with one of acceptorGainScore0 and acceptorGainDistance0 and not the other',
+    ),
+    'a SpliceAI distance without its score': (
+        {'spliceAI': [_SCORED | {'acceptorLossDistance0': -4}]},
+        'chr1:5: a SpliceAI entry with one of acceptorLossScore0 and acceptorLossDistance0 and not the other',
+    ),
+    'a PromoterAI entry without a score': (
+        {'promoterAI': [{'transcriptId': 'ENST01', 'distanceFromTss': 30}]},
+        r"chr1:5: a PromoterAI entry without \['score'\]",
+    ),
+    'a PromoterAI entry without its distance': (
+        {'promoterAI': [{'transcriptId': 'ENST01', 'score': 0.1}]},
+        r"chr1:5: a PromoterAI entry without \['distanceFromTss'\]",
+    ),
+    'a regulatory entry without an id': (
+        {'regulatoryRegions': [{'type': 'promoter', 'consequence': ['regulatory_region_variant']}]},
+        r"chr1:5: a regulatory entry without \['id'\]",
+    ),
+    'a regulatory entry without a type': (
+        {'regulatoryRegions': [{'id': 'R01', 'consequence': ['regulatory_region_variant']}]},
+        r"chr1:5: a regulatory entry without \['type'\]",
+    ),
+}
+
+
+@pytest.mark.parametrize('case', ENTRIES_REFUSED)
+def test_an_entry_that_lacks_what_a_column_reads_or_holds_an_unknown_key_is_refused(case: str) -> None:
+    variant, message = ENTRIES_REFUSED[case]
+    with pytest.raises(ValueError, match=message):
+        _position_rows(_position('chr1', 5, 'C', 'T', **variant))
 
 
 def test_a_transcript_has_its_genes_hgnc_id_and_an_allele_the_ids_of_its_genes() -> None:
@@ -364,13 +510,21 @@ def test_repeated_entries_of_one_transcript_or_gene_keep_the_highest_score() -> 
             {'transcriptId': 'ENST01.1', 'pathogenicity': 0.3},
             {'transcriptId': 'ENST01.2', 'pathogenicity': 0.8},
         ],
-        spliceAI=[{'geneId': 'ENSG01', 'donorGainScore0': 0.5}, {'geneId': 'ENSG01', 'acceptorGainScore0': 0.2}],
+        spliceAI=[
+            {'geneId': 'ENSG01', 'donorGainScore0': 0.5, 'donorGainDistance0': 2},
+            {'geneId': 'ENSG01', 'acceptorGainScore0': 0.2, 'acceptorGainDistance0': -7},
+            {'geneId': 'ENSG01', 'donorGainScore0': 0.3, 'donorGainDistance0': 40},
+        ],
     )
-    _, transcripts, _ = _position_rows(position)
+    row, transcripts, _ = _position_rows(position)
     by_id = {t['transcript_id']: t for t in transcripts}
     assert by_id['ENST01.1']['alphamissense_pathogenicity'] == 0.8
     assert by_id['ENST01.1']['spliceai_max'] == 0.5
     assert by_id['NM_01.1']['spliceai_max'] == 0.5
+    assert row['spliceai_max'] == 0.5
+    # Each kind of score keeps its own highest, with the distance of that score and not of a later entry.
+    assert _spliceai(by_id['ENST01.1']) == {'donor_gain': (0.5, 2), 'acceptor_gain': (0.2, -7)}
+    assert _spliceai(by_id['NM_01.1']) == _spliceai(by_id['ENST01.1'])
 
 
 def test_a_symbol_of_two_ensembl_genes_leaves_a_refseq_transcripts_gene_open() -> None:
@@ -384,12 +538,19 @@ def test_a_symbol_of_two_ensembl_genes_leaves_a_refseq_transcripts_gene_open() -
             _transcript('ENST02.1', 'Ensembl', 'GENEP', 'ENSG02', 'intron_variant'),
             _transcript('NM_01.1', 'RefSeq', 'GENEP', '1001', 'missense_variant'),
         ],
-        spliceAI=[{'geneId': 'ENSG01', 'donorGainScore0': 0.1}, {'geneId': 'ENSG02', 'donorGainScore0': 0.6}],
+        spliceAI=[
+            {'geneId': 'ENSG01', 'donorGainScore0': 0.1, 'donorGainDistance0': 5},
+            {'geneId': 'ENSG01', 'acceptorGainScore0': 0.3, 'acceptorGainDistance0': 11},
+            {'geneId': 'ENSG02', 'donorGainScore0': 0.6, 'donorGainDistance0': -40},
+        ],
     )
     row, transcripts, _ = _position_rows(position)
     gene = row['genes'][0]
     assert (gene['worst_transcript_id'], gene['gene_symbol'], gene['ensembl_gene_id']) == ('NM_01.1', 'GENEP', None)
-    assert next(t for t in transcripts if t['source'] == 'RefSeq')['spliceai_max'] == 0.6
+    refseq = next(t for t in transcripts if t['source'] == 'RefSeq')
+    assert refseq['spliceai_max'] == 0.6
+    # The RefSeq transcript has the highest score of each kind over both genes of its symbol.
+    assert _spliceai(refseq) == {'donor_gain': (0.6, -40), 'acceptor_gain': (0.3, 11)}
 
 
 # What no column of `variants` holds: each is of one gene or one transcript of an allele, and a field of an entry.
