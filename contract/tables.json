@@ -2587,8 +2587,8 @@
           "source": "strchive"
         },
         {
-          "name": "strchive_same_interval",
-          "type": "bool",
+          "name": "strchive_units_offset",
+          "type": "float32",
           "nullable": true,
           "source": "strchive"
         },

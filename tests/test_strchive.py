@@ -58,7 +58,8 @@ def test_a_locus_is_read_with_its_place_its_motifs_and_its_values(tmp_path: path
         'strchive_pathogenic_max': 200,
     }
     # Every column but the one that compares the entry with a row, in the table's order.
-    assert list(first.columns) == [name for name in strchive.COLUMNS if name != strchive.SAME_INTERVAL]
+    assert list(first.columns) == [name for name in strchive.COLUMNS if name != strchive.UNITS_OFFSET]
+    assert (first.unit, second.unit) == (3, 3)
     # The reference motif and the pathogenic one, each once, and a range that the file leaves empty as nulls.
     assert second.motifs == ('GCN', 'NGC')
     assert (second.columns['strchive_intermediate_min'], second.columns['strchive_intermediate_max']) == (None, None)
@@ -272,8 +273,8 @@ def test_each_repeat_gets_the_values_of_its_locus_and_one_without_a_locus_nulls(
         else:
             entry = by_locus[row['strchive_id']].columns
             assert {name: row[name] for name in entry} == entry
-            # Both loci are wider than their repeats.
-            assert row[strchive.SAME_INTERVAL] is False
+            # Both loci are wider than their repeats, by 20 and by 9 bases of units of 3.
+            assert row[strchive.UNITS_OFFSET] == pytest.approx({'RPTA': 20 / 3, 'RPTB_GCC': 3.0}[row['repeat_id']])
     assert {repeat for repeat, row in by_id.items() if row['strchive_id'] is None} == set(invented_strchive.UNMATCHED)
 
 
@@ -327,25 +328,38 @@ def test_a_repeat_is_of_the_locus_that_shares_a_base_and_a_unit_with_it(tmp_path
     assert _matched(tmp_path, row, locus) == ('INV1_GENEA' if same else None)
 
 
-# The interval of the repeat on chr1 is 2000 to 2030. A row's interval is its locus's where both ends are.
-INTERVALS: Mapping[str, tuple[int, int, bool | None]] = {
-    'the same start and stop': (2_000, 2_030, True),
-    'a locus that starts a base earlier': (1_999, 2_030, False),
-    'a locus that stops a base later': (2_000, 2_031, False),
-    'a locus within the repeat': (2_003, 2_027, False),
-    'a locus of the same length, shifted by a unit': (2_003, 2_033, False),
+# The repeat on chr1 has the interval 2000 to 2030, which is 10 units of 3 bases. The offset is the units by which
+# the locus's interval is the longer.
+OFFSETS: Mapping[str, tuple[int, int, float | None]] = {
+    'the same start and stop': (2_000, 2_030, 0.0),
+    'a locus that starts a base earlier': (1_999, 2_030, 1 / 3),
+    'a locus that holds four units more, as one that counts interrupted units too': (2_000, 2_042, 4.0),
+    'a locus that is longer at both ends': (1_994, 2_039, 5.0),
+    'a locus within the repeat, two units shorter': (2_003, 2_027, -2.0),
+    'a locus of the same length, shifted by a unit': (2_003, 2_033, 0.0),
     'a locus that the repeat does not overlap': (2_030, 2_060, None),
 }
 
 
-@pytest.mark.parametrize('case', INTERVALS)
-def test_a_matched_row_says_whether_its_interval_is_its_locuss(tmp_path: pathlib.Path, case: str) -> None:
-    start, stop, same = INTERVALS[case]
+@pytest.mark.parametrize('case', OFFSETS)
+def test_a_matched_row_has_the_units_by_which_its_locus_is_longer(tmp_path: pathlib.Path, case: str) -> None:
+    start, stop, offset = OFFSETS[case]
     loci = _read(tmp_path, invented_strchive.locus(start_hg38=start, stop_hg38=stop))
     (row,), matched = strchive.annotate([_repeat()], loci)
-    assert row[strchive.SAME_INTERVAL] is same
-    assert matched == (same is not None)
+    assert row[strchive.UNITS_OFFSET] == (None if offset is None else pytest.approx(offset))
+    assert matched == (offset is not None)
     assert (row['strchive_start_hg38'], row['strchive_stop_hg38']) == ((start, stop) if matched else (None, None))
+
+
+def test_the_offset_is_in_units_of_the_pathogenic_motifs_length(tmp_path: pathlib.Path) -> None:
+    # A repeat of 6 units of 5 bases in a locus of 50 bases, whose ranges count units of 5 bases.
+    locus = invented_strchive.locus(
+        stop_hg38=2_040,
+        reference_motif_reference_orientation=['AAAAT'],
+        pathogenic_motif_reference_orientation=['TGAAA'],
+    )
+    (row,), _matched = strchive.annotate([_repeat(repeat_unit='AAAAT')], _read(tmp_path, locus))
+    assert row[strchive.UNITS_OFFSET] == pytest.approx((50 - 30) / 5)
 
 
 def test_a_repeat_that_matches_two_loci_is_refused(tmp_path: pathlib.Path) -> None:
@@ -387,7 +401,7 @@ def test_each_column_holds_the_field_of_its_name_under_the_prefix(tmp_path: path
     entry = invented_strchive.locus()
     (locus,) = _read(tmp_path, entry)
     assert all(name.startswith('strchive_') for name in strchive.COLUMNS)
-    fields = [name for name in strchive.COLUMNS if name not in (strchive.SAME_INTERVAL, 'strchive_evidence')]
+    fields = [name for name in strchive.COLUMNS if name not in (strchive.UNITS_OFFSET, 'strchive_evidence')]
     assert {name: locus.columns[name] for name in fields} == {
         name: entry[name.removeprefix('strchive_')] for name in fields
     }

@@ -9,8 +9,8 @@ column says whether a member's allele is pathogenic: a reader compares the sizes
 A row is matched to an entry by what both publish about the repeat, and by no name of it, so that the rule holds for
 any genotyper's catalogue. The two lie on one chromosome, their intervals share a base, and the row's repeat unit is
 one of the entry's motifs (same_repeat). A row that matches no entry has nulls, and a row that matches two is refused.
-One more column says whether the row's interval is the entry's own: only then do a member's sizes and the entry's
-ranges count the same stretch.
+One more column gives the number of units by which the entry's interval is longer than the row's: a catalogue can
+size a shorter stretch of a repeat than STRchive counts, and a member's sizes are then lower by that number.
 
 The file states neither its release nor a date. STRchive is a dated source, so a run that gives the file states both
 (Release), and a family's manifest records them as stated.
@@ -40,13 +40,14 @@ _INT = pa.int32()
 _INT_MAX = 2**31 - 1
 _RANGES = ('benign', 'intermediate', 'pathogenic')
 _BOUNDS = tuple(f'{kind}_{bound}' for kind in _RANGES for bound in ('min', 'max'))
-# Whether a row's interval is its entry's, start and stop alike: the one column that no field of the file gives.
-SAME_INTERVAL = 'strchive_same_interval'
+# The length of an entry's interval less that of its row's, in units of the length that the entry's ranges count: the
+# one column that no field of the file gives. A genotyper that sizes a stretch within STRchive's interval counts so
+# many units fewer in an allele than the whole interval holds. It is 0 where the two intervals are of one length.
+UNITS_OFFSET = 'strchive_units_offset'
 # The columns of repeats that hold an entry's values, each named as STRchive's field with the prefix. The six bounds
 # count repeat units of the row's repeat unit's length (Locus.motifs). A catalogue can draw the repeat's ends
 # elsewhere than STRchive does. A member's size and a bound then count units of one length over different stretches,
-# and nothing here converts one to the other: the entry's interval is a column, and SAME_INTERVAL says where the two
-# intervals are one.
+# and no size or bound is changed for it: the entry's interval is a column, and UNITS_OFFSET gives the difference.
 FIELDS = (
     pa.field('strchive_id', _STRING),
     pa.field('strchive_gene', _STRING),
@@ -54,7 +55,7 @@ FIELDS = (
     pa.field('strchive_inheritance', pa.list_(_STRING)),
     pa.field('strchive_start_hg38', _INT),
     pa.field('strchive_stop_hg38', _INT),
-    pa.field(SAME_INTERVAL, pa.bool_()),
+    pa.field(UNITS_OFFSET, pa.float32()),
     pa.field('strchive_pathogenic_motif_reference_orientation', pa.list_(_STRING)),
     *(pa.field(f'strchive_{bound}', _INT) for bound in _BOUNDS),
 )
@@ -140,13 +141,14 @@ class Locus:
     its reference motif and its pathogenic motifs in the reference's orientation, those as long as its first
     pathogenic motif: STRchive counts a size in units of that length, so a row whose unit is one of them has sizes in
     the unit of the entry's ranges. The length is not read from the entry's `motif_len`, which in every release up to
-    v2.28.0 is another number for some locus. `columns` are the entry's values of FIELDS, all but SAME_INTERVAL, which
-    is of a row and its entry together.
+    v2.28.0 is another number for some locus. `unit` is that length. `columns` are the entry's values of FIELDS, all
+    but UNITS_OFFSET, which is of a row and its entry together.
     """
 
     chrom: str
     start: int
     stop: int
+    unit: int
     motifs: tuple[str, ...]
     columns: Mapping[str, Any]
 
@@ -232,6 +234,7 @@ def _locus(entry: Mapping[str, Any], where: str) -> Locus:
         chrom=chrom,
         start=start,
         stop=stop,
+        unit=len(pathogenic[0]),
         motifs=tuple(m for m in dict.fromkeys((*reference, *pathogenic)) if len(m) == len(pathogenic[0])),
         columns={
             'strchive_id': locus_id,
@@ -312,8 +315,8 @@ def _matches(row: Mapping[str, Any], locus: Locus) -> bool:
 def annotate(rows: Sequence[Mapping[str, Any]], loci: Sequence[Locus]) -> tuple[list[dict[str, Any]], int]:
     """The rows of repeats, each with the values of its entry of STRchive, and the number of rows that have one.
 
-    A row with an entry also says whether its interval is the entry's. A row without one has a null in each of the
-    columns.
+    A row with an entry also has the units by which the entry's interval is longer than its own (UNITS_OFFSET), which
+    is below 0 where the row's is the longer. A row without an entry has a null in each of the columns.
 
     Raises:
         ValueError: if a row matches two entries, which no release of STRchive that was read gives a repeat.
@@ -330,7 +333,8 @@ def annotate(rows: Sequence[Mapping[str, Any]], loci: Sequence[Locus]) -> tuple[
         matched += len(found)
         values: Mapping[str, Any] = dict.fromkeys(COLUMNS)
         if found:
-            same = (row['pos'], row['end_pos']) == (found[0].start, found[0].stop)
-            values = {**found[0].columns, SAME_INTERVAL: same}
+            locus = found[0]
+            longer = (locus.stop - locus.start) - (row['end_pos'] - row['pos'])
+            values = {**locus.columns, UNITS_OFFSET: longer / locus.unit}
         annotated.append({**row, **values})
     return annotated, matched

@@ -1463,18 +1463,36 @@ rows can be of one locus, as where a catalogue sizes a repeat in two parts. The 
 with a locus as `matched_repeats` and those without one as `unmatched_repeats`.
 
 A match says that a row and a locus are one repeat. The catalogue and STRchive can still count different stretches of
-it. Of the 24 matched repeats of Illumina's catalogue whose interval is not the locus's, 17 have a length within one
-unit of the locus's and 7 are shorter by a unit or more, by up to about 30 units. STRchive's ranges are those of the
-literature, which counts each locus in its own way. For the polyalanine repeat of `PABPN1`, STRchive counts every
-alanine codon, 10 in a benign allele, and says so in its entry. Illumina's catalogue sizes the `GCG` codons among them,
-of which the reference has 6, so a size from that catalogue is 4 units below STRchive's count, at a locus whose benign
-and pathogenic sizes lie two units apart. A longer interval need not mean another count, and whether it does is in
-STRchive's entry of the locus and in the literature behind it. The workflow converts nothing. `repeats` has STRchive's
-interval beside the row's own, as `strchive_start_hg38` and `strchive_stop_hg38`, and `strchive_same_interval` is true
-where the two are the same, start and stop alike. A size compares with STRchive's ranges as it stands only in such a row
-([A repeat in STRchive's pathogenic range](family-tables.md#a-repeat-in-strchives-pathogenic-range)). The column is true
-for 7 of the 31 matched repeats of Illumina's catalogue, for 30 of the 79 of the Broad Institute's and for 13 of the 59
-of Stranger's.
+it. For the polyalanine repeat of `PABPN1`, STRchive counts every alanine codon, 10 in a benign allele, and says so in
+its entry. Illumina's catalogue sizes the `GCG` codons among them, of which the reference has 6, so a size from that
+catalogue is 4 units below STRchive's count, at a locus whose benign and pathogenic sizes lie two units apart.
+
+`repeats` therefore has STRchive's interval beside the row's own, as `strchive_start_hg38` and `strchive_stop_hg38`, and
+`strchive_units_offset`: the length of STRchive's interval less the length of the row's, in units of the length that the
+ranges count. It is the number of units by which the genotyper's count of an allele is below the count of the same
+allele over STRchive's interval, and 4.33 for the row of `PABPN1` from Illumina's catalogue. No size and no bound is
+changed: a reader adds the offset to a size
+([A repeat in STRchive's pathogenic range](family-tables.md#a-repeat-in-strchives-pathogenic-range)).
+
+| Of the 31 matched repeats of Illumina's catalogue                 | Repeats |
+| ----------------------------------------------------------------- | ------- |
+| an offset below one unit, 7 of them with the locus's own interval | 24      |
+| an offset from one unit to under two                              | 2       |
+| an offset of two units or more: 3.0, 4.33, 7.33, 11.33 and 29.67  | 5       |
+| an offset below 0, where the row's interval is the longer         | 0       |
+
+Two things limit what the offset says.
+
+- It compares two lengths, so it is the exact difference of the two counts only where one interval lies within the
+  other. That holds for 30 of the 31: 7 have the locus's interval and 23 lie within it. The one other is shifted against
+  its locus by a base. Two intervals that are shifted far against each other can have an offset near 0 and count
+  different stretches, which the four interval columns show.
+- The sum of a size and the offset is the count over STRchive's whole interval. STRchive's ranges are those of the
+  literature, and they need not count that whole interval. For two loci of v2.28.0 the interval itself holds over a unit
+  more than the largest benign size, 3.7 and 10.7 units more, so the ranges of those loci count a shorter stretch than
+  the interval. One of them is the row with the offset of 29.67 above: the reference has 20 units in the catalogue's
+  interval and 49.7 in STRchive's, and the largest benign size is 39. At such a locus the size as the genotyper gives it
+  is the one that compares, and whether a locus is of that kind is in STRchive's entry and the literature behind it.
 
 The rule was run on four public catalogues for GRCh38 on 20 November 2026, each read as the rows that a repeat VCF of
 the catalogue gives, against v2.28.0:

@@ -1823,8 +1823,8 @@ def test_a_run_with_a_release_of_strchive_gives_each_repeat_the_values_of_its_lo
         else:
             entry = by_locus[row['strchive_id']]
             assert {column: row[column] for column in entry} == entry
-            # The invented loci are wider than the repeats.
-            assert row[strchive.SAME_INTERVAL] is False
+            # The invented loci are wider than the repeats, and the column is a 32-bit float.
+            assert row[strchive.UNITS_OFFSET] > 0
     # STRchive's columns follow the catalogue's and come before the members'.
     assert pq.read_schema(table).names == [*repeat_tables.LOCUS.names, *strchive.COLUMNS, 'S1', 'S2', 'S3']
     # The manifest records the file as the run read it, the release as the run stated it, and both counts.
