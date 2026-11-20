@@ -70,6 +70,7 @@
 // reading frame, chr1-300-T-A is a missense variant, which neither plugin evaluates, and chr1-400-TCA-T is a
 // frameshift in the third exon, which the NMD plugin evaluates and does not flag. A record of the gene models whose
 // controls are on another transcript is refused, which is what a run meets whose VEP did not read the gene models.
+// Sites that hold an allele of the exons twice are refused before VEP reads them.
 // Refused inputs must fail, and so must Annotator outputs without the group's annotation. The case-annotation and
 // echtvar steps run in the tools image, built first. Run with Docker from the repository's root, with this folder's
 // config alone (-C), because a run from the root would otherwise read the pipeline's nextflow.config over it:
@@ -86,6 +87,7 @@ include { ROH_UPD as ROH_UPD_FAILING_UPD_REFUSED } from '../../modules/family_ta
 include { ECHTVAR_VALUES as ECHTVAR_VALUES_GNOMAD_ALONE } from '../../modules/family_tables'
 include { JOINED_VALUES as JOINED_VALUES_MITO } from '../../modules/family_tables'
 include { VEP_PLUGIN_TABLE as VEP_PLUGIN_TABLE_CONTROL_REFUSED } from '../../modules/family_tables'
+include { VEP_SITES as VEP_SITES_REPEATED_REFUSED } from '../../modules/family_tables'
 include { SV_SITES as SV_SITES_NO_END } from '../../modules/family_tables'
 include { SV_UNION as SV_UNION_NO_END_REFUSED } from '../../modules/family_tables'
 include { NORMALISE_SV as NORMALISE_SV_REF_MISMATCH_REFUSED } from '../../modules/family_tables'
@@ -305,7 +307,8 @@ workflow {
     // structural variant written as a sequence whose REF is not the reference's; a union of sites with a deletion that
     // has no INFO END, which the Annotator would annotate as a single base; for ROH_UPD, a trio whose VCF has no GQ,
     // and an upd that fails after it has written a region, which failing-upd stands in for (nextflow.config); a record
-    // of the gene models whose positive controls are of a transcript that VEP does not list.
+    // of the gene models whose positive controls are of a transcript that VEP does not list; sites with an allele of
+    // the exons twice.
     unprefixed = NORMALISE_UNPREFIXED_REFUSED(channel.of(tuple('unprefixed', file("${fixture}/unprefixed.vcf"))), reference)
     mismatch = NORMALISE_REF_MISMATCH_REFUSED(channel.of(tuple('mismatch', file("${fixture}/ref-mismatch.vcf"))), reference)
     repeated = NORMALISE_REPEATED_REFUSED(channel.of(tuple('repeated', file("${fixture}/repeated.vcf"))), reference)
@@ -355,6 +358,11 @@ workflow {
         vep,
         INVENTED_OTHER_CONTROLS(gene_models.map { g -> g.resolve('gene-models.json') }),
     )
+    repeated_sites = VEP_SITES_REPEATED_REFUSED(
+        INVENTED_REPEATED_SITES(),
+        gene_models.map { g -> g.resolve('exons.bed') },
+        gene_models.map { g -> g.resolve('controls.vcf') },
+    )
     unprefixed.sites
         .map { _s -> 'unprefixed contigs' }
         .mix(
@@ -362,6 +370,7 @@ workflow {
             failing_upd.map { _f, _folder -> 'an upd that fails' },
             no_end_union.map.map { _m -> 'a deletion without END' },
             other_control.map { _t -> "controls on a transcript that VEP does not list" },
+            repeated_sites.map { _s -> 'an allele twice among the sites that VEP reads' },
             two_repeats.map { _f -> "repeat VCFs of two of three members" },
             other_samples.map { _f -> "a structural-variant VCF of another family's samples" },
             sv_mismatch.map { _a -> "a structural variant whose REF is not the reference's" },
@@ -433,6 +442,22 @@ process INVENTED_OTHER_CONTROLS {
     """
 }
 
+// Sites that hold one allele in the first exon of the invented gene twice, as no union does.
+process INVENTED_REPEATED_SITES {
+    output:
+    tuple val('repeated'), path('repeated.vcf.gz'), path('repeated.vcf.gz.tbi')
+
+    script:
+    """
+    printf '##fileformat=VCFv4.2\\n##contig=<ID=chr1,length=600>\\n' > repeated.vcf
+    printf '#CHROM\\tPOS\\tID\\tREF\\tALT\\tQUAL\\tFILTER\\tINFO\\n' >> repeated.vcf
+    printf 'chr1\\t100\\t.\\tG\\tA\\t.\\t.\\t.\\n' >> repeated.vcf
+    printf 'chr1\\t100\\t.\\tG\\tA\\t.\\t.\\t.\\n' >> repeated.vcf
+    bcftools view --no-version -Oz -o repeated.vcf.gz repeated.vcf
+    bcftools index -t repeated.vcf.gz
+    """
+}
+
 // What VEP read and the plugins' table of the union. VEP read the five alleles of the union in the gene's exons, each
 // under its variant id, and the four controls. The table has a row for an allele and transcript that a plugin
 // evaluated, for the transcript of each gene model file, and none for a control: the alleles in the 5' UTR have the
@@ -494,7 +519,8 @@ models = [(m['source'], m['file']['name'], m['prepared_from']['name'], m['rows']
           for m in info['gene_models']]
 assert models == [('Ensembl', 'ensembl.gff3.gz', 'invented.gff3.gz', 4, 0),
                   ('RefSeq', 'refseq.gff.gz', 'invented.gff.gz', 4, 0)], models
-assert all('Invented' in line for m in info['gene_models'] for line in m['prepared_from']['stated'][-1:]), info
+stated = [m['prepared_from']['stated'] for m in info['gene_models']]
+assert [len(lines) for lines in stated] == [2, 3] and all(line.startswith('#!') for lines in stated for line in lines), info
 EOF
     """
 }
