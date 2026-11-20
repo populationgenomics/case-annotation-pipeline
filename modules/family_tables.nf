@@ -622,8 +622,9 @@ process ROH_UPD {
 }
 
 // One family's variants table, which holds a column of each member's calls, its transcripts table, its manifest and
-// the notes on the tables (tables.md, a copy of the file in the tools' package), from the union's tables and its values
-// from the echtvar archives and from the joined files. The manifest's roles are those of the proband the sheet names
+// the notes on the tables (tables.md, a copy of the file in the tools' package), from the union's tables, its values
+// from the echtvar archives and from the joined files and its table of VEP's plugins. The manifest's roles are those of
+// the proband the sheet names
 // and of its parents; nobody has one where the sheet names none. DuckDB sorts the union's tables down to the family's
 // alleles, spilling to the boot disk.
 // A family with a structural-variant or a copy-number VCF also gets sv, which holds a column of each member's calls
@@ -649,6 +650,7 @@ process FAMILY_TABLES {
     path tables
     path echtvar_values
     path joined_values
+    path vep_plugins
     path sv_annotation, stageAs: 'sv-union/*'
     path sv_map, stageAs: 'sv-union/*'
     path strchive, stageAs: 'strchive/*'
@@ -669,7 +671,7 @@ process FAMILY_TABLES {
         ${structuralOptions(sv, cnv, repeats)} ${vcfs(sv_alleles).collect { f -> "--sv-alleles ${f}" }.join(' ')} \\
         ${annotated} ${ranges} \\
         --annotation ${tables} --echtvar-values ${echtvar_values} --joined-values ${joined_values} \\
-        --roh-upd ${segments} \\
+        --vep-plugins ${vep_plugins} --roh-upd ${segments} \\
         --schema-version ${schema_version} --pipeline-version ${pipeline_version} --output out --scratch /tmp
     mv out/* .
     """

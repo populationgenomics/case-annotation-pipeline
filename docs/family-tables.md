@@ -82,7 +82,7 @@ The family tables unpack the information of an annotated VCF into two tables wit
 | Table         | One row per                       | Holds                                                                                                                                                                                                                                                                                                  |
 | ------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `variants`    | allele                            | its frequencies, scores and ClinVar records, its most severe consequence, its genes, each with what the allele does to it, and then the VCF's sample columns: one column per sequenced member, named as the VCF names the sample, holding that member's call of the allele as a struct of typed fields |
-| `transcripts` | allele and transcript it overlaps | that transcript's consequence and HGVS names                                                                                                                                                                                                                                                           |
+| `transcripts` | allele and transcript it overlaps | that transcript's consequence and HGVS names, and what two plugins of VEP say of the allele on it                                                                                                                                                                                                      |
 
 A multi-allelic site becomes one row per allele before anything else happens, and the
 [variant id](glossary.md#variant-id) `<chrom>-<pos>-<ref>-<alt>` names the allele in both tables, so it is the key that
@@ -125,6 +125,7 @@ erDiagram
         double spliceai_max
         string clinvar_classification "summary of the first record"
         list clinvar_records "every record of this allele"
+        list utr5_consequences "the kinds of effect on a 5' UTR's reading frames"
         double qual "the VCF record's"
         list filters "the VCF record's"
         struct S0101 "a call, named as the sample"
@@ -145,6 +146,10 @@ erDiagram
         bool is_canonical
         float mcr_oe "gnomAD's missense ratio of the transcript's region"
         float mpc "gnomAD's missense score, where the run read its file"
+        list utr5_consequences "the kinds of effect on this transcript"
+        list utr5_uorfs "an entry per affected upstream start codon"
+        int utr5_existing_uorfs "and two more counts"
+        bool nmd_escaping "predicted to escape decay"
     }
     call {
         string gt "after the split"
@@ -422,6 +427,135 @@ The manifest's `members` for this family read:
   {"sample_id": "S0103", "father": "S0101", "mother": "S0102", "sex": "female", "affected": true, "sequenced": true, "role": "proband"}
 ]
 ```
+
+## Upstream reading frames and nonsense-mediated decay
+
+The Annotator says of a variant in a 5′ UTR that it is a `5_prime_UTR_variant`, and of a variant that ends a reading
+frame that it is a `stop_gained` or a `frameshift_variant`. Two plugins of Ensembl VEP say more about both, and the
+workflow runs them unchanged
+([Upstream reading frames and nonsense-mediated decay](annotation.md#upstream-reading-frames-and-nonsense-mediated-decay)).
+Their values are six columns of `transcripts`, on the rows of Ensembl's transcripts and of RefSeq's alike, and one
+column of `variants` to search by. Every allele, transcript and value in this section is invented.
+
+### What a variant does to the reading frames of a 5′ UTR
+
+A transcript's 5′ UTR is the stretch before the start codon of its protein. An `ATG` in that stretch is an upstream
+start codon, and the reading frame that begins there is an [upstream reading frame](glossary.md#upstream-reading-frame).
+The plugin UTRannotator, of Zhang, Wakeling, Ware and Whiffin, sorts such a frame into three types by where it ends.
+
+| Type              | The frame                                                                                                 |
+| ----------------- | --------------------------------------------------------------------------------------------------------- |
+| `uORF`            | ends at a stop codon inside the 5′ UTR                                                                    |
+| `OutOfFrame_oORF` | has no stop codon in the UTR and runs into the coding sequence, out of frame with it                      |
+| `InFrame_oORF`    | has no stop codon in the UTR and runs into the coding sequence in frame, as a longer start of the protein |
+
+It reports five kinds of effect that an allele can have on such frames.
+
+| Kind           | The allele                                                     |
+| -------------- | -------------------------------------------------------------- |
+| `uAUG_gained`  | creates a start codon in the 5′ UTR                            |
+| `uAUG_lost`    | removes a start codon that the UTR has                         |
+| `uSTOP_gained` | creates a stop codon inside an existing reading frame          |
+| `uSTOP_lost`   | removes the stop codon of an existing reading frame            |
+| `uFrameShift`  | shifts an existing reading frame by an insertion or a deletion |
+
+The columns hold what the plugin writes, under names in snake case.
+
+| Column                                         | Type           | Holds                                                                                                          | Null where                                              |
+| ---------------------------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `variants.utr5_consequences`                   | list of string | the kinds that the allele has on any of its transcripts in `transcripts`, each once, sorted                    | no transcript of the allele has a kind                  |
+| `transcripts.utr5_consequences`                | list of string | the kinds that the allele has on this transcript, each once, sorted                                            | the plugin reports no kind, or did not evaluate the row |
+| `transcripts.utr5_uorfs`                       | list of struct | one entry for each record of the plugin: one for each upstream start codon that is affected, for each kind     | as `utr5_consequences`                                  |
+| `transcripts.utr5_existing_uorfs`              | int32          | "the number of existing uORFs with a stop codon within the 5 prime UTR", for the transcript without the allele | the plugin did not evaluate the row                     |
+| `transcripts.utr5_existing_oorfs_out_of_frame` | int32          | the number of existing reading frames of the UTR that overlap the coding sequence out of frame                 | the plugin did not evaluate the row                     |
+| `transcripts.utr5_existing_oorfs_in_frame`     | int32          | the number of existing reading frames of the UTR that overlap the coding sequence in frame                     | the plugin did not evaluate the row                     |
+
+The plugin evaluates a row whose allele lies in the transcript's 5′ UTR, and writes its three counts for every such row.
+A count, also a 0, therefore says that the plugin looked. A row with counts and without `utr5_consequences` is one where
+it found no effect, and a row without counts is one that it did not evaluate.
+
+Several kinds can apply to one allele and transcript, and each has its entries in `utr5_uorfs`. An insertion can create
+a start codon and shift the frames of two existing uORFs. `utr5_consequences` is then `uAUG_gained` and `uFrameShift`,
+and `utr5_uorfs` has three entries, shown here with the fields that hold a value:
+
+| `consequence` | `type` | `ref_type` | `alt_type`        | `kozak_context` | `kozak_strength` | `distance_to_cds` | `ref_start_distance_to_cds` | `evidence` |
+| ------------- | ------ | ---------- | ----------------- | --------------- | ---------------- | ----------------- | --------------------------- | ---------- |
+| `uAUG_gained` | `uORF` |            |                   | `ACAATGC`       | `Moderate`       | 56                |                             |            |
+| `uFrameShift` |        | `uORF`     | `OutOfFrame_oORF` | `GTTATGT`       | `Moderate`       |                   | 150                         | true       |
+| `uFrameShift` |        | `uORF`     | `uORF`            |                 |                  |                   | 84                          | false      |
+
+The entries are ordered by kind, and within a kind from the 5′ end of the UTR.
+
+An entry has `consequence` and the fields of its kind, and every other field is null. The descriptions follow the
+plugin's
+[README](https://github.com/ImperialCardioGenetics/UTRannotator/blob/3d9d466e356752aa69d61b62da493edddf374363/README.md).
+
+| Field                                | Type   | In an entry of                | Holds                                                                                                                                                                |
+| ------------------------------------ | ------ | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `consequence`                        | string | every kind                    | the kind                                                                                                                                                             |
+| `type`                               | string | `uAUG_gained`, `uAUG_lost`    | the type of the reading frame that is created or lost                                                                                                                |
+| `ref_type`                           | string | `uSTOP_gained`, `uFrameShift` | the type of the affected reading frame with the reference allele                                                                                                     |
+| `alt_type`                           | string | `uFrameShift`                 | its type with the alternate allele                                                                                                                                   |
+| `kozak_context`                      | string | every kind                    | the Kozak context of the frame's start codon: three bases, `ATG` and one base                                                                                        |
+| `kozak_strength`                     | string | every kind                    | `Weak`, `Moderate` or `Strong`, from that context                                                                                                                    |
+| `cap_distance_to_start`              | int32  | `uAUG_gained`, `uAUG_lost`    | the number of bases from the start of the 5′ UTR to the start codon                                                                                                  |
+| `distance_to_cds`                    | int32  | `uAUG_gained`, `uAUG_lost`    | the number of bases from the start codon to the coding sequence                                                                                                      |
+| `distance_to_stop`                   | int32  | `uAUG_gained`, `uAUG_lost`    | the number of bases from the start codon to its stop codon, looked for in the UTR and the coding sequence after it; null where there is none                         |
+| `ref_start_distance_to_cds`          | int32  | `uSTOP_gained`, `uFrameShift` | the number of bases from the start codon of the affected frame to the coding sequence                                                                                |
+| `new_stop_distance_to_cds`           | int32  | `uSTOP_gained`                | the number of bases from the gained stop codon to the coding sequence                                                                                                |
+| `alt_stop`                           | bool   | `uSTOP_lost`                  | whether the UTR has another stop codon downstream in the frame                                                                                                       |
+| `alt_stop_distance_to_cds`           | int32  | `uSTOP_lost`                  | the number of bases from that stop codon to the coding sequence; null where there is none                                                                            |
+| `frame_with_cds`                     | string | `uSTOP_lost`                  | `inFrame` or `outOfFrame`: the frame of the uORF against the coding sequence                                                                                         |
+| `ref_type_length`, `alt_type_length` | int32  | `uFrameShift`                 | the length of the reading frame with the reference and with the alternate allele; null where it has no stop codon                                                    |
+| `evidence`                           | bool   | every kind but `uAUG_gained`  | whether the start codon of the affected frame is in the plugin's list of upstream reading frames that ribosome profiling has seen translated, curated from sorfs.org |
+
+Distances and lengths are counted along the spliced transcript. A start codon is in frame with the coding sequence where
+its distance to it is a multiple of three, so `distance_to_cds % 3 = 0` gives the frame of any gained or lost start,
+also of one whose frame ends inside the UTR. The Kozak strength is `Strong` where the base three before the `ATG` is `A`
+or `G` and the base after it is `G`, `Moderate` where one of the two holds and `Weak` otherwise.
+
+> [!WARNING]
+>
+> The plugin writes the in-frame type as `inFrame_oORF`, with a small `i`, in a `uAUG_gained` entry, and as
+> `InFrame_oORF` in every other entry. The tables keep both spellings as the plugin writes them, so a condition
+> `u.type = 'InFrame_oORF'` finds no gained start, without an error. Compare `lower(u.type)`, or ask for both.
+
+The plugin leaves these things out, and the tables add none of them.
+
+- It reads `ATG` as the only start codon.
+- It gives the Kozak context and strength of the upstream start codon, and nothing for the start codon of the protein
+  itself.
+- A `uSTOP_lost` entry has no type and no distance of its start codon, so it has fewer fields than the other kinds.
+  `frame_with_cds` and `alt_stop` say what becomes of the frame: with `alt_stop` false it runs into the coding sequence.
+- A gained start has no `evidence`, since the frame did not exist.
+- A start codon within three bases of either end of the UTR has no `kozak_context` and no `kozak_strength`.
+- It tests an insertion or a deletion for a shifted frame and for a gained or lost start, and not for a gained stop.
+- Its authors tested it on alleles of one to five bases.
+- It evaluates a variant inside the exons of the 5′ UTR. A variant upstream of the transcript or in an intron of the UTR
+  has no value.
+
+VEP reads its own files of the gene models, of the releases that the Annotator's catalog was built with. A row of
+`transcripts` in a 5′ UTR can still be without values, where VEP's file lacks the transcript at that version or places
+the variant differently at the edge of the UTR. The manifest counts these rows (`vep_plugins.matching`).
+
+### Escape from nonsense-mediated decay
+
+A variant that ends a reading frame early usually leaves no protein, because the cell destroys the transcript
+([nonsense-mediated decay](glossary.md#nonsense-mediated-decay)). VEP's plugin `NMD` predicts where a transcript escapes
+that, from the place of the variant alone. By the plugin's documentation it counts a variant as escaping in four cases:
+it lies in the last exon; it lies in the last 50 bases of the second-last exon; it lies in the first 100 coding bases;
+or the transcript has no intron.
+
+`transcripts.nmd_escaping` holds the prediction for the allele on the transcript.
+
+| `nmd_escaping` | The row                                                                                                                                                     |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| true           | the plugin flags the variant as escaping                                                                                                                    |
+| false          | the plugin evaluated the variant and did not flag it: VEP calls it a stop-gained, frameshift, splice-donor or splice-acceptor variant with coding positions |
+| null           | the plugin did not evaluate the row, as for a missense variant or a transcript that VEP's file lacks                                                        |
+
+The value is a rule about positions and no measurement. A false says that none of the four cases holds, and the plugin
+says nothing about a row that is null, so `NOT nmd_escaping` leaves the null rows out.
 
 ## Structural variants, copy number and repeats
 
@@ -1471,6 +1605,87 @@ it except the rule for the flags.
 - The PrimateAI-3D entries with a score and neither a percentile nor a class are those of insertions and deletions.
 - An amino-acid conservation list has one score for nearly all transcripts that have one, two for a few, and at most
   five.
+
+### A gained upstream start codon that overlaps the coding sequence
+
+The alleles that create a start codon in a 5′ UTR whose reading frame runs into the coding sequence out of frame, with
+the strength of the new start codon's Kozak context. `utr5_consequences` narrows the rows before the entries of
+`utr5_uorfs` are read, and each entry is then held to its own kind:
+
+```python
+gained_out_of_frame = con.sql(
+    """
+    SELECT t.variant_id, t.transcript_id, u.kozak_strength, u.distance_to_cds, u.distance_to_stop
+    FROM (SELECT variant_id, transcript_id, unnest(utr5_uorfs) AS u
+          FROM transcripts
+          WHERE list_contains(utr5_consequences, 'uAUG_gained')) t
+    WHERE u.consequence = 'uAUG_gained' AND u.type = 'OutOfFrame_oORF'
+    ORDER BY t.variant_id, t.transcript_id
+    """
+).to_arrow_table()
+```
+
+A search over the whole family starts in `variants`, which has the kinds of each allele beside its frequencies and the
+members' calls, and reads `transcripts` for the alleles that it keeps:
+
+```python
+utr5_candidates = con.sql(
+    """
+    SELECT variant_id, utr5_consequences
+    FROM variants
+    WHERE list_has_any(utr5_consequences, $kinds) AND coalesce(gnomad_joint_af, 0) < $max_af
+    ORDER BY pos
+    """,
+    params={'kinds': ['uAUG_gained', 'uSTOP_lost'], 'max_af': 0.001},
+).to_arrow_table()
+```
+
+The frame of a gained start codon against the coding sequence is its distance modulo three, whatever its type, and a row
+with a null `utr5_consequences` is told apart by the counts:
+
+```python
+gained_frames = con.sql(
+    """
+    SELECT t.variant_id, u.type, u.distance_to_cds % 3 = 0 AS in_frame, u.kozak_strength
+    FROM (SELECT variant_id, unnest(utr5_uorfs) AS u
+          FROM transcripts
+          WHERE is_mane_select AND list_contains(utr5_consequences, 'uAUG_gained')) t
+    WHERE u.consequence = 'uAUG_gained'
+    ORDER BY t.variant_id
+    """
+).to_arrow_table()
+evaluated = con.sql(
+    """
+    SELECT utr5_existing_uorfs IS NOT NULL AS evaluated, utr5_consequences IS NOT NULL AS has_effect, count(*) AS n
+    FROM transcripts
+    WHERE list_contains(consequences, '5_prime_UTR_variant')
+    GROUP BY ALL
+    ORDER BY ALL
+    """
+).to_arrow_table()
+```
+
+On an invented table the first query returned the one allele whose new frame overlaps the coding sequence out of frame,
+on both transcripts that hold it, and not the same allele's row on a transcript with a shorter UTR, where the frame ends
+before the coding sequence. The third query gave one row for each gained start codon of the MANE Select transcript, with
+`in_frame` true for the entry of type `inFrame_oORF` alone.
+
+### Variants that end a reading frame, by their escape from decay
+
+```python
+ended = con.sql(
+    """
+    SELECT variant_id, transcript_id, worst_consequence, nmd_escaping
+    FROM transcripts
+    WHERE worst_consequence IN ('stop_gained', 'frameshift_variant') AND is_mane_select
+    ORDER BY pos
+    """
+).to_arrow_table()
+```
+
+`WHERE nmd_escaping` keeps the variants that the plugin flags, and `WHERE nmd_escaping = false` those that it evaluated
+and did not flag. `WHERE NOT nmd_escaping` returns the same rows as the second, since a comparison with a null row is
+null.
 
 ### A variant by its rsID
 
@@ -2881,15 +3096,15 @@ a key that is added under the same version.
 
 The tables share these properties:
 
-| Property           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| order of the rows  | sorted by chromosome (1 to 22, X, Y, M) and position; `sv` and `repeats` then by `end_pos` and their key, `sv_transcripts` then by `end_pos`, `sv_id`, `variant_type` and `transcript_id`, and `roh` and `upd` then by `end_pos` and `member`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| compression        | zstd, in row groups of 100,000 rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| Bloom filters      | on the columns a lookup uses: in `variants` the variant id and the values of `hgnc_ids`; in `transcripts` the variant id, the transcript id, the gene symbol and id and the HGNC id; `sv_id` in `sv` and in `sv_transcripts`, which also has them on its transcript id, its gene symbol and id and its HGNC id; and `repeat_id` in `repeats`; `roh` and `upd` have none. DuckDB 2.0 does not use the one of `hgnc_ids` ([Variants in a gene](#variants-in-a-gene)), and a reader that tests a list's values against a filter can                                                                                                                                                                                                      |
-| key-value metadata | the tables' version (`schema_version`), the table's name, the family, and the annotation's provenance (`annotation`, `gnomad_joint`, the three `alphagenome_` keys and `joined_files`, as in the manifest); `sv` and `sv_transcripts` carry the provenance of the annotation of the structural variants instead (`annotation`, which is the manifest's `sv_annotation`), and `repeats` the release of STRchive that its ranges come from (`strchive`, as in the manifest, and a JSON null in a run without one)                                                                                                                                                                                                                       |
-| variant id         | `<chrom>-<pos>-<ref>-<alt>` with the VCF's contig name, such as `chr2-1234567-C-T`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| shared columns     | a column that means the same thing has the same name and type in every table ([Shared column names](#shared-column-names))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| a missing value    | a null. That holds for the list columns `rsids`, `hgnc_ids`, `breakpoint_hgnc_ids`, `genes`, `regulatory_features`, `clinvar_records`, `clinvar_other_alleles`, `clinvar_conditions`, `clinvar_pubmed_ids`, `amino_acid_conservation`, `gnomad_sv_matches`, `fusion_partners`, `pl` and `ft` too, and for `cipos`, `ciend`, the lists of a repeat's genotype and the two lists that STRchive gives for a repeat: an allele without an rsID has no `rsids`, not an empty list. `filters` differs: in every table it holds the VCF record's FILTER values, and an empty list for a record whose FILTER is `.`. `gnomad_mito_filters` holds those of gnomAD's record in the same way, and is null for an allele that gnomAD's file lacks |
+| Property           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| order of the rows  | sorted by chromosome (1 to 22, X, Y, M) and position; `sv` and `repeats` then by `end_pos` and their key, `sv_transcripts` then by `end_pos`, `sv_id`, `variant_type` and `transcript_id`, and `roh` and `upd` then by `end_pos` and `member`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| compression        | zstd, in row groups of 100,000 rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Bloom filters      | on the columns a lookup uses: in `variants` the variant id and the values of `hgnc_ids`; in `transcripts` the variant id, the transcript id, the gene symbol and id and the HGNC id; `sv_id` in `sv` and in `sv_transcripts`, which also has them on its transcript id, its gene symbol and id and its HGNC id; and `repeat_id` in `repeats`; `roh` and `upd` have none. DuckDB 2.0 does not use the one of `hgnc_ids` ([Variants in a gene](#variants-in-a-gene)), and a reader that tests a list's values against a filter can                                                                                                                                                                                                                                         |
+| key-value metadata | the tables' version (`schema_version`), the table's name, the family, and the annotation's provenance (`annotation`, `gnomad_joint`, the three `alphagenome_` keys and `joined_files`, as in the manifest, and `vep_plugins`, as the manifest's `vep_plugins.run`); `sv` and `sv_transcripts` carry the provenance of the annotation of the structural variants instead (`annotation`, which is the manifest's `sv_annotation`), and `repeats` the release of STRchive that its ranges come from (`strchive`, as in the manifest, and a JSON null in a run without one)                                                                                                                                                                                                  |
+| variant id         | `<chrom>-<pos>-<ref>-<alt>` with the VCF's contig name, such as `chr2-1234567-C-T`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| shared columns     | a column that means the same thing has the same name and type in every table ([Shared column names](#shared-column-names))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| a missing value    | a null. That holds for the list columns `rsids`, `hgnc_ids`, `breakpoint_hgnc_ids`, `genes`, `regulatory_features`, `clinvar_records`, `clinvar_other_alleles`, `clinvar_conditions`, `clinvar_pubmed_ids`, `amino_acid_conservation`, `utr5_consequences`, `utr5_uorfs`, `gnomad_sv_matches`, `fusion_partners`, `pl` and `ft` too, and for `cipos`, `ciend`, the lists of a repeat's genotype and the two lists that STRchive gives for a repeat: an allele without an rsID has no `rsids`, not an empty list. `filters` differs: in every table it holds the VCF record's FILTER values, and an empty list for a record whose FILTER is `.`. `gnomad_mito_filters` holds those of gnomAD's record in the same way, and is null for an allele that gnomAD's file lacks |
 
 The tables hold no gene-level knowledge beyond a gene's identifiers and, in a run that joined gnomAD's regions of
 missense constraint, the constraint of a transcript's regions. What OMIM, ClinGen and other gene–disease sources say
@@ -2918,6 +3133,7 @@ Every manifest holds every key below, also the manifest of a family without the 
 | `alphagenome_avi_breakdown`   | the archive of the breakdown of the AVI score, which the `avi_shap_` columns come from, in the same form, with the notice that DeepMind's terms ask for as `terms`; null in a run that was not given it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `alphagenome_splicing`        | the archive of AlphaGenome's splicing scores, which `alphagenome_splicing` comes from, in the form of `alphagenome_avi_breakdown`; null in a run that was not given it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `joined_files`                | the public files that the run joined to the alleles ([Joined files](annotation.md#joined-files)): an entry for each, with the name of its param as `source`, its `file` name, and its size in `bytes` and its `sha256` as the run read it, in the order of their columns; an empty list in a run that was given none                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `vep_plugins`                 | what the `utr5_` columns and `nmd_escaping` come from. `run` is the record of the union's VEP run: VEP's version, UTRannotator's commit, the name, size and SHA-256 of the plugin's file of translated reading frames, of `NMD.pm` and of each gene model file as the run read it, the public file that each was prepared from, VEP's options, the number of the union's alleles that VEP read, and for each gene model file the rows it gave and the rows left out because their id is no transcript id. `matching` has an entry for `Ensembl` and one for `RefSeq`, of this family's tables: `rows_without_transcript`, the plugins' rows on a transcript that the allele has no row of in `transcripts`, and `utr5_transcripts_without_values`, the rows of `transcripts` with `5_prime_UTR_variant` that have no value of UTRannotator's                       |
 | `omitted_columns`             | the columns of `variants` that the run left out because it did not name their source: those of its dated sources, then those of the archives of AlphaGenome's scores that it was not given, then those of the joined files that it was not given                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `transcripts_omitted_columns` | the columns of `transcripts` that the run left out because it was not given the joined file that they come from                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `sv_annotation`               | what annotated the structural variants and copy number segments, in the form of `annotation`: the second Annotator run, which has the catalog and the sources of the first; null in a family without `sv`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |

@@ -1,4 +1,4 @@
-"""A family's tables, from an invented trio's VCF and an invented union's tables and gnomAD joint values."""
+"""A family's tables, from an invented trio's VCF and an invented union's tables, joint values and plugins' table."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import importlib.resources
 import json
 import pathlib
 import struct
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import Any
 
 import duckdb
@@ -28,6 +28,7 @@ from case_annotation import (
     cli,
     echtvar_values,
     family_tables,
+    gene_models,
     joined_values,
     pedigree,
     repeat_tables,
@@ -36,6 +37,7 @@ from case_annotation import (
     sv_annotation,
     sv_sites,
     sv_tables,
+    vep_plugins,
 )
 
 _PED = 'fam-1\tS1\t0\t0\t1\t1\nfam-1\tS2\t0\t0\t2\t1\nfam-1\tS3\tS1\tS2\t2\t2\n'
@@ -216,8 +218,16 @@ _PER_TYPE = {
 }
 
 
-def _write_union(path: pathlib.Path, alleles: Sequence[str], info: annotation_tables.AnnotationInfo) -> None:
-    """Union tables holding the alleles and an allele of another family, each in a gene, with one transcript."""
+def _write_union(
+    path: pathlib.Path,
+    alleles: Sequence[str],
+    info: annotation_tables.AnnotationInfo,
+    utr5: Collection[str] = (),
+) -> None:
+    """Union tables holding the alleles and an allele of another family, each in a gene, with one transcript.
+
+    The transcript is an intron's for every allele but those of `utr5`, whose allele lies in its 5' UTR.
+    """
     (path / 'variants').mkdir(parents=True)
     (path / 'transcripts').mkdir()
     variants, transcripts = [], []
@@ -252,8 +262,8 @@ def _write_union(path: pathlib.Path, alleles: Sequence[str], info: annotation_ta
                 'transcript_id': 'ENST01.1',
                 'source': 'Ensembl',
                 'hgnc_id': hgnc_ids[0] if hgnc_ids else None,
-                'consequences': ['intron_variant'],
-                'worst_consequence': 'intron_variant',
+                'consequences': ['5_prime_UTR_variant' if vid in utr5 else 'intron_variant'],
+                'worst_consequence': '5_prime_UTR_variant' if vid in utr5 else 'intron_variant',
                 'is_mane_select': False,
                 'is_canonical': True,
                 'intron_offset_start': offsets[0],
@@ -451,6 +461,65 @@ def _write_joined(path: pathlib.Path, alleles: Sequence[str], sources: Sequence[
     (path / joined_values.INFO_NAME).write_text(info.model_dump_json())
 
 
+_PLUGINS_INFO = vep_plugins.VepPluginsInfo(
+    vep_version='0.0',
+    utrannotator_commit='0' * 40,
+    uorf_evidence=vep_plugins.FileRecord(name='invented-uorfs.txt', bytes=1, sha256='1' * 64),
+    nmd_plugin=vep_plugins.FileRecord(name='NMD.pm', bytes=1, sha256='2' * 64),
+    options=('--json',),
+    environment=('PERL_HASH_SEED=0',),
+    gene_models=tuple(
+        vep_plugins.GeneModelAnnotated(
+            source=source,
+            file=vep_plugins.FileRecord(name=gene_models.FILES[source], bytes=1, sha256='3' * 64),
+            prepared_from=gene_models.PublicFile(name=f'invented.{source}.gz', bytes=1, sha256='4' * 64, stated=()),
+            rows=2,
+            skipped_transcript_ids=0,
+        )
+        for source in gene_models.FILES
+    ),
+    alleles=3,
+)
+
+
+def _uorf(consequence: str, **fields: object) -> dict[str, Any]:
+    """One record of UTRannotator as the plugins' table holds it: the fields given, and null in every other."""
+    return {field.name: None for field in vep_plugins.UORF} | {'consequence': consequence} | fields
+
+
+# The rows of the union's table of VEP's plugins, each as (variant id, transcript id, source, columns). The second
+# allele has two kinds of effect on its transcript of `transcripts`, with two records of one kind, and a row on a
+# RefSeq transcript that `transcripts` lacks. The third allele ends a reading frame, and the NMD plugin evaluated it
+# without a flag. The other family's allele has a row too.
+_GAINED = _uorf('uAUG_gained', type='inFrame_oORF', kozak_context='GCCATGG', kozak_strength='Strong', distance_to_cds=9)
+_SHIFTED = (
+    _uorf('uFrameShift', ref_type='uORF', alt_type='OutOfFrame_oORF', ref_start_distance_to_cds=95, evidence=True),
+    _uorf('uFrameShift', ref_type='uORF', alt_type='uORF', ref_start_distance_to_cds=40, evidence=False),
+)
+_COUNTED = {'utr5_existing_uorfs': 2, 'utr5_existing_oorfs_out_of_frame': 0, 'utr5_existing_oorfs_in_frame': 1}
+_PLUGINS: tuple[tuple[str, str, str, dict[str, Any]], ...] = (
+    (
+        _ALLELES[1],
+        'ENST01.1',
+        'Ensembl',
+        _COUNTED | {'utr5_consequences': ['uAUG_gained', 'uFrameShift'], 'utr5_uorfs': [_GAINED, *_SHIFTED]},
+    ),
+    (_ALLELES[1], 'NM_77.1', 'RefSeq', _COUNTED | {'utr5_consequences': ['uSTOP_lost'], 'utr5_uorfs': None}),
+    (_ALLELES[2], 'ENST01.1', 'Ensembl', {'nmd_escaping': False}),
+    ('chr2-500-C-A', 'ENST01.1', 'Ensembl', _COUNTED | {'utr5_consequences': ['uAUG_lost']}),
+)
+
+
+def _write_plugins(path: pathlib.Path, rows: Sequence[tuple[str, str, str, Mapping[str, Any]]]) -> None:
+    path.mkdir()
+    table = [
+        {'variant_id': vid, 'transcript_id': transcript, 'source': source} | dict(columns)
+        for vid, transcript, source, columns in rows
+    ]
+    pq.write_table(pa.Table.from_pylist(table, schema=vep_plugins.TABLE), path / vep_plugins.TABLE_NAME)
+    (path / vep_plugins.INFO_NAME).write_text(_PLUGINS_INFO.model_dump_json())
+
+
 # The tables of a family's alleles, which every family has.
 _ALLELE_TABLES = ('variants', 'transcripts')
 # The tables of the runs of homozygosity, which every family has, and of the regions of uniparental disomy, which the
@@ -476,6 +545,8 @@ def _inputs(
     regions: Sequence[Mapping[str, Any]] = (),
     samples: Sequence[str] = _SAMPLES,
     assessed: bool = True,
+    plugins: Sequence[tuple[str, str, str, Mapping[str, Any]]] = _PLUGINS,
+    utr5: Collection[str] = (),
 ) -> dict[str, Any]:
     _write_vcf(tmp_path / 'family.vcf.gz', records)
     (tmp_path / 'family.ped').write_text(ped)
@@ -485,9 +556,10 @@ def _inputs(
     invented_roh_upd.written(
         segments, samples, children if assessed else (), runs, regions, not_assessed=() if assessed else children
     )
-    _write_union(tmp_path / 'union', _ALLELES, info or _info('Ensembl', 'dbSNP', 'clinvar'))
+    _write_union(tmp_path / 'union', _ALLELES, info or _info('Ensembl', 'dbSNP', 'clinvar'), utr5)
     _write_joint(tmp_path / 'joint', joint, scores)
     _write_joined(tmp_path / 'joined', joined_alleles, joined)
+    _write_plugins(tmp_path / 'plugins', plugins)
     return {
         'family': 'fam-1',
         'vcf_path': tmp_path / 'family.vcf.gz',
@@ -495,6 +567,7 @@ def _inputs(
         'annotation': tmp_path / 'union',
         'archive_values': tmp_path / 'joint',
         'joined': tmp_path / 'joined',
+        'plugins': tmp_path / 'plugins',
         'output': tmp_path / 'out',
         'proband': proband,
         'structural': structural or _NO_STRUCTURAL,
@@ -761,6 +834,106 @@ def test_each_allele_has_gnomads_joint_values_and_one_gnomad_lacks_has_none(tmp_
     assert not set(_GNOMAD_COLUMNS) & set(manifest.omitted_columns)
 
 
+def test_a_transcript_row_has_what_the_plugins_say_of_its_allele_and_transcript(tmp_path: pathlib.Path) -> None:
+    family_tables.assemble(**_inputs(tmp_path))
+    path = tmp_path / 'out' / 'transcripts.parquet'
+    assert pq.read_schema(path).names[-len(vep_plugins.COLUMNS) :] == vep_plugins.COLUMNS.names
+    rows = {row['variant_id']: row for row in pq.read_table(path).to_pylist()}
+    assert list(rows) == _ALLELES
+    both = rows[_ALLELES[1]]
+    assert both['utr5_consequences'] == ['uAUG_gained', 'uFrameShift']
+    assert both['utr5_uorfs'] == [_GAINED, *_SHIFTED]
+    assert {column: both[column] for column in _COUNTED} == _COUNTED
+    assert both['nmd_escaping'] is None
+    # A row that only the NMD plugin evaluated.
+    ended = rows[_ALLELES[2]]
+    assert ended['nmd_escaping'] is False
+    assert [ended[column] for column in ('utr5_consequences', 'utr5_uorfs', *_COUNTED)] == [None] * 5
+    # A transcript that neither plugin evaluated has no value in any of the columns.
+    for allele in (_ALLELES[0], _ALLELES[3], _ALLELES[4]):
+        assert [rows[allele][column] for column in vep_plugins.COLUMNS.names] == [None] * len(vep_plugins.COLUMNS)
+
+
+def test_an_alleles_row_has_the_kinds_of_effect_over_its_transcripts(tmp_path: pathlib.Path) -> None:
+    family_tables.assemble(**_inputs(tmp_path))
+    kinds = {row['variant_id']: row['utr5_consequences'] for row in _rows(tmp_path / 'out' / 'variants.parquet')}
+    # The kinds of the transcript that `transcripts` holds, and not those of the plugins' row that it lacks.
+    assert kinds == {**dict.fromkeys(_ALLELES), _ALLELES[1]: ['uAUG_gained', 'uFrameShift']}
+    found = _rows(
+        tmp_path / 'out' / 'variants.parquet',
+        "SELECT variant_id FROM t WHERE list_contains(utr5_consequences, 'uFrameShift')",
+    )
+    assert found == [{'variant_id': _ALLELES[1]}]
+
+
+def test_the_kinds_of_an_allele_are_those_of_all_its_transcripts_each_once(tmp_path: pathlib.Path) -> None:
+    inputs = _inputs(tmp_path)
+    # A second transcript of the second allele in the union's table, with a kind that the first has and one of its own.
+    second = pq.read_table(tmp_path / 'union' / 'transcripts' / 'p1.parquet').to_pylist()[1]
+    assert second['variant_id'] == _ALLELES[1]
+    pq.write_table(
+        pa.Table.from_pylist([second | {'transcript_id': 'ENST02.3'}], schema=annotation_tables.TRANSCRIPTS),
+        tmp_path / 'union' / 'transcripts' / 'p2.parquet',
+    )
+    other = (_ALLELES[1], 'ENST02.3', 'Ensembl', _COUNTED | {'utr5_consequences': ['uAUG_gained', 'uAUG_lost']})
+    _write_plugins(tmp_path / 'more-plugins', (*_PLUGINS, other))
+    family_tables.assemble(**{**inputs, 'plugins': tmp_path / 'more-plugins'})
+    rows = {row['variant_id']: row for row in _rows(tmp_path / 'out' / 'variants.parquet')}
+    assert rows[_ALLELES[1]]['utr5_consequences'] == ['uAUG_gained', 'uAUG_lost', 'uFrameShift']
+    listed = [r['transcript_id'] for r in _rows(tmp_path / 'out' / 'transcripts.parquet')]
+    assert listed == ['ENST01.1', 'ENST01.1', 'ENST02.3', 'ENST01.1', 'ENST01.1', 'ENST01.1']
+
+
+def test_a_search_for_one_kind_of_record_reads_the_entries_of_its_list(tmp_path: pathlib.Path) -> None:
+    family_tables.assemble(**_inputs(tmp_path))
+    # A field of an entry is read as u.type, also `type`, which is a word of SQL.
+    found = _rows(
+        tmp_path / 'out' / 'transcripts.parquet',
+        'SELECT variant_id, u.consequence, u.type, u.ref_type, u.distance_to_cds, u.evidence '
+        'FROM (SELECT variant_id, unnest(utr5_uorfs) AS u FROM t) '
+        "WHERE u.consequence = 'uFrameShift' AND u.evidence",
+    )
+    assert found == [
+        {
+            'variant_id': _ALLELES[1],
+            'consequence': 'uFrameShift',
+            'type': None,
+            'ref_type': 'uORF',
+            'distance_to_cds': None,
+            'evidence': True,
+        }
+    ]
+
+
+def test_the_manifest_counts_the_rows_that_did_not_meet(tmp_path: pathlib.Path) -> None:
+    # The fourth and fifth alleles lie in a 5' UTR by the Annotator, and the plugins' table has no row of either.
+    manifest = family_tables.assemble(**_inputs(tmp_path, utr5=(_ALLELES[1], _ALLELES[3], _ALLELES[4])))
+    assert manifest.vep_plugins.run == _PLUGINS_INFO
+    assert [m.source for m in manifest.vep_plugins.matching] == list(gene_models.FILES)
+    ensembl, refseq = manifest.vep_plugins.matching
+    # The second allele's transcript has UTRannotator's counts, and the row of the other family's allele is not
+    # this family's to count.
+    assert (ensembl.rows_without_transcript, ensembl.utr5_transcripts_without_values) == (0, 2)
+    # The plugins' row on the RefSeq transcript that `transcripts` lacks.
+    assert (refseq.rows_without_transcript, refseq.utr5_transcripts_without_values) == (1, 0)
+    written = json.loads((tmp_path / 'out' / 'manifest.json').read_text())
+    assert written['vep_plugins']['matching'][1] == {
+        'source': 'RefSeq',
+        'rows_without_transcript': 1,
+        'utr5_transcripts_without_values': 0,
+    }
+    # Both tables of the alleles carry the run's record.
+    for table in _ALLELE_TABLES:
+        kv = pq.read_schema(tmp_path / 'out' / f'{table}.parquet').metadata
+        assert vep_plugins.VepPluginsInfo.model_validate_json(kv[b'vep_plugins']) == _PLUGINS_INFO
+
+
+def test_a_plugins_table_of_another_union_is_refused(tmp_path: pathlib.Path) -> None:
+    other = ('chr3-77-A-C', 'ENST01.1', 'Ensembl', {'nmd_escaping': True})
+    with pytest.raises(ValueError, match=r"so the table is of another union, such as \['chr3-77-A-C'\]"):
+        family_tables.assemble(**_inputs(tmp_path, plugins=(*_PLUGINS, other)))
+
+
 def test_an_alleles_dbsnp_ids_are_a_list_and_an_allele_without_any_has_none(tmp_path: pathlib.Path) -> None:
     family_tables.assemble(**_inputs(tmp_path))
     path = tmp_path / 'out' / 'variants.parquet'
@@ -941,6 +1114,7 @@ def _tables_command(
     args = ['family-tables', '--family', 'fam-1', '--ped', str(inputs['ped_path']), '--vcf', str(inputs['vcf_path'])]
     args += ['--annotation', str(inputs['annotation']), '--echtvar-values', str(inputs['archive_values'])]
     args += ['--joined-values', str(inputs['joined']), '--roh-upd', str(inputs['segments'])]
+    args += ['--vep-plugins', str(inputs['plugins'])]
     args += ['--output', str(output or inputs['output'])]
     return [*args, '--schema-version', version, '--pipeline-version', pipeline]
 
@@ -2273,11 +2447,11 @@ def test_a_family_has_the_columns_of_the_files_its_run_joined(tmp_path: pathlib.
     assert manifest.joined_files == tuple(_joined_file(source) for source in given)
     assert [file['source'] for file in written['joined_files']] == [source.name for source in given]
     assert json.loads(schema.metadata[b'joined_files']) == written['joined_files']
-    # transcripts has the columns that the files give by transcript, after the annotation's, and the manifest lists
-    # those of a file that the run did not join.
+    # transcripts has the columns that the files give by transcript, after the annotation's and before those of VEP's
+    # plugins, and the manifest lists those of a file that the run did not join.
     by_transcript = pq.read_schema(tmp_path / 'out' / 'transcripts.parquet')
     held = [column for source in given for column in source.transcript_columns]
-    assert by_transcript.names == [*annotation_tables.TRANSCRIPTS.names, *held]
+    assert by_transcript.names == [*annotation_tables.TRANSCRIPTS.names, *held, *vep_plugins.COLUMNS.names]
     assert [by_transcript.field(column) for column in held] == [family_tables.TRANSCRIPT.field(c) for c in held]
     assert manifest.transcripts_omitted_columns == tuple(c for c in _JOINED_TRANSCRIPT_COLUMNS if c not in held)
     assert json.loads(by_transcript.metadata[b'joined_files']) == written['joined_files']
