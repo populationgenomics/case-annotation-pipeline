@@ -1079,8 +1079,6 @@ A query on these columns has to allow for the following.
 - A search for a promoter effect reads both `promoterai_min` and `promoterai_max`, as above, because a threshold on
   `promoterai_max` alone misses every allele whose scores are all below 0. Both columns hold the same value for an
   allele with one PromoterAI entry, and both are null for an allele without an entry.
-- Illumina documents neither the sign of the distance from the TSS nor the direction of a SpliceAI distance, and the
-  tables hold both as the Annotator writes them.
 - A SpliceAI score is null where SpliceAI gives the gene no score of that kind, which is the case for a score below the
   threshold of Illumina's release, and a distance is null with its score.
 - A RefSeq row has the SpliceAI scores of the Ensembl gene with its symbol, because a SpliceAI entry is matched to a
@@ -1092,8 +1090,23 @@ A query on these columns has to allow for the following.
   Annotator's words, such as `promoter` or `enhancer`. An allele that overlaps no feature has no list rather than an
   empty one. The column is a list of structs like `genes`, so a condition on a field of an entry is written with
   `list_filter` or `list_transform` and cannot skip a row group ([An allele's genes](#an-alleles-genes)).
-- `phylop_primate` in `variants` is the Annotator's phyloP score over primates, a conservation score beside `phylop`. It
-  is null for an allele that the Annotator gives no such score.
+- `phylop_primate` in `variants` is the Annotator's phyloP score over primates, a conservation score beside `phylop`.
+
+Illumina states neither how the two distances are counted nor which alleles have a phyloP score. The tables hold every
+distance as the Annotator writes it, and the following was measured on the Annotator's output for one whole genome with
+catalog `202610`.
+
+- A SpliceAI distance is counted from the allele's `pos`. A positive distance points to a higher genomic coordinate on
+  both strands, whatever the direction of the transcript.
+- For an SNV at the intron offset `c.N+k` or `c.N-k` whose loss score is of that intron's own splice site, the distance
+  is k-1 bases long, so it leads from the allele to the base at the intron's edge.
+- A SpliceAI distance can be long. Of the distances of SNVs, 2% are more than 500 bases, and the longest about 32,000.
+  Of those of insertions and deletions, nine in ten are more than 500 bases, almost all towards higher coordinates and
+  spread evenly up to 32,765. The SpliceAI score of an insertion or a deletion therefore mostly refers to a place far
+  from the allele, and a query can discount such a score by its distance.
+- `promoterai_tss_distance` is negative for an allele upstream of the transcript's start, in the transcript's direction,
+  and runs from -500 to 500.
+- `phylop_primate` and `phylop` have a value for SNVs only, and are null for every insertion and deletion.
 
 ### A variant by its rsID
 
