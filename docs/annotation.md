@@ -1250,8 +1250,8 @@ table of windows the header and the first 43,642 rows were read, and of the tabl
 
 The catalogue of branch points is tab-separated with a header, like the six tables, and has lines before the header that
 start with `##`, which the step passes over. It has one row for a branch point and an intron, or one row for a branch
-point without an intron, whose columns from `gene` on are empty. The step turns each row into the three bases that an
-allele is matched to: the branch point and the two bases before it on its strand, which lie at lower positions on the
+point without an intron, whose eight columns of the intron are empty. The step turns each row into the three bases that
+an allele is matched to: the branch point and the two bases before it on its strand, which lie at lower positions on the
 forward strand and at higher ones on the reverse strand. An allele overlaps them as it overlaps a polyadenylation
 signal, by the reference bases that it changes, and gets an entry for each row that it overlaps, with the positions
 among -2, -1 and 0 whose base it changes. An insertion between two of the three bases overlaps them and changes none, so
@@ -1337,7 +1337,7 @@ these counts on 21 November 2026:
 | branch points in the file                                       | 545,977           | 541,326              |
 | of them with a row of Dataset S2                                | 386,135           | 383,770              |
 | rows of the file                                                | 586,435           | 581,579              |
-| the file's bytes                                                | 12,000,053        | 11,922,855           |
+| the file's bytes                                                | 11,712,351        | 11,637,034           |
 
 The file made with UCSC's chain file holds 4,799 branch points that are missing from the one made with Ensembl's, 1,478
 of them in one stretch of chr17, from 34.0 to 37.0 Mb on GRCh37. The file made with Ensembl's holds 148 that are missing
@@ -1361,15 +1361,18 @@ file it was lifted with.
 | `chrom`, `pos`       | the branch point's place on GRCh38, 1-based                                                                                                      |
 | `strand`             | the strand of its intron on GRCh38                                                                                                               |
 | `name`               | the paper's name with the place on GRCh38: the kind of support, the chromosome, the position, the strand and the base, as in `mBP_chr1_1601_+_A` |
-| `grch37_name`        | the name as the datasets write it, with the place on GRCh37, by which a row is found in the supplement                                           |
-| `sources`            | `SOURCE` of Dataset S1                                                                                                                           |
-| `gene`               | `GENE` of Dataset S2, and empty like the columns after it in a row without an intron                                                             |
+| `gene`               | `GENE` of Dataset S2. This column and the seven after it are empty in a row without an intron                                                    |
 | `transcript_introns` | `TRANSCRIPT_INTRON`                                                                                                                              |
 | `intron_type`        | `INTRON_TYPE`                                                                                                                                    |
 | `intron_length`      | `INTRON_LENGTH`                                                                                                                                  |
 | `acceptor_offset`    | `DIST_3SS`                                                                                                                                       |
 | `rank`, `total`      | the two numbers of `RANK`, which the dataset writes as `#1/2`                                                                                    |
 | `consensus`          | `CONSENSUS`                                                                                                                                      |
+| `sources`            | `SOURCE` of Dataset S1                                                                                                                           |
+| `grch37_name`        | the name as the datasets write it, with the place on GRCh37, by which a row is found in the supplement                                           |
+
+Every row fills the last two columns, so no line ends in empty fields, which a tool that trims the ends of lines would
+remove.
 
 The file leaves out seven columns of Dataset S2: the binding energy of the motif to the U2 or U12 snRNA, and the
 population frequency, GERP score and phyloP score at the branch point and at the base two before it. The paper computed

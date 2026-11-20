@@ -1163,9 +1163,9 @@ def _catalogued(
 ) -> str:
     """A row of the prepared catalogue: an invented branch point, which the lift moved from `was` if that is given."""
     sources = {'m': 'eBP_Invented,cBP_Invented', 'e': 'eBP_Invented', 'c': 'cBP_Invented'}[kind]
-    names = [f'{kind}BP_{chrom}_{at}_{strand}_{base}' for at in (pos, pos if was is None else was)]
+    name, grch37_name = (f'{kind}BP_{chrom}_{at}_{strand}_{base}' for at in (pos, pos if was is None else was))
     described = [''] * 8 if intron is None else [str(value) for value in intron]
-    return '\t'.join([chrom, str(pos), strand, *names, sources, *described])
+    return '\t'.join([chrom, str(pos), strand, name, *described, sources, grch37_name])
 
 
 # Invented branch points: one on each strand of chr1, far from the other; two that lie two bases apart, of which the
@@ -1341,7 +1341,7 @@ def _recatalogued(row: str, **columns: str) -> str:
     return '\t'.join(fields.values())
 
 
-_REFUSED_ROW = 'rows without chrom, pos, strand, name, grch37_name, sources, gene, .* as a primary chromosome'
+_REFUSED_ROW = 'rows without chrom, pos, strand, name, gene, .*, sources, grch37_name as a primary chromosome'
 CATALOGUE_REFUSED: dict[str, tuple[dict[str, Any], str]] = {
     'another header': (
         {'header': _CATALOGUE_HEADER.replace('acceptor_offset', 'dist_3ss')},

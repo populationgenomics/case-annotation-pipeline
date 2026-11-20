@@ -37,16 +37,9 @@ from case_annotation import sv_sites
 FILE_NAME = 'branch-points.tsv.gz'
 RECORD_NAME = 'branch-points.json'
 
-# The columns of the prepared file. `name` is the paper's name of the branch point with its GRCh38 position, and
-# `grch37_name` the name as the datasets write it. The columns from `gene` on are of a row of Dataset S2 and empty in
-# the row of a branch point that only Dataset S1 lists.
-COLUMNS = (
-    'chrom',
-    'pos',
-    'strand',
-    'name',
-    'grch37_name',
-    'sources',
+# The columns of the prepared file that are of a row of Dataset S2, and empty in the row of a branch point that only
+# Dataset S1 lists.
+INTRON_COLUMNS = (
     'gene',
     'transcript_introns',
     'intron_type',
@@ -56,6 +49,10 @@ COLUMNS = (
     'total',
     'consensus',
 )
+# The columns of the prepared file. `name` is the paper's name of the branch point with its GRCh38 position, and
+# `grch37_name` the name as the datasets write it. Every row fills the last two, so that no line ends in empty fields,
+# which a tool that trims the ends of lines would remove.
+COLUMNS = ('chrom', 'pos', 'strand', 'name', *INTRON_COLUMNS, 'sources', 'grch37_name')
 # A line of the prepared file before its header starts with this.
 PREAMBLE = '##'
 # The classes of a branch point's motif and the kinds of intron, as Dataset S2 writes them.
@@ -165,7 +162,7 @@ class _BranchPoint:
 
 @dataclasses.dataclass(frozen=True)
 class _Intron:
-    """What a row of Dataset S2 says of a branch point in one intron, as the prepared file writes it."""
+    """What a row of Dataset S2 says of a branch point in one intron, as the prepared file writes INTRON_COLUMNS."""
 
     gene: str
     transcript_introns: str
@@ -371,22 +368,14 @@ def prepare(dataset_s1: pathlib.Path, dataset_s2: pathlib.Path, chain: pathlib.P
         if place is None:
             continue
         chrom, pos, strand = place
-        start = '\t'.join(
-            [
-                chrom,
-                str(pos),
-                strand,
-                f'{branch_point.kind}BP_{chrom}_{pos}_{strand}_{branch_point.base}',
-                name,
-                branch_point.sources,
-            ]
-        )
+        placed = [chrom, str(pos), strand, f'{branch_point.kind}BP_{chrom}_{pos}_{strand}_{branch_point.base}']
         written += 1
         with_introns += name in introns
         for intron in introns.get(name) or [None]:
-            rest = [''] * (len(COLUMNS) - 6) if intron is None else list(dataclasses.astuple(intron))
+            described = [''] * len(INTRON_COLUMNS) if intron is None else list(dataclasses.astuple(intron))
             key = '' if intron is None else intron.transcript_introns
-            rows.append((_CHROM_RANK[chrom], pos, strand, name, key, '\t'.join([start, *rest])))
+            line = '\t'.join([*placed, *described, branch_point.sources, name])
+            rows.append((_CHROM_RANK[chrom], pos, strand, name, key, line))
     # + sorts before - as a character, and a branch point's rows by their introns.
     rows.sort(key=lambda row: row[:5])
     inputs = {'dataset_s1': _input(dataset_s1), 'dataset_s2': _input(dataset_s2), 'chain': _input(chain)}

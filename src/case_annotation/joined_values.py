@@ -817,8 +817,6 @@ _CATALOGUE = _Layout(
     header=branch_points.COLUMNS,
     preamble=branch_points.PREAMBLE,
 )
-# The columns that a row of the paper's table by intron fills and a row without an intron leaves empty.
-_INTRON_COLUMNS = branch_points.COLUMNS[branch_points.COLUMNS.index('gene') :]
 _BRANCH_POINT = pa.struct(
     [
         pa.field('name', _STRING, nullable=False),
@@ -864,7 +862,9 @@ def _branch_points(con: duckdb.DuckDBPyConnection, path: pathlib.Path) -> Values
             two rows hold one branch point in the same introns; or the file holds no row.
     """
     quoted = {column: f'"{column}"' for column in branch_points.COLUMNS}
-    filled = ' + '.join(f'({quoted[column]} IS NOT NULL)::INTEGER' for column in _INTRON_COLUMNS)
+    # A row of the paper's table by intron fills each of these columns, and a row without an intron none.
+    intron_columns = branch_points.INTRON_COLUMNS
+    filled = ' + '.join(f'({quoted[column]} IS NOT NULL)::INTEGER' for column in intron_columns)
     _read_rows(
         con,
         path,
@@ -896,8 +896,8 @@ def _branch_points(con: duckdb.DuckDBPyConnection, path: pathlib.Path) -> Values
             f"""OR NOT regexp_full_match(grch37_name, '{branch_points.NAME}') """
             """OR "name" != concat("name"[1], 'BP_', chrom, '_', pos, '_', strand, '_', "name"[-1]) """
             'OR "name"[1] != grch37_name[1] OR "name"[-1] != grch37_name[-1] OR sources IS NULL '
-            f'OR filled NOT IN (0, {len(_INTRON_COLUMNS)}) '
-            f'OR (filled = {len(_INTRON_COLUMNS)} AND (transcript_introns IS NULL '
+            f'OR filled NOT IN (0, {len(intron_columns)}) '
+            f'OR (filled = {len(intron_columns)} AND (transcript_introns IS NULL '
             f'OR intron_type NOT IN {_one_of(branch_points.INTRON_TYPES)} OR intron_length IS NULL '
             'OR acceptor_offset IS NULL OR "rank" IS NULL OR total IS NULL OR "rank" > total '
             f'OR consensus NOT IN {_one_of(branch_points.CONSENSUS)}))'

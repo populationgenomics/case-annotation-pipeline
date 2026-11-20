@@ -270,14 +270,14 @@ process ECHTVAR_VALUES {
 // which a run need not have (docs/annotation.md): gnomAD's sites VCF of the mitochondrial genome, MitoTIP's table of
 // scores, GENCODE's polyadenylation features, APARENT2's table of effects on polyadenylation, gnomAD's tables of
 // genomic constraint by window, of regions of missense constraint and of MPC scores, and the prepared catalogue of
-// branch points. A file that the run does not have is an empty list. gnomAD's VCF is matched by position, REF and ALT, so bcftools first normalises it as
-// NORMALISE_FAMILY normalises a family's VCF, one allele per record and left-aligned against the reference, and stops
-// at a REF that is not the reference's. case-annotation writes the values as a table keyed by variant id, and those
-// that a file gives for an allele and one transcript as a second table keyed by variant id and transcript id, and
-// records each file's name, size and SHA-256 as the run was given it. It fails for a file that is not what its source
-// publishes, and unless the first table's alleles are exactly the union's. The step runs in every run, also in one
-// without a file, whose first table then holds the alleles alone and whose second has no row. The normalised VCF gets
-// an index only because htslib reports a file it opens without one.
+// branch points. A file that the run does not have is an empty list. gnomAD's VCF is matched by position, REF and
+// ALT, so bcftools first normalises it as NORMALISE_FAMILY normalises a family's VCF, one allele per record and
+// left-aligned against the reference, and stops at a REF that is not the reference's. case-annotation writes the
+// values as a table keyed by variant id, and those that a file gives for an allele and one transcript as a second
+// table keyed by variant id and transcript id, and records each file's name, size and SHA-256 as the run was given
+// it. It fails for a file that is not what its source publishes, and unless the first table's alleles are exactly the
+// union's. The step runs in every run, also in one without a file, whose first table then holds the alleles alone and
+// whose second has no row. The normalised VCF gets an index only because htslib reports a file it opens without one.
 // The stub gives its folder a fixed time, as the stub of ECHTVAR_VALUES does.
 process JOINED_VALUES {
     tag "${group}"

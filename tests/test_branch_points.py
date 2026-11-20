@@ -95,20 +95,20 @@ S2_ROWS = (
     _s2_row(FLIPPED, 'ENST04_IVS7', -19, '#2/3', '0:none', 'INVENTED2', 85, 'minor'),
     _s2_row(ELSEWHERE, 'ENST05_IVS1', -40, '#1/1'),
 )
-# What the prepared file holds of them: chromosome, position, strand, name, the name in the datasets, the sources, and
-# for a row of Dataset S2 the gene, the introns, the kind and length of the intron, the distance, the rank, the total
-# and the consensus.
+# What the prepared file holds of them: chromosome, position, strand and name, then for a row of Dataset S2 the gene,
+# the introns, the kind and length of the intron, the distance, the rank, the total and the consensus, and last the
+# sources and the name in the datasets.
 NOTHING = ('',) * 8
 NEAR = ('INVENTED1', 'ENST01_IVS2', 'major', '900', '-24', '1', '2', '1:YTNAY')
 FAR = ('INVENTED1', 'ENST02_IVS1,ENST03_IVS1', 'major', '4000', '-30', '1', '1', '2:YTNA')
 MINOR = ('INVENTED2', 'ENST04_IVS7', 'minor', '85', '-19', '2', '3', '0:none')
 WRITTEN = (
-    ('chr1', '1601', '+', 'mBP_chr1_1601_+_A', 'mBP_chr1_1101_+_A', BOTH, *NEAR),
-    ('chr1', '1601', '+', 'mBP_chr1_1601_+_A', 'mBP_chr1_1101_+_A', BOTH, *FAR),
-    ('chr1', '1603', '+', 'cBP_chr1_1603_+_C', 'cBP_chr1_1103_+_C', PREDICTED, *NOTHING),
+    ('chr1', '1601', '+', 'mBP_chr1_1601_+_A', *NEAR, BOTH, 'mBP_chr1_1101_+_A'),
+    ('chr1', '1601', '+', 'mBP_chr1_1601_+_A', *FAR, BOTH, 'mBP_chr1_1101_+_A'),
+    ('chr1', '1603', '+', 'cBP_chr1_1603_+_C', *NOTHING, PREDICTED, 'cBP_chr1_1103_+_C'),
     # The base at 3201 of the - strand is the 201st of the stretch, which is its 800th once it is turned around.
-    ('chr1', '3800', '+', 'eBP_chr1_3800_+_A', 'eBP_chr1_3201_-_A', 'eBP_Invented', *MINOR),
-    ('chr2', '301', '-', 'cBP_chr2_301_-_T', 'cBP_chr2_301_-_T', PREDICTED, *NOTHING),
+    ('chr1', '3800', '+', 'eBP_chr1_3800_+_A', *MINOR, 'eBP_Invented', 'eBP_chr1_3201_-_A'),
+    ('chr2', '301', '-', 'cBP_chr2_301_-_T', *NOTHING, PREDICTED, 'cBP_chr2_301_-_T'),
 )
 LIFTED = {
     'clean': 3,
@@ -159,6 +159,9 @@ def test_the_file_holds_every_branch_point_that_lifts_with_the_two_bases_before_
     # A row for each row of Dataset S2 and one for a branch point that only Dataset S1 lists, sorted by chromosome,
     # position and strand, and a branch point's rows by their introns.
     assert rows == list(WRITTEN)
+    # Every row fills its last two columns, so no line ends in an empty field, which a tool that trims the ends of
+    # lines would remove.
+    assert all(row[-2] and row[-1] for row in rows)
     assert record.lifted.model_dump() == LIFTED
     assert (record.branch_points, record.branch_points_with_introns) == (len(S1_ROWS), 3)
     assert (record.written_branch_points, record.written_branch_points_with_introns, record.written_rows) == (4, 2, 5)
