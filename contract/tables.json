@@ -2545,6 +2545,98 @@
           "name": "ref_copies",
           "type": "int32",
           "nullable": true
+        },
+        {
+          "name": "strchive_id",
+          "type": "string",
+          "nullable": true,
+          "source": "strchive"
+        },
+        {
+          "name": "strchive_gene",
+          "type": "string",
+          "nullable": true,
+          "source": "strchive"
+        },
+        {
+          "name": "strchive_evidence",
+          "type": "string",
+          "nullable": true,
+          "source": "strchive"
+        },
+        {
+          "name": "strchive_inheritance",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "string",
+            "nullable": true
+          },
+          "source": "strchive"
+        },
+        {
+          "name": "strchive_start_hg38",
+          "type": "int32",
+          "nullable": true,
+          "source": "strchive"
+        },
+        {
+          "name": "strchive_stop_hg38",
+          "type": "int32",
+          "nullable": true,
+          "source": "strchive"
+        },
+        {
+          "name": "strchive_units_offset",
+          "type": "float32",
+          "nullable": true,
+          "source": "strchive"
+        },
+        {
+          "name": "strchive_pathogenic_motif_reference_orientation",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "string",
+            "nullable": true
+          },
+          "source": "strchive"
+        },
+        {
+          "name": "strchive_benign_min",
+          "type": "int32",
+          "nullable": true,
+          "source": "strchive"
+        },
+        {
+          "name": "strchive_benign_max",
+          "type": "int32",
+          "nullable": true,
+          "source": "strchive"
+        },
+        {
+          "name": "strchive_intermediate_min",
+          "type": "int32",
+          "nullable": true,
+          "source": "strchive"
+        },
+        {
+          "name": "strchive_intermediate_max",
+          "type": "int32",
+          "nullable": true,
+          "source": "strchive"
+        },
+        {
+          "name": "strchive_pathogenic_min",
+          "type": "int32",
+          "nullable": true,
+          "source": "strchive"
+        },
+        {
+          "name": "strchive_pathogenic_max",
+          "type": "int32",
+          "nullable": true,
+          "source": "strchive"
         }
       ],
       "member": {

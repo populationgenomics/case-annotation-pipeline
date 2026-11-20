@@ -24,7 +24,7 @@ import structural_vcfs
 import test_family_tables
 
 import case_annotation
-from case_annotation import cli, contract, echtvar_values, family_tables, joined_values
+from case_annotation import cli, contract, echtvar_values, family_tables, joined_values, strchive
 
 REPOSITORY = pathlib.Path(__file__).parent.parent
 CONTRACT = REPOSITORY / 'contract'
@@ -153,11 +153,13 @@ def test_the_example_manifest_is_one_that_the_model_reads_and_writes() -> None:
         set(manifest.annotation.sources)
         | {name for name in echtvar_values.SOURCES if getattr(manifest, name) is not None}
         | {file.source for file in manifest.joined_files}
+        | ({strchive.NAME} if manifest.strchive is not None else set())
     )
     for omitted, table in (
         (manifest.omitted_columns, 'variants'),
         (manifest.transcripts_omitted_columns, 'transcripts'),
         (manifest.sv_omitted_columns, 'sv'),
+        (manifest.repeats_omitted_columns, 'repeats'),
     ):
         sources = family_tables.TABLES[table].sources
         assert omitted == tuple(c for source, columns in sources.items() if source not in named for c in columns)
@@ -181,6 +183,10 @@ def test_the_example_manifest_is_one_that_the_model_reads_and_writes() -> None:
         manifest.annotation.catalog,
         manifest.annotation.sources,
     )
+    # It shows a release of STRchive, whose counts are of the rows of repeats.
+    assert manifest.strchive is not None
+    repeats = next(table.rows for table in manifest.tables if table.table == 'repeats')
+    assert manifest.strchive.matched_repeats + manifest.strchive.unmatched_repeats == repeats
 
 
 # ---- the families sheet ----
@@ -337,9 +343,38 @@ def test_the_reference_has_the_index_the_workflow_looks_for_beside_it() -> None:
 def test_the_patterns_of_the_family_tables_params_are_the_ones_the_workflow_matches() -> None:
     ((names, name),) = re.findall(r'\[([^\]]+)\]\.each \{ v ->\s+if \(!\(v ==~ /(.+?)/\)\)', FAMILY_TABLES)
     (source,) = re.findall(r'settings\.sources\.each \{ v ->\s+if \(!\(v ==~ /(.+?)/\)\)', FAMILY_TABLES)
-    matched = dict.fromkeys(re.findall(r'settings\.(\w+)', names), name) | {'sources': source}
+    # A setting that a run can leave out is matched where the run gives it.
+    stated = dict(re.findall(r'if \(!\(settings\.(\w+) ==~ /(.+?)/\)\) \{\n\s+error\(', FAMILY_TABLES))
+    matched = dict.fromkeys(re.findall(r'settings\.(\w+)', names), name) | {'sources': source} | stated
     assert {param['name']: param['pattern'] for param in _params('family_tables.nf') if 'pattern' in param} == matched
-    assert set(matched) == {'group', 'catalog', 'sources'}
+    assert set(matched) == {'group', 'catalog', 'sources', 'strchive_release', 'strchive_release_date'}
+    assert (stated['strchive_release'], stated['strchive_release_date']) == (contract.NAME, strchive.DATE.pattern)
+
+
+def test_a_release_of_strchive_comes_with_its_name_and_its_date() -> None:
+    ((file, release, date),) = WORKFLOWS['family_tables.nf']['given_together']
+    assert file == strchive.NAME
+    declared = {param['name']: param for param in _params('family_tables.nf')}
+    assert [declared[name]['type'] for name in (file, release, date)] == ['Path', 'String', 'String']
+    assert not any(declared[name]['required'] for name in (file, release, date))
+    # The workflow refuses the file without the two, and either of the two without the file.
+    included = _code(_block(FAMILY_TABLES, 'workflow ANNOTATE_FAMILIES'))
+    assert re.search(
+        rf'if \(settings\.{file} != null\) \{{\s+'
+        rf'if \(settings\.{release} == null \|\| settings\.{date} == null\) \{{\s+error\([^\n]+\)\s+\}}',
+        included,
+    )
+    assert re.search(rf'else if \(settings\.{release} != null \|\| settings\.{date} != null\) \{{\s+error\(', included)
+    # The step that writes a family's tables takes the three, and gives the tools an option for each.
+    given = f"settings.{file} ?: [],\n        settings.{release} ?: '',\n        settings.{date} ?: '',\n"
+    assert given in included
+    assert f"path {file}, stageAs: '{file}/*'\n    val {release}\n    val {date}\n" in FAMILY_MODULES
+    options = ' '.join(f'--{name.replace("_", "-")} ${{{name}}}' for name in (file, release, date))
+    assert f'def ranges = {file} ? "{options}" : \'\'' in FAMILY_MODULES
+    # The stub runs give the three together, and each refusal its own message.
+    assert f'--{file} /src/stub/strchive.json --{release} v0.0.0 --{date} 2099-01-01' in STUB_RUNS
+    assert f"refused 'give {release} and {date}'" in STUB_RUNS
+    assert f"refused 'the run gives no {file}'" in STUB_RUNS
 
 
 def test_the_patterns_of_the_annotator_params_are_the_ones_the_workflow_matches() -> None:
@@ -596,10 +631,12 @@ def _assemble(
     sources: Sequence[str] = test_family_tables._SOURCES,
     scores: Sequence[echtvar_values.Source] = test_family_tables._SCORE_SOURCES,
     joined: Sequence[joined_values.Source] = test_family_tables._JOINED_SOURCES,
+    ranges: bool = True,
 ) -> family_tables.FamilyManifest:
     """Writes the folder of the invented family of test_family_tables, for a row that names the columns given.
 
-    Its run named the sources given, read the archives of the scores given and joined the files given.
+    Its run named the sources given, read the archives of the scores given, joined the files given and, unless `ranges`
+    is false, gave a release of STRchive.
     """
     larger = test_family_tables._larger(
         tmp_path,
@@ -608,6 +645,7 @@ def _assemble(
         cnv=structural_vcfs.CNV_RECORDS if 'cnv_vcf' in named else None,
         repeats='repeat_vcfs' in named,
         sources=sources,
+        ranges=ranges,
     )
     inputs = test_family_tables._inputs(tmp_path, info=test_family_tables._info(*sources), scores=scores, joined=joined)
     return family_tables.assemble(**{**inputs, **larger})
@@ -693,29 +731,39 @@ def _schema(table: Mapping[str, Any], samples: Sequence[str], sources: Sequence[
 
 
 _EVERY_FILE = test_family_tables._JOINED_SOURCES
+# The sources that a run named, the archives of scores that it read, the files that it joined, and whether it gave a
+# release of STRchive.
 RUNS = {
-    'every source, every archive and every file': (
+    'every source, every archive, every file and STRchive': (
         test_family_tables._SOURCES,
         test_family_tables._SCORE_SOURCES,
         _EVERY_FILE,
+        True,
     ),
-    'no dated source': (('Ensembl',), test_family_tables._SCORE_SOURCES, _EVERY_FILE),
-    'no archive of scores': (test_family_tables._SOURCES, (), _EVERY_FILE),
-    'the scores alone': (test_family_tables._SOURCES, test_family_tables._SCORE_SOURCES[:1], _EVERY_FILE),
-    'no joined file': (test_family_tables._SOURCES, test_family_tables._SCORE_SOURCES, ()),
-    'one joined file': (test_family_tables._SOURCES, test_family_tables._SCORE_SOURCES, (joined_values.MCR,)),
-    'nothing that a run can leave out': (('Ensembl',), (), ()),
+    'no dated source of the annotation': (('Ensembl',), test_family_tables._SCORE_SOURCES, _EVERY_FILE, True),
+    'no archive of scores': (test_family_tables._SOURCES, (), _EVERY_FILE, True),
+    'the scores alone': (test_family_tables._SOURCES, test_family_tables._SCORE_SOURCES[:1], _EVERY_FILE, True),
+    'no joined file': (test_family_tables._SOURCES, test_family_tables._SCORE_SOURCES, (), True),
+    'one joined file': (test_family_tables._SOURCES, test_family_tables._SCORE_SOURCES, (joined_values.MCR,), True),
+    'no release of STRchive': (test_family_tables._SOURCES, test_family_tables._SCORE_SOURCES, _EVERY_FILE, False),
+    'nothing that a run can leave out': (('Ensembl',), (), (), False),
 }
 
 
 @pytest.mark.parametrize('case', RUNS)
 def test_the_columns_of_each_table_are_the_ones_its_file_declares(tmp_path: pathlib.Path, case: str) -> None:
-    sources, scores, joined = RUNS[case]
-    manifest = _assemble(tmp_path, FOLDERS['every VCF of the larger variants'], sources, scores, joined)
+    sources, scores, joined, ranges = RUNS[case]
+    manifest = _assemble(tmp_path, FOLDERS['every VCF of the larger variants'], sources, scores, joined, ranges)
     assert [table.table for table in manifest.tables] == list(TABLES)
     samples = [member.sample_id for member in manifest.members if member.sequenced]
-    # A run names a dated source in its sources, and an archive or a joined file by giving it.
-    named = (*sources, *(source.name for source in scores), *(source.name for source in joined))
+    # A run names a dated source of the annotation in its sources, and an archive, a joined file or a release of
+    # STRchive by giving it.
+    named = (
+        *sources,
+        *(source.name for source in scores),
+        *(source.name for source in joined),
+        *((strchive.NAME,) if ranges else ()),
+    )
     for name, table in TABLES.items():
         written = pq.read_schema(tmp_path / 'out' / table['file'])
         assert written.equals(_schema(table, samples, named), check_metadata=False), name
@@ -724,14 +772,21 @@ def test_the_columns_of_each_table_are_the_ones_its_file_declares(tmp_path: path
         ('variants', manifest.omitted_columns),
         ('transcripts', manifest.transcripts_omitted_columns),
         ('sv', manifest.sv_omitted_columns),
+        ('repeats', manifest.repeats_omitted_columns),
     ):
         left_out = [c['name'] for c in TABLES[name]['columns'] if 'source' in c and c['source'] not in named]
         assert tuple(sorted(left_out)) == tuple(sorted(omitted))
-    assert bool(manifest.omitted_columns) == (case != 'every source, every archive and every file')
+    assert bool(manifest.omitted_columns) == (
+        (sources, scores, joined) != (test_family_tables._SOURCES, test_family_tables._SCORE_SOURCES, _EVERY_FILE)
+    )
     assert bool(manifest.transcripts_omitted_columns) == (joined != _EVERY_FILE)
     assert bool(manifest.sv_omitted_columns) == (sources == ('Ensembl',))
-    with_sources = {'variants', 'transcripts', 'sv'}
+    assert bool(manifest.repeats_omitted_columns) == (manifest.strchive is None) == (not ranges)
+    with_sources = {'variants', 'transcripts', 'sv', 'repeats'}
     assert all('source' not in c for name in set(TABLES) - with_sources for c in TABLES[name]['columns'])
+    # The columns of STRchive are those that its release gives, and no other column of repeats has a source.
+    assert [c['name'] for c in TABLES['repeats']['columns'] if 'source' in c] == list(strchive.COLUMNS)
+    assert {c['source'] for c in TABLES['repeats']['columns'] if 'source' in c} == {strchive.NAME}
     # An archive's columns are those of its source, and the archive that every run reads is no column's source.
     by_source: dict[str, list[str]] = {}
     for column in TABLES['variants']['columns']:

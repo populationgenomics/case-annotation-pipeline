@@ -15,6 +15,7 @@ from case_annotation import (
     echtvar_values,
     family_tables,
     joined_values,
+    strchive,
     sv_annotation,
     sv_sites,
 )
@@ -329,6 +330,22 @@ def _family_tables_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--echtvar-values', type=path, required=True, help="echtvar-values' output folder of the union")
     parser.add_argument('--joined-values', type=path, required=True, help="joined-values' output folder of the union")
     parser.add_argument(
+        '--strchive',
+        type=path,
+        help=(
+            "the loci of one release of STRchive, a JSON file, whose size ranges go into the family's repeats table; "
+            'given with --strchive-release and --strchive-release-date, or not at all'
+        ),
+    )
+    parser.add_argument(
+        '--strchive-release',
+        help='with --strchive: the release that the file is of, such as v2.28.0, which the file does not state',
+    )
+    parser.add_argument(
+        '--strchive-release-date',
+        help='with --strchive: the day on which that release was published, as YYYY-MM-DD',
+    )
+    parser.add_argument(
         '--schema-version',
         required=True,
         help="the tables' layout version the caller expects, which names its output folder; another fails",
@@ -349,6 +366,10 @@ def _family_tables(args: argparse.Namespace) -> None:
     sv_annotated = None
     if args.sv_annotation is not None:
         sv_annotated = family_tables.SvAnnotation(tables=args.sv_annotation, site_map=args.sv_map)
+    release = (args.strchive, args.strchive_release, args.strchive_release_date)
+    if any(part is None for part in release) and any(part is not None for part in release):
+        raise SystemExit('--strchive, --strchive-release and --strchive-release-date are given together')
+    ranges = None if args.strchive is None else strchive.stated(*release)
     family_tables.assemble(
         args.family,
         args.vcf,
@@ -361,6 +382,7 @@ def _family_tables(args: argparse.Namespace) -> None:
         structural=_structural(args),
         sv_alleles=args.sv_alleles,
         sv_annotated=sv_annotated,
+        ranges=ranges,
         scratch=args.scratch,
     )
 
@@ -497,8 +519,9 @@ _SUBCOMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Ca
             "writes a family's variants table, with a column of each member's calls, and its transcripts table from "
             "its VCF and the union's tables, its sv, sv_transcripts and repeats tables from the VCFs of its "
             "structural variants, copy numbers and repeats where it has them, with the annotation of the group's "
-            'structural variants, its manifest with the roles of the proband the run names and of its parents, and '
-            'a copy of the notes on the tables (tables.md)'
+            "structural variants and, where the run gives a release of STRchive, STRchive's size ranges of the "
+            'repeats, its manifest with the roles of the proband the run names and of its parents, and a copy of the '
+            'notes on the tables (tables.md)'
         ),
         _family_tables_arguments,
         _family_tables,

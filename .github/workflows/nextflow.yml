@@ -105,7 +105,7 @@ jobs:
             stub/annotated/out/stub-group.sv.json.gz stub/annotated/run.json stub/gnomad-joint.zip \
             stub/alphagenome-avi.zip stub/alphagenome-avi-breakdown.zip stub/alphagenome-splicing.zip \
             stub/gnomad-mito.vcf.bgz stub/mitotip.txt stub/gencode-polya.gtf.gz stub/aparent2.csv.gz \
-            stub/genomic-constraint.txt.gz stub/mcr.tsv stub/mpc.tsv.bgz
+            stub/genomic-constraint.txt.gz stub/mcr.tsv stub/mpc.tsv.bgz stub/strchive.json
           # An annotation folder of the group's alleles alone, without the annotation of its structural variants.
           mkdir -p stub/annotated-no-sv/out
           touch stub/annotated-no-sv/out/stub-group.json.gz stub/annotated-no-sv/run.json
@@ -300,6 +300,14 @@ jobs:
             test -L "stub/larger-annotated/${annotation}/${f}" || { echo "not published: ${f}" >&2; exit 1; }
           done
           test -L stub/larger-annotated/annotations/fam-a/tables-0.5.0-illumina-202610/sv_transcripts.parquet
+          # A run gives a release of STRchive with its name and its date, for the repeats tables of its families.
+          strchive=(--strchive /src/stub/strchive.json --strchive_release v0.0.0 --strchive_release_date 2099-01-01)
+          family_run --families /src/stub/larger.csv --annotated /src/stub/annotated "${strchive[@]}" \
+            --output_dir /src/stub/strchive > strchive.log
+          grep -qF 'ANNOTATE_FAMILIES:FAMILY_TABLES (fam-a)' strchive.log ||
+            { echo "did not run: FAMILY_TABLES" >&2; cat strchive.log; exit 1; }
+          test -L stub/strchive/annotations/fam-a/tables-0.5.0-illumina-202610/repeats.parquet
+          test -L stub/strchive/annotations/fam-b/tables-0.5.0-illumina-202610/manifest.json
           # Refused, each with its own message: sources and a reused annotation together; neither; annotating without
           # the Annotator's params; a repeated family; a family id that is not a folder name; a reference without its
           # index; a catalog id that is not a folder name; a quote in a source; a sheet without families; a row
@@ -307,7 +315,9 @@ jobs:
           # a sample id; a reused annotation that holds none of the group; a reused annotation without its run config,
           # which Nextflow refuses by the missing file's path; a repeat VCF without its index; an empty entry among a
           # row's repeat VCFs; a sheet with a column that is none of a families sheet; a reused annotation without
-          # that of the structural variants, for a group with a family that names their VCF.
+          # that of the structural variants, for a group with a family that names their VCF; a release of STRchive
+          # without its name and date; a name and a date without the release's file; a name that is not one of a
+          # release; a date that is not written as YYYY-MM-DD.
           refused() {
             local message=$1
             shift
@@ -343,6 +353,12 @@ jobs:
             --families /src/stub/misspelt-column.csv
           refused 'stub-group: /src/stub/annotated-no-sv holds no out/stub-group.sv.json.gz' \
             --families /src/stub/larger.csv --annotated /src/stub/annotated-no-sv
+          reused=("${families[@]}" --annotated /src/stub/annotated)
+          refused 'give strchive_release and strchive_release_date' "${reused[@]}" "${strchive[@]:0:4}"
+          refused 'the run gives no strchive' "${reused[@]}" "${strchive[@]:2}"
+          refused 'a release of STRchive, such as v2.28.0, may hold' "${reused[@]}" "${strchive[@]:0:2}" \
+            --strchive_release 'v 0' "${strchive[@]:4}"
+          refused 'is written as YYYY-MM-DD' "${reused[@]}" "${strchive[@]:0:4}" --strchive_release_date 1-1-2099
 
       - name: Stub runs of a pipeline that includes the family tables' workflow, and of what the workflow refuses
         run: |
@@ -351,7 +367,7 @@ jobs:
             > stub/illumina-bundle/runConfigs/bundle.json
           touch stub/reference.fa stub/reference.fa.fai stub/annotated/out/stub-group.json.gz \
             stub/annotated/out/stub-group.sv.json.gz stub/annotated/run.json stub/gnomad-joint.zip \
-            stub/alphagenome-avi.zip stub/gencode-polya.gtf.gz
+            stub/alphagenome-avi.zip stub/gencode-polya.gtf.gz stub/strchive.json
           # tests/workflows/include/main.nf makes one family's files in the run and gives the family to the workflow.
           # -C gives the run that pipeline's config alone, as the run of a project that includes the workflow has.
           # NXF_ANSI_LOG=false gives the log with one line for each task, as in the step above.
@@ -368,10 +384,12 @@ jobs:
                 "$@"
           }
           family=(--family fam-c --proband A3)
-          # The run names one of the three archives of AlphaGenome's scores and one of the seven files that are joined
-          # to the alleles, and leaves the other settings of both null.
+          # The run names one of the three archives of AlphaGenome's scores, one of the seven files that are joined
+          # to the alleles and a release of STRchive with its name and date, and leaves the other settings of the
+          # first two null.
           included_run "${family[@]}" --with_sv --annotates_sv --alphagenome_avi /src/stub/alphagenome-avi.zip \
-            --gencode_polya /src/stub/gencode-polya.gtf.gz --output_dir /src/stub/included > included.log
+            --gencode_polya /src/stub/gencode-polya.gtf.gz --strchive /src/stub/strchive.json \
+            --strchive_release v0.0.0 --strchive_release_date 2099-01-01 --output_dir /src/stub/included > included.log
           # Each of the workflow's processes runs under the workflow's name, and the including pipeline's under its own.
           for task in 'Submitted process > MADE_FAMILY' 'ANNOTATE_FAMILIES:FAMILY_CHECK (fam-c)' \
             'ANNOTATE_FAMILIES:SV_UNION (stub-group)' 'ANNOTATE_FAMILIES:ECHTVAR_VALUES (stub-group)' \

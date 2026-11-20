@@ -25,8 +25,9 @@ A family whose sheet row also names VCFs of its structural variants, its copy-nu
   call of the record (sv_tables). A structural variant written as a sequence that is the same allele as a row of
   `variants`, after the normalisation of the family's VCF, names that row;
 - `sv_transcripts.parquet`: the transcripts the Annotator lists for each allele of each record;
-- `repeats.parquet`: one row per repeat of the repeat genotyper's catalogue, with one column per sequenced member that
-  holds the member's genotype of it (repeat_tables), which nothing annotates.
+- `repeats.parquet`: one row per repeat of the repeat genotyper's catalogue, with STRchive's size ranges of the repeat
+  where the run gives a release of STRchive (strchive), and one column per sequenced member that holds the member's
+  genotype of it (repeat_tables).
 
 Each table is sorted by chromosome (1 to 22, X, Y, M), then position, and written with zstd in row groups of 100,000
 rows, with Bloom filters on the columns that look up a variant, a gene or a transcript. The columns whose values rarely
@@ -56,6 +57,7 @@ from case_annotation import (
     joined_values,
     pedigree,
     repeat_tables,
+    strchive,
     sv_annotation,
     sv_tables,
     vcf_values,
@@ -181,12 +183,33 @@ def sv_schema(samples: Sequence[str], omitted: Collection[str] = ()) -> pa.Schem
     )
 
 
+# The columns of the repeats table that describe the repeat, in the table's order: what the genotyper's catalogue
+# says of it, then STRchive's values of it. The members' columns follow them.
+REPEAT = pa.schema([*repeat_tables.LOCUS, *strchive.FIELDS])
+# The columns of the repeats table that a run can leave out, by the file that it then was not given, under its param's
+# name. STRchive is a dated source, and a run includes it only by giving a release of it.
+REPEAT_SOURCES: Mapping[str, tuple[str, ...]] = {strchive.NAME: strchive.COLUMNS}
+
+
+def repeats_schema(samples: Sequence[str], omitted: Collection[str] = ()) -> pa.Schema:
+    """The repeats table of a family with these samples, in a run that leaves the omitted columns out.
+
+    The repeat's columns come first, then a genotype column per sample.
+    """
+    return pa.schema(
+        [
+            *(field for field in REPEAT if field.name not in omitted),
+            *(pa.field(sample, repeat_tables.CALL, nullable=False) for sample in samples),
+        ]
+    )
+
+
 # The tables that hold one column per sequenced member, named as the member's sample, each with the columns that say
 # what a row is of, which come before the members'.
 ROW_COLUMNS: Mapping[str, pa.Schema] = {
     'variants': ALLELE,
     'sv': sv_schema(()),
-    'repeats': repeat_tables.LOCUS,
+    'repeats': REPEAT,
 }
 
 
@@ -197,9 +220,9 @@ class Table:
     `columns` are the columns that say what a row is of, in the file's order. In a table that holds the members' calls
     a column of each sequenced member follows them, named as the member's sample, in the order of the family's VCF and
     never null, and `member` is the type of each. `sources` gives the columns that hold the data of a source that a
-    run can leave out, by the source's name: a dated source by its name in a run config, and an echtvar archive or a
-    joined file that a run need not read by its param's name. The table of a run that did not name the source lacks
-    them.
+    run can leave out, by the source's name: a dated source of the annotation by its name in a run config, and an
+    echtvar archive, a joined file or a release of STRchive that a run need not read by its param's name. The table of
+    a run that did not name the source lacks them.
     """
 
     columns: pa.Schema
@@ -215,7 +238,7 @@ TABLES: Mapping[str, Table] = {
     'transcripts': Table(TRANSCRIPT, None, TRANSCRIPT_SOURCES),
     'sv': Table(sv_schema(()), sv_tables.CALL, sv_annotation.SOURCE_COLUMNS),
     'sv_transcripts': Table(sv_tables.transcripts_schema(sv_annotation.TRANSCRIPT_COLUMNS), None, {}),
-    'repeats': Table(repeat_tables.LOCUS, repeat_tables.CALL, {}),
+    'repeats': Table(REPEAT, repeat_tables.CALL, REPEAT_SOURCES),
 }
 
 
@@ -376,6 +399,10 @@ class FamilyManifest(pydantic.BaseModel, frozen=True, extra='forbid'):
     # sources that run did not name; None and no columns in a family without the sv table.
     sv_annotation: annotation_tables.AnnotationInfo | None
     sv_omitted_columns: tuple[str, ...]
+    # The release of STRchive that the strchive_ columns of repeats come from, and the repeats columns that a run
+    # without one left out; None and no columns in a family without the repeats table.
+    strchive: strchive.StrchiveFile | None
+    repeats_omitted_columns: tuple[str, ...]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -730,14 +757,18 @@ def _structural_queries(
     sv_alleles: pathlib.Path | None,
     annotated: SvAnnotation | None,
     sv_omitted: Collection[str],
+    loci: Sequence[strchive.Locus] | None,
     samples: Sequence[str],
     work: pathlib.Path,
-) -> dict[str, tuple[str, pa.Schema]]:
+) -> tuple[dict[str, tuple[str, pa.Schema]], tuple[int, int] | None]:
     """The query and the schema of each table of the family's larger variants, by the table's name.
 
     Reads the VCFs into views of the connection, which also has the family's `records`. `annotated` is the annotation
     of the group's structural variants, which a family with a caller's VCF has, and `sv_omitted` the columns of sv
-    that the family's table leaves out.
+    that the family's table leaves out. `loci` are those of the release of STRchive that the run gives, or None in a
+    run without one, whose repeats table lacks STRchive's columns. Also returns how many of the family's repeats have
+    an entry of STRchive and how many have none, or None where nothing was matched: in a run without a release and in
+    a family without repeat VCFs.
     """
     queries: dict[str, tuple[str, pa.Schema]] = {}
     if structural.callers:
@@ -771,15 +802,19 @@ def _structural_queries(
         }
     elif annotated is not None:
         raise ValueError("the annotation of the group's structural variants, for a family without a caller's VCF")
+    counts = None
     if structural.repeat_vcfs:
-        schema = repeat_tables.schema(samples)
         rows = repeat_tables.rows(structural.repeat_vcfs, samples, _CHROM_RANK)
         if not rows:
             for vcf in structural.repeat_vcfs:
                 _check_contigs(vcf)
+        if loci is not None:
+            rows, matched = strchive.annotate(rows, loci)
+            counts = (matched, len(rows) - matched)
+        schema = repeats_schema(samples, () if loci is not None else strchive.COLUMNS)
         con.register('repeat_rows', pa.Table.from_pylist(rows, schema=schema))
         queries['repeats'] = ('SELECT * FROM repeat_rows ORDER BY chrom_rank(chrom), pos, end_pos, repeat_id', schema)
-    return queries
+    return queries, counts
 
 
 def assemble(
@@ -795,6 +830,7 @@ def assemble(
     *,
     sv_alleles: pathlib.Path | None = None,
     sv_annotated: SvAnnotation | None = None,
+    ranges: strchive.Release | None = None,
     scratch: pathlib.Path | None = None,
 ) -> FamilyManifest:
     """Writes the family's tables and manifest into the output folder.
@@ -805,7 +841,9 @@ def assemble(
     a family in which it designates none (member_roles), and the VCFs of its larger variants that the sheet names, with
     the normalised sequences of its structural variants where it names their VCF (read_sv_alleles) and the annotation
     of the group's structural variants where it names a caller's VCF (SvAnnotation). That annotation must be of the
-    same catalog and sources as the union's, since one run makes both.
+    same catalog and sources as the union's, since one run makes both. `ranges` is the release of STRchive that the
+    run gives, whose file is read and checked for every family, and matched with the repeats of a family that has
+    them.
     """
     ped = pedigree.read(ped_path)
     if ped.family != family:
@@ -823,6 +861,7 @@ def assemble(
         )
     archives = echtvar_values.read_info(archive_values)
     joined_files = joined_values.read_info(joined)
+    loci = None if ranges is None else strchive.read(ranges.file)
     output.mkdir(parents=True)
     with tempfile.TemporaryDirectory(dir=scratch) as tmp:
         work = pathlib.Path(tmp)
@@ -904,18 +943,41 @@ def assemble(
             ),
         }
         declared = {'variants': variants_schema(samples, omitted)}
+        larger, counts = _structural_queries(
+            con, family, structural, sv_alleles, sv_annotated, sv_omitted, loci, samples, work
+        )
+        ranges_record = None
+        if ranges is not None and counts is not None:
+            ranges_record = strchive.StrchiveFile(
+                file=ranges.file.name,
+                bytes=ranges.file.stat().st_size,
+                sha256=_sha256(ranges.file),
+                release=ranges.name,
+                release_date=ranges.date,
+                matched_repeats=counts[0],
+                unmatched_repeats=counts[1],
+            )
+        repeats_omitted = REPEAT_SOURCES[strchive.NAME] if 'repeats' in larger and ranges is None else ()
         # A table of the larger variants carries the provenance of what annotated it: the annotation of the group's
-        # structural variants for the two tables that hold it, and nothing for the repeats.
+        # structural variants for the two tables that hold it, and for the repeats the release of STRchive, as in the
+        # manifest, or a JSON null in a run without one.
         metadata = dict.fromkeys(queries, annotated)
         sv_metadata = own if sv_info is None else {**own, 'annotation': sv_info.model_dump_json()}
-        larger = _structural_queries(con, family, structural, sv_alleles, sv_annotated, sv_omitted, samples, work)
+        repeats_metadata = {
+            **own,
+            strchive.NAME: 'null' if ranges_record is None else ranges_record.model_dump_json(),
+        }
         for table, (query, schema) in larger.items():
             queries[table], declared[table] = query, schema
-            metadata[table] = sv_metadata if table in ('sv', 'sv_transcripts') else own
+            metadata[table] = sv_metadata if table in ('sv', 'sv_transcripts') else repeats_metadata
         files = []
         for table, query in queries.items():
             path = output / f'{table}.parquet'
-            left_out = {'sv': sv_omitted, 'transcripts': transcripts_omitted}.get(table, omitted)
+            left_out = {
+                'sv': sv_omitted,
+                'transcripts': transcripts_omitted,
+                'repeats': repeats_omitted,
+            }.get(table, omitted)
             rows = _write(con, query, path, table, metadata[table], _encodings(table, left_out), declared.get(table))
             files.append(
                 TableFile(table=table, path=path.name, rows=rows, bytes=path.stat().st_size, sha256=_sha256(path))
@@ -952,6 +1014,8 @@ def assemble(
         transcripts_omitted_columns=transcripts_omitted,
         sv_annotation=sv_info,
         sv_omitted_columns=sv_omitted,
+        strchive=ranges_record,
+        repeats_omitted_columns=repeats_omitted,
     )
     (output / 'manifest.json').write_text(manifest.model_dump_json(indent=2) + '\n')
     return manifest

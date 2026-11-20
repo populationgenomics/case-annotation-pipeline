@@ -8,6 +8,7 @@ declared here, and tests/test_contract.py holds each statement to the .nf source
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import pathlib
 from collections.abc import Mapping, Sequence
@@ -23,12 +24,15 @@ from case_annotation import (
     family_tables,
     joined_values,
     pedigree,
+    strchive,
 )
 
 # A family's id, a sample's, a group's and a catalog's: each names files and folders and goes into command lines.
 NAME = pedigree.NAME.pattern
 # A source, a category or a catalog as Illumina names it, which may hold spaces and brackets.
 ILLUMINA_NAME = r'[A-Za-z0-9][A-Za-z0-9 ._()-]*'
+# The date of a release as a run states it.
+DATE = strchive.DATE.pattern
 # What separates the VCFs of a row's repeat_vcfs, and what the index beside a VCF adds to the VCF's name.
 SEPARATOR = ';'
 INDEX_SUFFIX = '.tbi'
@@ -129,6 +133,7 @@ def _param(name: str, kind: str, *default: object, required: bool = False, **rul
 
 def _family_tables_workflow() -> dict[str, Any]:
     annotator = ('annotator_container', 'annotator', 'annotator_version', 'license_secret')
+    release, release_date = f'{strchive.NAME}_release', f'{strchive.NAME}_release_date'
     return {
         'params': [
             _param('families', 'Path', required=True),
@@ -147,6 +152,9 @@ def _family_tables_workflow() -> dict[str, Any]:
                 if source is not echtvar_values.REQUIRED
             ),
             *(_param(name, 'Path') for name in joined_values.SOURCES),
+            _param(strchive.NAME, 'Path'),
+            _param(release, 'String', pattern=NAME),
+            _param(release_date, 'String', pattern=DATE),
             _param('tools_container', 'String', required=True),
             _param('output_dir', 'String'),
             _param('arGuid', 'String'),
@@ -165,6 +173,9 @@ def _family_tables_workflow() -> dict[str, Any]:
                 ],
             },
         },
+        # A file of a dated source that states neither its release nor a date comes with the params that state them,
+        # and they with the file.
+        'given_together': [[strchive.NAME, release, release_date]],
         'publishes': {
             'family': {
                 'folder': f'annotations/{{family}}/{_TABLES_FOLDER}',
@@ -263,9 +274,10 @@ def tables() -> dict[str, Any]:
 
     A type is the name of an Arrow type, or `list` with its `element`, or `struct` with its `fields`. `nullable` is
     what the file declares. A column with a `source` holds the data of a source that a run can leave out, and the table
-    of a run that did not name the source lacks the column: a dated source, by its name in a run config, or an echtvar
-    archive or a joined file that a run need not read, by its param's name. `member` is the type of the column that each
-    sequenced member has after the others, named as the member's sample.
+    of a run that did not name the source lacks the column: a dated source of the annotation, by its name in a run
+    config, or an echtvar archive, a joined file or a release of STRchive that a run need not read, by its param's
+    name. `member` is the type of the column that each sequenced member has after the others, named as the member's
+    sample.
     """
     described = []
     for name, table in family_tables.TABLES.items():
@@ -377,9 +389,9 @@ def _example_annotation() -> annotation_tables.AnnotationInfo:
 def example_manifest() -> family_tables.FamilyManifest:
     """An invented manifest: a trio with the tables of its larger variants.
 
-    Its run did not name dbSNP, read AlphaGenome's scores and splicing scores and no breakdown of the scores, and
-    joined gnomAD's mitochondrial sites, GENCODE's polyadenylation features and gnomAD's regions of missense
-    constraint, and none of the other four files.
+    Its run did not name dbSNP, read AlphaGenome's scores and splicing scores and no breakdown of the scores, joined
+    gnomAD's mitochondrial sites, GENCODE's polyadenylation features and gnomAD's regions of missense constraint, and
+    none of the other four files, and gave a release of STRchive.
     """
 
     def member(
@@ -459,6 +471,16 @@ def example_manifest() -> family_tables.FamilyManifest:
         transcripts_omitted_columns=family_tables.TRANSCRIPT_SOURCES['mpc'],
         sv_annotation=annotation,
         sv_omitted_columns=(),
+        strchive=strchive.StrchiveFile(
+            file='STRchive-loci-v0.0.0.invented.json',
+            bytes=500_000,
+            sha256='e' * 64,
+            release='v0.0.0',
+            release_date=dt.date(2099, 1, 1),
+            matched_repeats=45,
+            unmatched_repeats=sizes['repeats'] - 45,
+        ),
+        repeats_omitted_columns=(),
     )
 
 

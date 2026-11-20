@@ -138,7 +138,14 @@ nothing to do with the catalogue of repeats that a repeat genotyper sizes.
 An annotation source that carries clinical assertions or literature, such as ClinVar or OMIM, so that what it says
 depends on the date of its version. Every other source is a current source. A run includes a dated source only by naming
 it, and a family's manifest records the versions that the run pinned and the sources that it left out
-([Dated sources](annotation.md#dated-sources)).
+([Dated sources](annotation.md#dated-sources)). STRchive is a dated source too, which a run includes by giving the file
+of one of its releases.
+
+### STRchive
+
+A curated, public catalogue of the tandem repeats that are linked to a disease, with the sizes at which each repeat
+counts as benign, intermediate and pathogenic. A run that is given the loci of one of its releases adds those sizes to
+`repeats` ([STRchive's ranges of the repeats](annotation.md#strchives-ranges-of-the-repeats)).
 
 ### AlphaGenome
 
@@ -179,7 +186,8 @@ the pedigree with each member's role, and what annotated the tables ([The manife
 
 What the documents call the variants that a joint VCF does not hold and that other callers write into VCFs of their own:
 structural variants, copy number segments and tandem repeats. The family tables hold them as the callers wrote them, the
-structural variants and copy number segments with the Annotator's annotation and the repeats without one
+structural variants and copy number segments with the Annotator's annotation and the repeats with STRchive's size ranges
+where the run was given a release of STRchive
 ([Structural variants, copy number and repeats](family-tables.md#structural-variants-copy-number-and-repeats)).
 
 ### Reciprocal overlap

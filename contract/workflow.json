@@ -126,6 +126,23 @@
           "required": false
         },
         {
+          "name": "strchive",
+          "type": "Path",
+          "required": false
+        },
+        {
+          "name": "strchive_release",
+          "type": "String",
+          "required": false,
+          "pattern": "[A-Za-z0-9][A-Za-z0-9._-]*"
+        },
+        {
+          "name": "strchive_release_date",
+          "type": "String",
+          "required": false,
+          "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}"
+        },
+        {
           "name": "tools_container",
           "type": "String",
           "required": true
@@ -178,6 +195,13 @@
           ]
         }
       },
+      "given_together": [
+        [
+          "strchive",
+          "strchive_release",
+          "strchive_release_date"
+        ]
+      ],
       "publishes": {
         "family": {
           "folder": "annotations/{family}/tables-{tables_version}-illumina-{catalog}",

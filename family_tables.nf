@@ -9,7 +9,8 @@
 // (its structural variants, its copy-number segments or its members' repeats) gets tables of those too. The structural
 // variants and copy-number segments of the group's families go the same way as their alleles: the union of their sites
 // is annotated once, in a second Annotator run with the same catalog and sources, and each family's tables read its
-// records' annotation from it. Nothing annotates the repeats.
+// records' annotation from it. The Annotator does not read the repeats. A run that gives a release of STRchive adds its
+// size ranges to each family's repeats table.
 //
 // The steps are the workflow ANNOTATE_FAMILIES, which takes the families as a channel and its settings as values, so
 // that another pipeline can include it and give it families that it makes in the same run (docs/annotation.md,
@@ -73,6 +74,14 @@ params {
     genomic_constraint: Path?
     mcr: Path?
     mpc: Path?
+    // The loci of one release of STRchive, a JSON file, whose size ranges go into each family's repeats table, and
+    // which a run can leave out (docs/annotation.md). STRchive is a dated source and its file states neither its
+    // release nor a date, so a run that gives the file states both: the release, such as v2.28.0, and the day on
+    // which it was published, as YYYY-MM-DD, which a params file writes as a quoted string. A family's manifest
+    // records them as stated.
+    strchive: Path?
+    strchive_release: String?
+    strchive_release_date: String?
     tools_container: String
     output_dir: String?
     arGuid: String?
@@ -178,6 +187,22 @@ workflow ANNOTATE_FAMILIES {
                 error("give ${name}, which annotating needs")
             }
         }
+    }
+    // A release of STRchive comes with its name and its date, which go into a family's manifest and into a command
+    // line, and a run without one gives neither.
+    if (settings.strchive != null) {
+        if (settings.strchive_release == null || settings.strchive_release_date == null) {
+            error('give strchive_release and strchive_release_date, which say what release strchive is of')
+        }
+        if (!(settings.strchive_release ==~ /[A-Za-z0-9][A-Za-z0-9._-]*/)) {
+            error("${settings.strchive_release}: a release of STRchive, such as v2.28.0, may hold letters, digits and . _ - only")
+        }
+        if (!(settings.strchive_release_date ==~ /[0-9]{4}-[0-9]{2}-[0-9]{2}/)) {
+            error("${settings.strchive_release_date}: the date of a release of STRchive is written as YYYY-MM-DD")
+        }
+    }
+    else if (settings.strchive_release != null || settings.strchive_release_date != null) {
+        error('strchive_release and strchive_release_date say what release strchive is of, and the run gives no strchive')
     }
     def reference_index = settings.reference.resolveSibling("${settings.reference.name}.fai")
     if (!reference_index.exists()) {
@@ -300,6 +325,9 @@ workflow ANNOTATE_FAMILIES {
         joined_values,
         sv_tables,
         sv_map,
+        settings.strchive ?: [],
+        settings.strchive_release ?: '',
+        settings.strchive_release_date ?: '',
         tablesVersion(),
         pipelineVersion(),
     )
@@ -368,7 +396,7 @@ def pipelineVersion() {
 
 // The settings of ANNOTATE_FAMILIES, each of which the entry workflow takes as the param of the same name.
 def settingNames() {
-    return ['group', 'reference', 'catalog', 'annotation_data', 'sources', 'workers', 'annotator', 'annotator_version', 'license_secret', 'annotated', 'gnomad_joint', 'alphagenome_avi', 'alphagenome_avi_breakdown', 'alphagenome_splicing', 'gnomad_mito', 'mitotip', 'gencode_polya', 'aparent2', 'genomic_constraint', 'mcr', 'mpc']
+    return ['group', 'reference', 'catalog', 'annotation_data', 'sources', 'workers', 'annotator', 'annotator_version', 'license_secret', 'annotated', 'gnomad_joint', 'alphagenome_avi', 'alphagenome_avi_breakdown', 'alphagenome_splicing', 'gnomad_mito', 'mitotip', 'gencode_polya', 'aparent2', 'genomic_constraint', 'mcr', 'mpc', 'strchive', 'strchive_release', 'strchive_release_date']
 }
 
 // The columns of the families sheet: four that every sheet has, and the optional ones of the larger variants.

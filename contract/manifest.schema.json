@@ -415,6 +415,51 @@
       "title": "SourceVersion",
       "type": "object"
     },
+    "StrchiveFile": {
+      "description": "The STRchive file that a family's repeats were matched with, as the run read it.",
+      "properties": {
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "release": {
+          "title": "Release",
+          "type": "string"
+        },
+        "release_date": {
+          "format": "date",
+          "title": "Release Date",
+          "type": "string"
+        },
+        "matched_repeats": {
+          "title": "Matched Repeats",
+          "type": "integer"
+        },
+        "unmatched_repeats": {
+          "title": "Unmatched Repeats",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "file",
+        "bytes",
+        "sha256",
+        "release",
+        "release_date",
+        "matched_repeats",
+        "unmatched_repeats"
+      ],
+      "title": "StrchiveFile",
+      "type": "object"
+    },
     "TableFile": {
       "properties": {
         "table": {
@@ -563,6 +608,23 @@
       },
       "title": "Sv Omitted Columns",
       "type": "array"
+    },
+    "strchive": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/StrchiveFile"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "repeats_omitted_columns": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Repeats Omitted Columns",
+      "type": "array"
     }
   },
   "required": [
@@ -583,7 +645,9 @@
     "omitted_columns",
     "transcripts_omitted_columns",
     "sv_annotation",
-    "sv_omitted_columns"
+    "sv_omitted_columns",
+    "strchive",
+    "repeats_omitted_columns"
   ],
   "title": "FamilyManifest",
   "type": "object"

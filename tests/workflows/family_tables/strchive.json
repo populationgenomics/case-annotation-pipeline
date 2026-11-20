@@ -1,0 +1,79 @@
+[
+  {
+    "id": "INVA_GENEA",
+    "gene": "GENEA",
+    "evidence": [
+      "Definitive"
+    ],
+    "chrom": "chr1",
+    "start_hg38": 47,
+    "stop_hg38": 83,
+    "inheritance": [
+      "AD"
+    ],
+    "reference_motif_reference_orientation": [
+      "AGC"
+    ],
+    "pathogenic_motif_reference_orientation": [
+      "AGC"
+    ],
+    "benign_min": 5,
+    "benign_max": 20,
+    "intermediate_min": 21,
+    "intermediate_max": 35,
+    "pathogenic_min": 36,
+    "pathogenic_max": 200,
+    "details": "Invented for the tests of the family tables: no locus of STRchive."
+  },
+  {
+    "id": "INVB_GENEB",
+    "gene": "GENEB",
+    "evidence": [
+      "Limited"
+    ],
+    "chrom": "chr2",
+    "start_hg38": 100,
+    "stop_hg38": 130,
+    "inheritance": [
+      "AR"
+    ],
+    "reference_motif_reference_orientation": [
+      "AAAAT"
+    ],
+    "pathogenic_motif_reference_orientation": [
+      "AAATG",
+      "AAACG"
+    ],
+    "benign_min": 0,
+    "benign_max": 30,
+    "intermediate_min": null,
+    "intermediate_max": null,
+    "pathogenic_min": 100,
+    "pathogenic_max": 1000,
+    "details": "Invented for the tests of the family tables: no locus of STRchive."
+  },
+  {
+    "id": "INVX_GENEX",
+    "gene": "GENEX",
+    "evidence": [
+      "Refuted"
+    ],
+    "chrom": "chrX",
+    "start_hg38": 380,
+    "stop_hg38": 470,
+    "inheritance": [],
+    "reference_motif_reference_orientation": [
+      "CAG"
+    ],
+    "pathogenic_motif_reference_orientation": [
+      "CAG"
+    ],
+    "benign_min": null,
+    "benign_max": null,
+    "intermediate_min": null,
+    "intermediate_max": null,
+    "pathogenic_min": 40,
+    "pathogenic_max": 40,
+    "details": "Invented for the tests of the family tables: no locus of STRchive."
+  }
+]

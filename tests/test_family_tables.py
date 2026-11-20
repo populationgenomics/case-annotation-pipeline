@@ -12,6 +12,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 import duckdb
+import invented_strchive
 import invented_sv_annotation
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -29,6 +30,7 @@ from case_annotation import (
     joined_values,
     pedigree,
     repeat_tables,
+    strchive,
     sv_annotation,
     sv_sites,
     sv_tables,
@@ -1253,6 +1255,10 @@ COLUMN_CLASHES = {
         ('S1', 'S2', 'repeat_unit'),
         "column name 'repeat_unit' in the repeats table",
     ),
+    "a sample named as a column of STRchive's, which a run can leave out": (
+        ('S1', 'S2', 'strchive_id'),
+        "column name 'strchive_id' in the repeats table",
+    ),
 }
 
 
@@ -1383,12 +1389,14 @@ def _larger(
     annotated: Any = None,  # noqa: ANN401 (what invented_sv_annotation.annotate takes)
     sources: Sequence[str] = _SOURCES,
     group: Mapping[str, Sequence[Sequence[structural_vcfs.Record]]] | None = None,
+    ranges: bool = True,
 ) -> dict[str, Any]:
     """The arguments of assemble that name a family's larger variants; None leaves a VCF out.
 
     A family with a caller's VCF also gets the annotation of its group's structural variants, which `annotated` gives
     each site's position line of and whose run named `sources`. The group is the family alone, or the families of
-    `group`, whose records then stand for this family's too.
+    `group`, whose records then stand for this family's too. The run gives the invented release of STRchive unless
+    `ranges` is false.
     """
     folder = tmp_path / 'larger'
     folder.mkdir()
@@ -1403,7 +1411,8 @@ def _larger(
     if callers:
         families = {'fam-1': callers} if group is None else group
         sv_annotated = invented_sv_annotation.annotate(folder / 'annotation', families, annotated, sources)
-    return {'structural': structural, 'sv_alleles': sv_alleles, 'sv_annotated': sv_annotated}
+    release = invented_strchive.release(folder) if ranges else None
+    return {'structural': structural, 'sv_alleles': sv_alleles, 'sv_annotated': sv_annotated, 'ranges': release}
 
 
 def test_a_family_with_the_vcfs_of_its_larger_variants_gets_their_tables(tmp_path: pathlib.Path) -> None:
@@ -1431,7 +1440,7 @@ def test_a_family_with_the_vcfs_of_its_larger_variants_gets_their_tables(tmp_pat
         sv_tables.transcripts_schema(sv_annotation.TRANSCRIPT_COLUMNS), check_metadata=False
     )
     assert pq.read_schema(out / 'repeats.parquet').equals(
-        repeat_tables.schema(('S1', 'S2', 'S3')), check_metadata=False
+        family_tables.repeats_schema(('S1', 'S2', 'S3')), check_metadata=False
     )
     # The alleles' tables are as without the larger variants.
     assert [v['variant_id'] for v in _rows(out / 'variants.parquet')] == _ALLELES
@@ -1443,6 +1452,7 @@ def test_a_family_without_such_vcfs_has_no_table_of_them(tmp_path: pathlib.Path)
     assert [t.table for t in manifest.tables] == list(_ALLELE_TABLES)
     assert manifest.sv_callers == ()
     assert (manifest.sv_annotation, manifest.sv_omitted_columns) == (None, ())
+    assert (manifest.strchive, manifest.repeats_omitted_columns) == (None, ())
     assert sorted(f.name for f in (tmp_path / 'out').iterdir()) == [
         'manifest.json',
         'tables.md',
@@ -1483,6 +1493,7 @@ def test_the_manifest_of_a_family_without_such_vcfs_states_that_it_has_none(tmp_
     written = json.loads((tmp_path / 'out' / 'manifest.json').read_text())
     assert written.keys() == family_tables.FamilyManifest.model_fields.keys()
     assert (written['sv_callers'], written['sv_annotation'], written['sv_omitted_columns']) == ([], None, [])
+    assert (written['strchive'], written['repeats_omitted_columns']) == (None, [])
     assert family_tables.FamilyManifest.model_validate(written) == manifest
 
 
@@ -1551,7 +1562,7 @@ def test_the_member_columns_of_the_larger_variants_follow_the_familys_vcf(tmp_pa
     assert sv.names == [*family_tables.ROW_COLUMNS['sv'].names, 'S3', 'S1', 'S2']
     assert all(sv.field(s).type.equals(sv_tables.CALL, check_metadata=False) for s in ('S1', 'S2', 'S3'))
     repeats = pq.read_schema(out / 'repeats.parquet')
-    assert repeats.names == [*repeat_tables.LOCUS.names, 'S3', 'S1', 'S2']
+    assert repeats.names == [*family_tables.REPEAT.names, 'S3', 'S1', 'S2']
     assert all(repeats.field(s).type.equals(repeat_tables.CALL, check_metadata=False) for s in ('S1', 'S2', 'S3'))
     # Each column holds its own member's call, whatever the order of the files' samples.
     deletion = _rows(
@@ -1609,11 +1620,13 @@ def test_the_tables_of_the_larger_variants_carry_their_metadata_filters_and_enco
         groups = [metadata.row_group(i).num_rows for i in range(metadata.num_row_groups)]
         assert (sum(groups), set(groups[:-1])) == (rows, {2})
         # The two tables that hold the annotation of the group's structural variants carry its provenance beside their
-        # own version and family. Nothing annotated the repeats.
+        # own version and family, and the repeats the release of STRchive that their ranges come from.
         kv = pq.read_schema(path).metadata
-        provenance = {b'annotation'} if table in ('sv', 'sv_transcripts') else set()
+        provenance = {b'annotation'} if table in ('sv', 'sv_transcripts') else {b'strchive'}
         assert set(kv) == {b'schema_version', b'family', b'table'} | provenance
-        if provenance:
+        if table == 'repeats':
+            assert strchive.StrchiveFile.model_validate_json(kv[b'strchive']).release == invented_strchive.RELEASE
+        else:
             recorded = annotation_tables.AnnotationInfo.model_validate_json(kv[b'annotation'])
             assert recorded == invented_sv_annotation.info(*_SOURCES)
         assert (kv[b'table'], kv[b'family']) == (table.encode(), b'fam-1')
@@ -1791,6 +1804,116 @@ def test_the_commands_take_the_vcfs_of_the_larger_variants(tmp_path: pathlib.Pat
     manifest = json.loads((tmp_path / 'written' / 'manifest.json').read_text())
     assert [t['table'] for t in manifest['tables']] == [*_ALLELE_TABLES, *_SV_TABLES, 'repeats']
     assert manifest['schema_version'] == family_tables.SCHEMA_VERSION
+
+
+# STRchive's size ranges in a family's repeats.
+
+
+def test_a_run_with_a_release_of_strchive_gives_each_repeat_the_values_of_its_locus(tmp_path: pathlib.Path) -> None:
+    larger = _larger(tmp_path)
+    manifest = family_tables.assemble(**{**_inputs(tmp_path), **larger})
+    table = tmp_path / 'out' / 'repeats.parquet'
+    rows = {row['repeat_id']: row for row in _rows(table)}
+    by_locus = {locus.id: locus.columns for locus in strchive.read(larger['ranges'].file)}
+    unmatched = dict.fromkeys(invented_strchive.UNMATCHED)
+    assert {repeat: row['strchive_id'] for repeat, row in rows.items()} == invented_strchive.MATCHED | unmatched
+    for row in rows.values():
+        if row['strchive_id'] is None:
+            assert {column: row[column] for column in strchive.COLUMNS} == dict.fromkeys(strchive.COLUMNS)
+        else:
+            entry = by_locus[row['strchive_id']]
+            assert {column: row[column] for column in entry} == entry
+            # The invented loci are wider than the repeats, and the column is a 32-bit float.
+            assert row[strchive.UNITS_OFFSET] > 0
+    # STRchive's columns follow the catalogue's and come before the members'.
+    assert pq.read_schema(table).names == [*repeat_tables.LOCUS.names, *strchive.COLUMNS, 'S1', 'S2', 'S3']
+    # The manifest records the file as the run read it, the release as the run stated it, and both counts.
+    file = larger['ranges'].file
+    assert manifest.strchive == strchive.StrchiveFile(
+        file=invented_strchive.FILE_NAME,
+        bytes=file.stat().st_size,
+        sha256=hashlib.sha256(file.read_bytes()).hexdigest(),
+        release=invented_strchive.RELEASE,
+        release_date=invented_strchive.RELEASE_DATE,
+        matched_repeats=len(invented_strchive.MATCHED),
+        unmatched_repeats=len(invented_strchive.UNMATCHED),
+    )
+    assert len(invented_strchive.MATCHED) + len(invented_strchive.UNMATCHED) == len(rows)
+    assert manifest.repeats_omitted_columns == ()
+    written = json.loads((tmp_path / 'out' / 'manifest.json').read_text())
+    assert written['strchive']['release_date'] == invented_strchive.RELEASE_DATE.isoformat()
+    # The table carries the same record.
+    recorded = pq.read_schema(table).metadata[b'strchive']
+    assert strchive.StrchiveFile.model_validate_json(recorded) == manifest.strchive
+
+
+def test_a_run_without_a_release_of_strchive_leaves_its_columns_out_of_repeats(tmp_path: pathlib.Path) -> None:
+    manifest = family_tables.assemble(**{**_inputs(tmp_path), **_larger(tmp_path, ranges=False)})
+    table = tmp_path / 'out' / 'repeats.parquet'
+    written = pq.read_schema(table)
+    assert written.names == [*repeat_tables.LOCUS.names, 'S1', 'S2', 'S3']
+    assert written.equals(family_tables.repeats_schema(('S1', 'S2', 'S3'), strchive.COLUMNS), check_metadata=False)
+    # The manifest and the table say that the run gave no release, and the manifest lists the columns left out.
+    assert manifest.strchive is None
+    assert written.metadata[b'strchive'] == b'null'
+    assert manifest.repeats_omitted_columns == strchive.COLUMNS == family_tables.TABLES['repeats'].sources['strchive']
+    # A query that reads one of the columns fails, and does not return an empty result.
+    with pytest.raises(duckdb.BinderException, match='strchive_pathogenic_min'):
+        _rows(table, 'SELECT repeat_id FROM t WHERE list_max(S3.repcn) >= strchive_pathogenic_min')
+
+
+def test_a_family_without_repeats_records_no_release_of_strchive_and_its_file_is_checked_all_the_same(
+    tmp_path: pathlib.Path,
+) -> None:
+    inputs, larger = _inputs(tmp_path), _larger(tmp_path, repeats=False)
+    manifest = family_tables.assemble(**{**inputs, **larger})
+    assert 'repeats' not in [table.table for table in manifest.tables]
+    assert (manifest.strchive, manifest.repeats_omitted_columns) == (None, ())
+    # A file that STRchive would not publish stops this family too, before anything is written for it.
+    inverted = [invented_strchive.locus(pathogenic_min=201)]
+    refused = {**inputs, **larger, 'output': tmp_path / 'refused'}
+    with pytest.raises(ValueError, match='pathogenic_min 201 is above pathogenic_max 200'):
+        family_tables.assemble(**{**refused, 'ranges': invented_strchive.release(tmp_path, inverted)})
+    assert not (tmp_path / 'refused').exists()
+
+
+def test_the_members_with_an_allele_in_the_pathogenic_range_are_found_by_comparing_sizes(
+    tmp_path: pathlib.Path,
+) -> None:
+    family_tables.assemble(**{**_inputs(tmp_path), **_larger(tmp_path)})
+    # The table has no column that says so: a member's sizes and the locus's bounds are in the same unit.
+    query = (
+        'SELECT repeat_id, strchive_id, list_max(S3.repcn) AS longer FROM t '
+        'WHERE list_max(S3.repcn) BETWEEN strchive_pathogenic_min AND strchive_pathogenic_max'
+    )
+    assert _rows(tmp_path / 'out' / 'repeats.parquet', query) == [
+        {'repeat_id': 'RPTA', 'strchive_id': 'INV1_GENEA', 'longer': 45}
+    ]
+
+
+def test_the_command_takes_a_release_of_strchive_with_its_name_and_its_date(tmp_path: pathlib.Path) -> None:
+    inputs, larger = _inputs(tmp_path), _larger(tmp_path)
+    options = [*_larger_options(larger), '--sv-alleles', str(larger['sv_alleles']), *_annotation_options(larger)]
+    command = [*_tables_command(inputs), '--proband', 'S3', *options]
+    release = ['--strchive', str(larger['ranges'].file), '--strchive-release', invented_strchive.RELEASE]
+    date = ['--strchive-release-date', invented_strchive.RELEASE_DATE.isoformat()]
+    # The file, the release and its date come together: the file states neither of the two.
+    for some in (release[:2], release, release[2:], date, [*release[:2], *date]):
+        with pytest.raises(SystemExit, match='--strchive, --strchive-release and --strchive-release-date are given'):
+            cli.main([*command, *some])
+    with pytest.raises(ValueError, match="'2099-02-30', not a day of the calendar"):
+        cli.main([*command, *release, date[0], '2099-02-30'])
+    assert not inputs['output'].exists()
+    cli.main([*command, *release, *date])
+    written = json.loads((inputs['output'] / 'manifest.json').read_text())
+    assert (written['strchive']['release'], written['strchive']['release_date']) == (
+        invented_strchive.RELEASE,
+        invented_strchive.RELEASE_DATE.isoformat(),
+    )
+    # Without the three, the family's repeats have no column of STRchive.
+    cli.main([*_tables_command(inputs, output=tmp_path / 'without'), '--proband', 'S3', *options])
+    without = json.loads((tmp_path / 'without' / 'manifest.json').read_text())
+    assert (without['strchive'], without['repeats_omitted_columns']) == (None, list(strchive.COLUMNS))
 
 
 # The annotation of the group's structural variants in a family's tables.
