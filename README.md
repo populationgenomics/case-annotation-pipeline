@@ -25,8 +25,9 @@ A pipeline that makes the families' files itself can include the steps of `famil
 
 The pipeline's own steps are the Python package `case-annotation-tools` in `src/case_annotation/`, which installs the
 `case-annotation` command with one subcommand for each step. They run in the image `case-annotation-tools`, which
-[containers/tools/Dockerfile](containers/tools/Dockerfile) builds. The Annotator is Illumina's licensed software and
-runs in an image that the organisation running the pipeline builds itself.
+[containers/tools/Dockerfile](containers/tools/Dockerfile) builds. One step runs Ensembl VEP with two of its plugins, in
+the image that [containers/vep/Dockerfile](containers/vep/Dockerfile) builds. The Annotator is Illumina's licensed
+software and runs in an image that the organisation running the pipeline builds itself.
 
 ## The documents
 

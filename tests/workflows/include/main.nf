@@ -38,6 +38,7 @@ params {
     strchive: Path?
     strchive_release: String?
     strchive_release_date: String?
+    gene_models: Path
     // A name to add to the settings, and the name of a setting to give as null, for the runs that ANNOTATE_FAMILIES
     // refuses for them.
     unknown_setting: String?
@@ -73,6 +74,7 @@ workflow {
         strchive: params.strchive,
         strchive_release: params.strchive_release,
         strchive_release_date: params.strchive_release_date,
+        gene_models: params.gene_models,
     ]
     families = MADE_FAMILY(params.with_sv).map { vcf, ped, sv -> tuple(params.family, vcf, ped, params.proband, sv, [], []) }
     annotated = ANNOTATE_FAMILIES(

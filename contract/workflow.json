@@ -143,6 +143,16 @@
           "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}"
         },
         {
+          "name": "gene_models",
+          "type": "Path",
+          "required": true
+        },
+        {
+          "name": "vep_container",
+          "type": "String",
+          "required": true
+        },
+        {
           "name": "tools_container",
           "type": "String",
           "required": true

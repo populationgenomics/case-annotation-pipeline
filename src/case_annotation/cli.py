@@ -14,11 +14,13 @@ from case_annotation import (
     contract,
     echtvar_values,
     family_tables,
+    gene_models,
     joined_values,
     roh_upd,
     strchive,
     sv_annotation,
     sv_sites,
+    vep_plugins,
 )
 
 
@@ -299,6 +301,82 @@ def _joined_values(args: argparse.Namespace) -> None:
         args.output,
         scratch=args.scratch,
     )
+
+
+def _gene_models_arguments(parser: argparse.ArgumentParser) -> None:
+    path = pathlib.Path
+    parser.add_argument(
+        '--ensembl', type=path, required=True, help="Ensembl's GFF3 of the gene models, gzipped as published"
+    )
+    parser.add_argument(
+        '--refseq', type=path, required=True, help="NCBI's RefSeq GFF of the gene models, gzipped as published"
+    )
+    parser.add_argument(
+        '--assembly-report',
+        type=path,
+        required=True,
+        help="NCBI's assembly report of the genome build, which names each chromosome as both files do",
+    )
+    parser.add_argument(
+        '--reference',
+        type=path,
+        required=True,
+        help='the reference the VCFs are called against, with its .fai beside it, whose sequences are chr1, chr2, ...',
+    )
+    parser.add_argument(
+        '--output',
+        type=path,
+        required=True,
+        help=(
+            f'the folder to write the prepared files into, with {gene_models.EXONS_NAME}, '
+            f'{gene_models.SYNONYMS_NAME}, {gene_models.CONTROLS_NAME} and {gene_models.RECORD_NAME}; it must not exist'
+        ),
+    )
+
+
+def _gene_models(args: argparse.Namespace) -> None:
+    gene_models.prepare(
+        {'Ensembl': args.ensembl, 'RefSeq': args.refseq}, args.assembly_report, args.reference, args.output
+    )
+
+
+def _vep_plugins_arguments(parser: argparse.ArgumentParser) -> None:
+    path = pathlib.Path
+    parser.add_argument(
+        '--given',
+        type=path,
+        required=True,
+        help=(
+            "the VCF that VEP read: the union's alleles that overlap an exon, each under its variant id, and the "
+            'positive controls'
+        ),
+    )
+    parser.add_argument(
+        '--vep',
+        type=path,
+        required=True,
+        help=(
+            f"the folder of the step that ran VEP, with {vep_plugins.RUN_NAME} and VEP's JSON for each gene model "
+            f'file ({", ".join(vep_plugins.OUTPUTS.values())})'
+        ),
+    )
+    parser.add_argument(
+        '--gene-models',
+        type=path,
+        required=True,
+        help=f'{gene_models.RECORD_NAME} of the prepared gene models that VEP read',
+    )
+    parser.add_argument(
+        '--output',
+        type=path,
+        required=True,
+        help=f'the folder to write {vep_plugins.TABLE_NAME} and {vep_plugins.INFO_NAME} into; it must not exist',
+    )
+
+
+def _vep_plugins(args: argparse.Namespace) -> None:
+    prepared = gene_models.GeneModels.model_validate_json(args.gene_models.read_text())
+    vep_plugins.convert(args.given, args.vep, prepared, args.output)
 
 
 def _family_tables_arguments(parser: argparse.ArgumentParser) -> None:
@@ -673,6 +751,22 @@ _SUBCOMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Ca
         ),
         _roh_upd_arguments,
         _roh_upd,
+    ),
+    'gene-models': (
+        (
+            "prepares the gene models that VEP reads from Ensembl's and NCBI's public files: each file sorted, "
+            "bgzipped and indexed, the chromosome synonyms, the exons' regions and the positive controls"
+        ),
+        _gene_models_arguments,
+        _gene_models,
+    ),
+    'vep-plugins': (
+        (
+            "writes what VEP's UTRannotator and NMD plugins say of a sites union as a table by allele and "
+            'transcript, after checking the positive controls, with the record of the run'
+        ),
+        _vep_plugins_arguments,
+        _vep_plugins,
     ),
     'family-tables': (
         (

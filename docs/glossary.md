@@ -59,6 +59,20 @@ alternate allele (heterozygous), `1/1` for two (homozygous), and a single `1` wh
 A variant that a child carries and neither parent does, because it arose new in the child
 ([De novo variants](annotation.md#de-novo-variants)).
 
+### Upstream reading frame
+
+A stretch of a transcript's 5′ untranslated region (5′ UTR), the part before the protein's own start codon, that begins
+with a start codon of its own. A ribosome that starts there can fail to reach the protein's start, so a variant that
+creates or removes such a frame can change how much protein is made. A frame that ends before the protein's start is a
+uORF, and one that runs past it is an overlapping one, an oORF
+([Upstream reading frames and nonsense-mediated decay](annotation.md#upstream-reading-frames-and-nonsense-mediated-decay)).
+
+### Nonsense-mediated decay
+
+How a cell destroys a transcript whose reading frame ends early, so that a variant which stops a protein short usually
+leaves no protein at all. A variant near the transcript's end, or near its start, can escape the decay, and the
+shortened protein is then made.
+
 ### Structural variant
 
 A change of 50 bases or more, or a rearrangement: a deletion, an insertion, a duplication, an inversion, or a junction
@@ -141,6 +155,13 @@ the population, prediction scores and its ClinVar classification ([Annotation](a
 
 Illumina's standalone DRAGEN Annotator, which `annotator.nf` runs. Its data and its output are licensed to the
 organisation that runs it, and the pipeline takes its image as a param ([The Annotator's image](annotator-image.md)).
+
+### Gene models
+
+Where each gene's transcripts lie on the genome: their exons and their coding sequence. Ensembl and RefSeq each publish
+a set, in releases, and a transcript's id carries a version that changes with its model. The Annotator reads both sets
+from its catalog, and Ensembl VEP reads the same releases from two prepared files
+([The gene models](annotation.md#the-gene-models)).
 
 ### Catalog
 
