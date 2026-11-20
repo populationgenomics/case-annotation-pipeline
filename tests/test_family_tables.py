@@ -146,6 +146,17 @@ _PREDICTED = {
     'promoterai_score': -0.2,
     'promoterai_tss_distance': 150,
 }
+# The invented intron offsets of the one transcript of each allele of the union, in the alleles' order, as the first
+# and the last position of its HGVS name: a base 25 before an exon, a base 5 after one, a base in an exon, a deletion
+# from 50 to 30 before an exon, and one from 50 to 10 before it. The other family's allele is 20 before an exon.
+_OFFSETS: tuple[tuple[int | None, int | None], ...] = (
+    (-25, -25),
+    (5, 5),
+    (None, None),
+    (-50, -30),
+    (-50, -10),
+    (-20, -20),
+)
 
 
 def _gene(symbol: str, hgnc_id: int | None) -> dict[str, Any]:
@@ -191,8 +202,8 @@ def _write_union(path: pathlib.Path, alleles: Sequence[str], info: annotation_ta
     (path / 'variants').mkdir(parents=True)
     (path / 'transcripts').mkdir()
     variants, transcripts = [], []
-    for index, (vid, rsids, hgnc_ids, genes, regulatory) in enumerate(
-        zip([*alleles, 'chr2-500-C-A'], _RSIDS, _HGNC_IDS, _GENES, _REGULATORY, strict=True)
+    for index, (vid, rsids, hgnc_ids, genes, regulatory, offsets) in enumerate(
+        zip([*alleles, 'chr2-500-C-A'], _RSIDS, _HGNC_IDS, _GENES, _REGULATORY, _OFFSETS, strict=True)
     ):
         chrom, pos, ref, alt = vid.split('-')
         first = index == 0
@@ -226,6 +237,8 @@ def _write_union(path: pathlib.Path, alleles: Sequence[str], info: annotation_ta
                 'worst_consequence': 'intron_variant',
                 'is_mane_select': False,
                 'is_canonical': True,
+                'intron_offset_start': offsets[0],
+                'intron_offset_end': offsets[1],
                 **_PREDICTED,
             }
         )
@@ -502,6 +515,24 @@ def test_the_transcripts_table_has_the_columns_and_types_of_the_unions_with_thei
     # The table is written as DuckDB returns the union's rows, with no declared schema to cast them to.
     assert pq.read_schema(path).equals(family_tables.TABLES['transcripts'].columns, check_metadata=False)
     assert [{name: row[name] for name in _PREDICTED} for row in _rows(path)] == [_PREDICTED] * len(_ALLELES)
+    held = [(row['intron_offset_start'], row['intron_offset_end']) for row in _rows(path)]
+    assert held == list(_OFFSETS[: len(_ALLELES)])
+
+
+def test_a_window_before_an_exon_finds_the_alleles_with_an_end_in_it_by_their_intron_offsets(
+    tmp_path: pathlib.Path,
+) -> None:
+    family_tables.assemble(**_inputs(tmp_path))
+    in_window = _rows(
+        tmp_path / 'out' / 'transcripts.parquet',
+        """
+        SELECT variant_id FROM t
+        WHERE intron_offset_start BETWEEN -44 AND -18 OR intron_offset_end BETWEEN -44 AND -18
+        """,
+    )
+    # The base in the window and the deletion that ends in it. A base after an exon and a base in an exon are outside
+    # it, and the deletion that starts before the window and ends after it has neither end in it.
+    assert sorted(row['variant_id'] for row in in_window) == sorted([_ALLELES[0], _ALLELES[3]])
 
 
 def test_a_call_without_likelihoods_has_none(tmp_path: pathlib.Path) -> None:

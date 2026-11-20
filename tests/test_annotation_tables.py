@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import copy
 import gzip
+import itertools
 import json
 import pathlib
+import re
 from typing import Any
 
 import duckdb
@@ -159,7 +161,7 @@ def _rich_position() -> dict[str, Any]:
         gnomad=_gnomad(31, all=(0.001, 2, 2000, 0), afr=(0.004, 2, 500, 0), male=(0.002, 2, 1000, 1))
         | {'failedFilter': True},
         transcripts=[
-            _transcript('ENST01.1', 'Ensembl', 'GENEA', 'ENSG01', 'intron_variant'),
+            _transcript('ENST01.1', 'Ensembl', 'GENEA', 'ENSG01', 'intron_variant', hgvsc='ENST01.1:c.124-25A>G'),
             _transcript(
                 'ENST02.3',
                 'Ensembl',
@@ -494,6 +496,125 @@ def test_a_transcript_has_the_amino_acid_conservation_scores_as_the_annotator_li
     table = pa.Table.from_pylist(rows, schema=annotation_tables.TRANSCRIPTS)
     assert table.schema.field('amino_acid_conservation').type == pa.list_(pa.float64())
     assert table.column('amino_acid_conservation').to_pylist() == [None, [0.9, 0.12], None]
+
+
+def _offsets(rows: list[dict[str, Any]]) -> dict[str, tuple[int | None, int | None]]:
+    """The two intron offsets of each transcript row, by the row's transcript."""
+    return {row['transcript_id']: (row['intron_offset_start'], row['intron_offset_end']) for row in rows}
+
+
+def test_a_transcript_row_has_the_intron_offsets_of_its_hgvs_name_and_none_without_a_name_or_an_offset() -> None:
+    _, rows, _ = _position_rows(_rich_position())
+    # The one transcript whose name has an offset is the one that the allele is in an intron of.
+    assert _offsets(rows) == {
+        'ENST01.1': (-25, -25),
+        'ENST02.3': (None, None),
+        'NM_01.2': (None, None),
+        'ENST03.1': (None, None),
+    }
+    table = pa.Table.from_pylist(rows, schema=annotation_tables.TRANSCRIPTS)
+    for column in ('intron_offset_start', 'intron_offset_end'):
+        assert table.schema.field(column).type == pa.int32()
+        assert table.column(column).to_pylist() == [-25, None, None, None]
+
+    unnamed = _transcript('ENST01.1', 'Ensembl', 'GENEA', 'ENSG01', 'upstream_gene_variant')
+    transcripts = [_without(unnamed, 'hgvsc'), unnamed | {'transcript': 'ENST02.1', 'hgvsc': None}]
+    _, rows, _ = _position_rows(_position('chr1', 5, 'C', 'T', transcripts=transcripts))
+    assert _offsets(rows) == {'ENST01.1': (None, None), 'ENST02.1': (None, None)}
+    assert {row['hgvsc'] for row in rows} == {None}
+
+
+# How an HGVS name writes a base of an exon, by the kind of the name: a coding name has a plain number, a number after
+# `-` before the start codon and a number after `*` after the stop codon, and a non-coding name the plain number alone.
+_EXON_BASES = {'c': ('123', '-12', '*34'), 'n': ('123',)}
+# No offset, which is a base of an exon, and offsets of both signs, of one digit and of several.
+_INTRON_OFFSETS = (None, 1, 5, 44, 12345, -1, -25, -44, -12345)
+# What follows the position of a name of one position, and the positions of a name of two.
+_CHANGES = {
+    1: ('A>G', '=', 'del', 'dup', 'delinsTT', 'T[4]', '[4]'),
+    2: ('del', 'dup', 'inv', 'insA', 'delinsTT', '=', '[4]'),
+}
+
+
+def _written(kind: str) -> dict[str, int | None]:
+    """Every invented position of a name of the kind as the name writes it, with the offset that it holds."""
+    return {
+        base + ('' if offset is None else f'{offset:+d}'): offset
+        for base in _EXON_BASES[kind]
+        for offset in _INTRON_OFFSETS
+    }
+
+
+@pytest.mark.parametrize('kind', _EXON_BASES)
+def test_a_name_of_one_position_gives_that_positions_offset_twice_whatever_its_change(kind: str) -> None:
+    for (position, offset), change in itertools.product(_written(kind).items(), _CHANGES[1]):
+        name = f'NM_01.2:{kind}.{position}{change}'
+        assert annotation_tables.intron_offsets(name, 'chr1:5') == (offset, offset), name
+
+
+@pytest.mark.parametrize('kind', _EXON_BASES)
+def test_a_name_of_a_range_gives_the_offset_of_each_end_whatever_the_form_of_the_other(kind: str) -> None:
+    written = _written(kind)
+    # Every pair of positions, so each end takes every form beside every form of the other: an end in an exon beside
+    # one in an intron, offsets of opposite signs, and a `-` or a `*` of the exon's base before the sign of an offset.
+    for (first, start), (last, end), change in itertools.product(written.items(), written.items(), _CHANGES[2]):
+        name = f'ENST01.1:{kind}.{first}_{last}{change}'
+        assert annotation_tables.intron_offsets(name, 'chr1:5') == (start, end), name
+
+
+def test_the_first_sign_of_a_position_before_the_start_codon_is_the_positions_and_the_second_the_offsets() -> None:
+    offsets = {
+        name: annotation_tables.intron_offsets(f'ENST01.1:{name}', 'chr1:5')
+        for name in ('c.-12+5A>G', 'c.-12-5A>G', 'c.-12A>G', 'c.*34-5A>G', 'c.-12-5_*34+7del', 'c.-12_12-5del')
+    }
+    assert offsets == {
+        'c.-12+5A>G': (5, 5),
+        'c.-12-5A>G': (-5, -5),
+        'c.-12A>G': (None, None),
+        'c.*34-5A>G': (-5, -5),
+        'c.-12-5_*34+7del': (-5, 7),
+        'c.-12_12-5del': (None, -5),
+    }
+
+
+# Invented HGVS names whose positions the conversion does not read, each by what is wrong with it.
+NAMES_REFUSED = {
+    'an unknown offset after an exon': 'ENST01.1:c.123+?del',
+    'an unknown offset before an exon': 'ENST01.1:c.124-?del',
+    'an unknown offset at the end of a range': 'ENST01.1:c.124-30_124-?del',
+    'an unknown first position': 'ENST01.1:c.?_124-25del',
+    'an unknown last position': 'ENST01.1:c.124-30_?del',
+    'an unknown position alone': 'ENST01.1:c.?',
+    'uncertain positions in parentheses': 'ENST01.1:c.(123+1_124-1)_(456+1_457-1)del',
+    'an uncertain last position in parentheses': 'ENST01.1:c.124-30_(124-25_124-1)del',
+    'an offset of zero': 'ENST01.1:c.123+0A>G',
+    'an offset that starts with a zero': 'ENST01.1:c.123+05A>G',
+    'a sign without an offset': 'ENST01.1:c.123+A>G',
+    'two offsets on one position': 'ENST01.1:c.123+5-3A>G',
+    'an offset from an intron by its number': 'ENST01.1:c.IVS2+2T>G',
+    'an offset beyond the end of the transcript': 'ENST01.1:c.*34+d5A>G',
+    'a third position': 'ENST01.1:c.124-30_124-25_124-20del',
+    'a range without its last position': 'ENST01.1:c.124-30_del',
+    'a name that ends after its position': 'ENST01.1:c.124-25',
+    'a question mark after a position': 'ENST01.1:c.124-25?',
+    'a parenthesis after a position': 'ENST01.1:c.124-25(A>G)',
+    'a name that ends after its range': 'ENST01.1:c.124-30_124-25',
+    'several changes in brackets': 'ENST01.1:c.[124-25A>G;130C>T]',
+    'a name without a reference': 'c.124-25A>G',
+    'a name with an empty reference': ':c.124-25A>G',
+    'a name without its kind': 'ENST01.1:124-25A>G',
+    'a genomic name': 'NC_000002.12:g.100A>G',
+    'a name of an RNA': 'ENST01.1:r.124-25a>g',
+    'an empty name': '',
+}
+
+
+@pytest.mark.parametrize('case', NAMES_REFUSED)
+def test_an_hgvs_name_whose_positions_the_conversion_does_not_read_is_refused_with_the_name(case: str) -> None:
+    name = NAMES_REFUSED[case]
+    transcript = _transcript('ENST01.1', 'Ensembl', 'GENEA', 'ENSG01', 'intron_variant', hgvsc=name)
+    with pytest.raises(ValueError, match=re.escape(f'chr1:5: the HGVS name {name!r} is of no form')):
+        _position_rows(_position('chr1', 5, 'C', 'T', transcripts=[transcript]))
 
 
 _SCORED = {'geneId': 'ENSG01', 'donorGainScore0': 0.5, 'donorGainDistance0': 2}
@@ -1227,6 +1348,19 @@ def test_the_unions_tables_hold_the_hgnc_ids_that_the_genes_section_gives(tmp_pa
         'chr1-5-C-T': None,
         'chr2-100-A-G': [90001],
         'chr10-7-G-GA': None,
+    }
+
+
+def test_the_unions_transcripts_hold_the_intron_offsets_as_32_bit_integers(tmp_path: pathlib.Path) -> None:
+    _convert(tmp_path)
+    (part,) = (p for p in (tmp_path / 'tables' / 'transcripts').glob('*.parquet') if pq.read_metadata(p).num_rows)
+    table = pq.read_table(part)
+    assert {table.schema.field(f'intron_offset_{end}').type for end in ('start', 'end')} == {pa.int32()}
+    assert _offsets(table.to_pylist()) == {
+        'ENST01.1': (-25, -25),
+        'ENST02.3': (None, None),
+        'NM_01.2': (None, None),
+        'ENST03.1': (None, None),
     }
 
 
