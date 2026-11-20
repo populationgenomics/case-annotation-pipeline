@@ -140,6 +140,12 @@ depends on the date of its version. Every other source is a current source. A ru
 it, and a family's manifest records the versions that the run pinned and the sources that it left out
 ([Dated sources](annotation.md#dated-sources)).
 
+### AlphaGenome
+
+Google DeepMind's model of DNA sequence. DeepMind publishes tables of scores that it computed with the model for every
+single-base change, among them the AlphaGenome Variant Impact (AVI) score, and an echtvar archive can be built from each
+table ([AlphaGenome's archives](annotation.md#alphagenomes-archives)).
+
 ### Families sheet
 
 The input of one run of `family_tables.nf`: a CSV with one row for each family of a group, naming its joint VCF, its PED

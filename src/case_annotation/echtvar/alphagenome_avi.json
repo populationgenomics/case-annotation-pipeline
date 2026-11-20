@@ -1,0 +1,4 @@
+[
+  {"field": "raw_score", "alias": "avi_raw", "multiplier": 1000000, "zigzag": true, "missing_value": 2139095041},
+  {"field": "PHRED", "alias": "avi_phred", "multiplier": 1000000, "zigzag": true, "missing_value": 2139095041}
+]

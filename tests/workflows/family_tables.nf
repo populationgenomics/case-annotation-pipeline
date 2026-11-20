@@ -31,6 +31,15 @@
 // the Annotator's layout, SV_ANNOTATION_TABLES converts it, and FAMILY_TABLES reads family A's records' annotation from
 // it. A deletion written as a sequence without INFO END (sv-no-end.vcf) is refused when the union is written.
 // The ##source line of the VCFs of the larger variants names build/tests/family.nf, which means this file.
+// alphagenome_avi.tsv, alphagenome_avi_breakdown.tsv and alphagenome_splicing.tsv stand in for DeepMind's three tables
+// of AlphaGenome's scores (docs/annotation.md, AlphaGenome's archives), with invented values under DeepMind's column
+// names. INVENTED_ALPHAGENOME_ARCHIVE builds an archive of each as the document says, with the conversion and the
+// encode configuration of the tools, and checks that the archive returns the table's rows. The tables hold the three
+// single-base changes at each of a few positions of the union: every change at one position has a score, a breakdown
+// and a splicing score; other positions lack the breakdown, the splicing score or both; the position of a deletion
+// has scores of its single-base changes; and other positions of the union have no row. One raw score is 0, another is
+// negative, a PHRED is 0, one is above 67, where a 32-bit float is coarser than the millionths that the archive
+// stores, and one contribution is in scientific notation.
 // Refused inputs must fail, and so must Annotator outputs without the group's annotation. The case-annotation and
 // echtvar steps run in the tools image, built first. Run with Docker from the repository's root, with this folder's
 // config alone (-C), because a run from the root would otherwise read the pipeline's nextflow.config over it:
@@ -103,6 +112,11 @@ workflow {
     ).first()
     archive = INVENTED_ARCHIVE(file("${fixture}/gnomad-joint.vcf"), file("${fixture}/echtvar-config.json"))
     joint = GNOMAD_JOINT(union, archive)
+    // An archive of each of the three invented tables of AlphaGenome's scores, built and checked.
+    INVENTED_ALPHAGENOME_ARCHIVE(
+        channel.of('alphagenome_avi', 'alphagenome_avi_breakdown', 'alphagenome_splicing').map { table -> tuple(table, file("${fixture}/${table}.tsv")) },
+        file("${fixture}/reference.fa.fai"),
+    )
     // The union of the group's structural variants and copy-number segments, which are family A's, and its tables.
     sv_sites = SV_SITES(
         structural.join(checked.map { f -> [f] }).filter { _f, sv, cnv, _repeats -> sv || cnv }.map { f, sv, cnv, _repeats -> tuple(f, sv, cnv) }
@@ -421,6 +435,32 @@ process INVENTED_ARCHIVE {
     script:
     """
     echtvar encode invented.zip ${config} ${vcf}
+    """
+}
+
+// An echtvar archive of one of the invented tables of AlphaGenome's scores, built as docs/annotation.md says: the
+// table's rows as a VCF, encoded with the table's configuration. The archive is then checked as the document says:
+// echtvar annotates the rows' alleles with it, and the values that it returns are compared with the rows.
+process INVENTED_ALPHAGENOME_ARCHIVE {
+    tag "${table}"
+
+    input:
+    tuple val(table), path(tsv)
+    path reference_index
+
+    output:
+    tuple val(table), path("${table}.zip")
+
+    script:
+    """
+    set -o pipefail
+    case-annotation alphagenome-config --table ${table} > config.json
+    case-annotation alphagenome-vcf --table ${table} --reference-index ${reference_index} < ${tsv} > rows.vcf
+    echtvar encode ${table}.zip config.json rows.vcf
+    bcftools annotate --no-version -x INFO -Ob -o alleles.bcf rows.vcf
+    echtvar anno -e ${table}.zip alleles.bcf annotated.bcf
+    bcftools index annotated.bcf
+    case-annotation alphagenome-check --table ${table} --annotated annotated.bcf < ${tsv}
     """
 }
 
