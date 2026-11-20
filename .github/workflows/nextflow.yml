@@ -106,6 +106,9 @@ jobs:
             stub/alphagenome-avi.zip stub/alphagenome-avi-breakdown.zip stub/alphagenome-splicing.zip \
             stub/gnomad-mito.vcf.bgz stub/mitotip.txt stub/gencode-polya.gtf.gz stub/aparent2.csv.gz \
             stub/genomic-constraint.txt.gz stub/mcr.tsv stub/mpc.tsv.bgz stub/strchive.json
+          # The folder of prepared gene models, with the three files that the workflow gives a step by name.
+          mkdir -p stub/gene-models
+          touch stub/gene-models/exons.bed stub/gene-models/controls.vcf stub/gene-models/gene-models.json
           # An annotation folder of the group's alleles alone, without the annotation of its structural variants.
           mkdir -p stub/annotated-no-sv/out
           touch stub/annotated-no-sv/out/stub-group.json.gz stub/annotated-no-sv/run.json
@@ -157,6 +160,8 @@ jobs:
                 --catalog 202610 \
                 --annotation_data /src/stub/illumina-bundle \
                 --gnomad_joint /src/stub/gnomad-joint.zip \
+                --gene_models /src/stub/gene-models \
+                --vep_container stub \
                 --tools_container stub \
                 "$@"
           }
@@ -165,14 +170,15 @@ jobs:
           sources=(-params-file /src/stub/family-sources.params.yaml)
           family_run "${sources[@]}" "${annotator[@]}" --families /src/stub/families.csv
           # Published files are symlinks into the container's work directory, so their names are checked. The union,
-          # its tables and its values from the echtvar archives and from the joined files go under annotation-unions/
-          # into a folder that names the tables' version, the Annotator's output into one beside it that names the
-          # catalog alone, and each family's tables under annotations/<family>/, with the table of its runs of
-          # homozygosity among them. tests/test_contract.py holds the three folders to the contract's.
+          # its tables, its values from the echtvar archives and from the joined files and its table of VEP's plugins
+          # go under annotation-unions/ into a folder that names the tables' version, the Annotator's output into one
+          # beside it that names the catalog alone, and each family's tables under annotations/<family>/, with the
+          # table of its runs of homozygosity among them. tests/test_contract.py holds the three folders to the
+          # contract's.
           results=results
           union=annotation-unions/stub-group/tables-0.5.0-illumina-202610
           annotation=annotation-unions/stub-group/illumina-202610
-          for f in "${union}"/{stub-group.vcf.gz,stub-group.vcf.gz.tbi,tables,echtvar_values,joined_values} \
+          for f in "${union}"/{stub-group.vcf.gz,stub-group.vcf.gz.tbi,tables,echtvar_values,joined_values,vep_plugins} \
             "${annotation}"/{run.json,stub-group.annotate.log,out/stub-group.json.gz} \
             annotations/fam-{a,b}/tables-0.5.0-illumina-202610/{variants,transcripts,roh}.parquet \
             annotations/fam-{a,b}/tables-0.5.0-illumina-202610/manifest.json; do
@@ -199,25 +205,29 @@ jobs:
             echo "the Annotator's output is published under the tables' version" >&2
             exit 1
           fi
-          # A second run into the same folder replaces the union's tables, archive values and joined values, which
-          # are folders: each link then leads into the second run's work directory. The stubs give the folders a fixed
-          # time, so that Nextflow cannot tell the second run's from the first's, as it cannot in a bucket.
+          # A second run into the same folder replaces the union's tables, archive values, joined values and table of
+          # VEP's plugins, which are folders: each link then leads into the second run's work directory. The stubs
+          # give the folders a fixed time, so that Nextflow cannot tell the second run's from the first's, as it
+          # cannot in a bucket.
           first_tables=$(readlink "${results}/${union}/tables")
           first_values=$(readlink "${results}/${union}/echtvar_values")
           first_joined=$(readlink "${results}/${union}/joined_values")
+          first_plugins=$(readlink "${results}/${union}/vep_plugins")
           family_run "${sources[@]}" "${annotator[@]}" --families /src/stub/families.csv
           if [[ $(readlink "${results}/${union}/tables") == "${first_tables}" ||
             $(readlink "${results}/${union}/echtvar_values") == "${first_values}" ||
-            $(readlink "${results}/${union}/joined_values") == "${first_joined}" ]]; then
-            echo "a second run left the first run's tables, archive values or joined values published" >&2
+            $(readlink "${results}/${union}/joined_values") == "${first_joined}" ||
+            $(readlink "${results}/${union}/vep_plugins") == "${first_plugins}" ]]; then
+            echo "a second run left the first run's tables, archive values, joined values or table of VEP's plugins published" >&2
             exit 1
           fi
           # Reusing an earlier run's annotation, from the folder that the run published it in, runs no Annotator, and
-          # reads the values from the echtvar archives afresh. Its outputs go to a folder of their own: the first run's belong to
-          # the container's user, which the runner cannot remove.
+          # reads the values from the echtvar archives and runs VEP afresh. Its outputs go to a folder of their own: the
+          # first run's belong to the container's user, which the runner cannot remove.
           family_run --families /src/stub/families.csv --annotated "/src/${results}/${annotation}" \
             --output_dir /src/stub/reuse > reuse.log
-          if grep -q ILLUMINA_ANNOTATE reuse.log || ! grep -q ECHTVAR_VALUES reuse.log; then
+          if grep -q ILLUMINA_ANNOTATE reuse.log || ! grep -q ECHTVAR_VALUES reuse.log ||
+            ! grep -qF 'ANNOTATE_FAMILIES:VEP_PLUGINS (stub-group)' reuse.log; then
             cat reuse.log
             exit 1
           fi
@@ -233,6 +243,7 @@ jobs:
           fi
           test -L stub/reuse/annotations/fam-a/tables-0.5.0-illumina-202610/manifest.json
           test -L "stub/reuse/${union}/echtvar_values"
+          test -L "stub/reuse/${union}/vep_plugins"
           test ! -e "stub/reuse/${annotation}"
           # A run names any of the three archives of AlphaGenome's scores: here all of them, and then the scores alone.
           # The step that reads the archives runs once in each.
@@ -378,6 +389,8 @@ jobs:
           touch stub/reference.fa stub/reference.fa.fai stub/annotated/out/stub-group.json.gz \
             stub/annotated/out/stub-group.sv.json.gz stub/annotated/run.json stub/gnomad-joint.zip \
             stub/alphagenome-avi.zip stub/gencode-polya.gtf.gz stub/strchive.json
+          mkdir -p stub/gene-models
+          touch stub/gene-models/exons.bed stub/gene-models/controls.vcf stub/gene-models/gene-models.json
           # tests/workflows/include/main.nf makes one family's files in the run and gives the family to the workflow.
           # -C gives the run that pipeline's config alone, as the run of a project that includes the workflow has.
           # NXF_ANSI_LOG=false gives the log with one line for each task, as in the step above.
@@ -390,6 +403,7 @@ jobs:
                 --catalog 202610 \
                 --annotation_data /src/stub/illumina-bundle \
                 --gnomad_joint /src/stub/gnomad-joint.zip \
+                --gene_models /src/stub/gene-models \
                 --annotated /src/stub/annotated \
                 "$@"
           }
@@ -403,7 +417,8 @@ jobs:
           # Each of the workflow's processes runs under the workflow's name, and the including pipeline's under its own.
           for task in 'Submitted process > MADE_FAMILY' 'ANNOTATE_FAMILIES:FAMILY_CHECK (fam-c)' \
             'ANNOTATE_FAMILIES:SV_UNION (stub-group)' 'ANNOTATE_FAMILIES:ECHTVAR_VALUES (stub-group)' \
-            'ANNOTATE_FAMILIES:JOINED_VALUES (stub-group)' 'ANNOTATE_FAMILIES:ROH_UPD (fam-c)' \
+            'ANNOTATE_FAMILIES:JOINED_VALUES (stub-group)' 'ANNOTATE_FAMILIES:VEP_PLUGIN_TABLE (stub-group)' \
+            'ANNOTATE_FAMILIES:ROH_UPD (fam-c)' \
             'ANNOTATE_FAMILIES:FAMILY_TABLES (fam-c)'; do
             grep -qF "${task}" included.log || { echo "did not run: ${task}" >&2; cat included.log; exit 1; }
           done
@@ -413,7 +428,7 @@ jobs:
           fi
           # What it publishes lies where a run of family_tables.nf publishes it.
           union=annotation-unions/stub-group/tables-0.5.0-illumina-202610
-          for f in "${union}"/{stub-group.vcf.gz,stub-group.vcf.gz.tbi,tables,echtvar_values,joined_values} \
+          for f in "${union}"/{stub-group.vcf.gz,stub-group.vcf.gz.tbi,tables,echtvar_values,joined_values,vep_plugins} \
             "${union}"/{stub-group.sv.vcf.gz,stub-group.sv.map.parquet,sv_annotation} \
             annotations/fam-c/tables-0.5.0-illumina-202610/{variants,transcripts,roh,sv,sv_transcripts}.parquet \
             annotations/fam-c/tables-0.5.0-illumina-202610/{manifest.json,tables.md}; do
@@ -459,7 +474,7 @@ jobs:
   family-tables:
     # Runs the family tables' processes for real on invented families, wired as family_tables.nf wires them, and checks
     # their output (tests/workflows/family_tables.nf). The case-annotation, echtvar and upd steps run in the tools
-    # image, built from this commit.
+    # image, and the step that runs Ensembl VEP in the VEP image, both built from this commit.
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -468,6 +483,7 @@ jobs:
       - name: The family tables' processes on invented families
         run: |
           docker build -f containers/tools/Dockerfile -t case-annotation-tools-test .
+          docker build -t case-annotation-vep-test containers/vep
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "${PWD}:${PWD}" -w "${PWD}" \
             nextflow/nextflow:26.04.7@sha256:08a3a53e8fd317b22711b6fbabb268678b91b023b39099da2b902261515f438e \
             nextflow -C tests/workflows/nextflow.config run tests/workflows/family_tables.nf

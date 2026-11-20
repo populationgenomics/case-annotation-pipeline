@@ -159,6 +159,8 @@ def _family_tables_workflow() -> dict[str, Any]:
             _param(strchive.NAME, 'Path'),
             _param(release, 'String', pattern=NAME),
             _param(release_date, 'String', pattern=DATE),
+            _param('gene_models', 'Path', required=True),
+            _param('vep_container', 'String', required=True),
             _param('tools_container', 'String', required=True),
             _param('output_dir', 'String'),
             _param('arGuid', 'String'),

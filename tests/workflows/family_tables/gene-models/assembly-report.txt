@@ -1,0 +1,29 @@
+# Assembly name:  invented
+# Description:    An invented assembly report, in the layout of NCBI's, for the tests in tests/workflows
+# Sequence-Name	Sequence-Role	Assigned-Molecule	Assigned-Molecule-Location/Type	GenBank-Accn	Relationship	RefSeq-Accn	Assembly-Unit	Sequence-Length	UCSC-style-name
+1	assembled-molecule	1	Chromosome	INVGB01.1	=	INV_000001.1	Primary Assembly	600	chr1
+2	assembled-molecule	2	Chromosome	INVGB02.1	=	INV_000002.1	Primary Assembly	600	chr2
+3	assembled-molecule	3	Chromosome	INVGB03.1	=	INV_000003.1	Primary Assembly	600	chr3
+4	assembled-molecule	4	Chromosome	INVGB04.1	=	INV_000004.1	Primary Assembly	600	chr4
+5	assembled-molecule	5	Chromosome	INVGB05.1	=	INV_000005.1	Primary Assembly	600	chr5
+6	assembled-molecule	6	Chromosome	INVGB06.1	=	INV_000006.1	Primary Assembly	600	chr6
+7	assembled-molecule	7	Chromosome	INVGB07.1	=	INV_000007.1	Primary Assembly	600	chr7
+8	assembled-molecule	8	Chromosome	INVGB08.1	=	INV_000008.1	Primary Assembly	600	chr8
+9	assembled-molecule	9	Chromosome	INVGB09.1	=	INV_000009.1	Primary Assembly	600	chr9
+10	assembled-molecule	10	Chromosome	INVGB10.1	=	INV_000010.1	Primary Assembly	600	chr10
+11	assembled-molecule	11	Chromosome	INVGB11.1	=	INV_000011.1	Primary Assembly	600	chr11
+12	assembled-molecule	12	Chromosome	INVGB12.1	=	INV_000012.1	Primary Assembly	600	chr12
+13	assembled-molecule	13	Chromosome	INVGB13.1	=	INV_000013.1	Primary Assembly	600	chr13
+14	assembled-molecule	14	Chromosome	INVGB14.1	=	INV_000014.1	Primary Assembly	600	chr14
+15	assembled-molecule	15	Chromosome	INVGB15.1	=	INV_000015.1	Primary Assembly	600	chr15
+16	assembled-molecule	16	Chromosome	INVGB16.1	=	INV_000016.1	Primary Assembly	600	chr16
+17	assembled-molecule	17	Chromosome	INVGB17.1	=	INV_000017.1	Primary Assembly	600	chr17
+18	assembled-molecule	18	Chromosome	INVGB18.1	=	INV_000018.1	Primary Assembly	600	chr18
+19	assembled-molecule	19	Chromosome	INVGB19.1	=	INV_000019.1	Primary Assembly	600	chr19
+20	assembled-molecule	20	Chromosome	INVGB20.1	=	INV_000020.1	Primary Assembly	600	chr20
+21	assembled-molecule	21	Chromosome	INVGB21.1	=	INV_000021.1	Primary Assembly	600	chr21
+22	assembled-molecule	22	Chromosome	INVGB22.1	=	INV_000022.1	Primary Assembly	600	chr22
+X	assembled-molecule	X	Chromosome	INVGB23.1	=	INV_000023.1	Primary Assembly	600	chrX
+Y	assembled-molecule	Y	Chromosome	INVGB24.1	=	INV_000024.1	Primary Assembly	600	chrY
+MT	assembled-molecule	MT	Mitochondrion	INVGB25.1	=	INV_000025.1	Primary Assembly	600	chrM
+INVUN1	unplaced-scaffold	na	na	INVGB99.1	=	INV_000099.1	Primary Assembly	100	chrUn_test

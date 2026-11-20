@@ -1,0 +1,17 @@
+##gff-version 3
+##sequence-region   1 1 600
+#!genome-build Invented reference of the tests in tests/workflows
+#!genebuild-last-updated 2099-01
+1	invented	gene	70	580	.	+	.	ID=gene:ENSG01;Name=GENEA;biotype=protein_coding;description=an invented gene;gene_id=ENSG01;version=1
+1	invented	mRNA	70	580	.	+	.	ID=transcript:ENST01;Parent=gene:ENSG01;Name=GENEA-201;biotype=protein_coding;transcript_id=ENST01;version=1
+1	invented	five_prime_UTR	70	180	.	+	.	Parent=transcript:ENST01
+1	invented	five_prime_UTR	193	210	.	+	.	Parent=transcript:ENST01
+1	invented	exon	70	180	.	+	.	Parent=transcript:ENST01;Name=ENSE01;exon_id=ENSE01;rank=1;version=1
+1	invented	exon	193	260	.	+	.	Parent=transcript:ENST01;Name=ENSE02;exon_id=ENSE02;rank=2;version=1
+1	invented	exon	290	480	.	+	.	Parent=transcript:ENST01;Name=ENSE03;exon_id=ENSE03;rank=3;version=1
+1	invented	exon	510	580	.	+	.	Parent=transcript:ENST01;Name=ENSE04;exon_id=ENSE04;rank=4;version=1
+1	invented	CDS	211	260	.	+	0	ID=CDS:ENSP01;Parent=transcript:ENST01;protein_id=ENSP01
+1	invented	CDS	290	480	.	+	1	ID=CDS:ENSP01;Parent=transcript:ENST01;protein_id=ENSP01
+1	invented	CDS	510	559	.	+	2	ID=CDS:ENSP01;Parent=transcript:ENST01;protein_id=ENSP01
+1	invented	three_prime_UTR	560	580	.	+	.	Parent=transcript:ENST01
+###

@@ -1,11 +1,12 @@
 // Writes the family tables (docs/annotation.md) of the families that share one source selection: each family's VCF is
 // normalised, the union of their sites is annotated once with Illumina's Annotator and converted into tables, the
 // union's values from echtvar archives are read (gnomAD's joint values, and AlphaGenome's scores where the run names
-// their archives), the public files that the run names are joined to the union's alleles, and each family's tables are
-// cut from all three. Each family's runs of homozygosity and regions of uniparental disomy come from its own VCF, which
-// two published tools read with gnomAD's frequencies from the same archive. The union and what annotates it reveal
-// every family's alleles, so they are published under annotation-unions/<group>/ and never
-// beside a family's tables, which go to annotations/<family>/. The Annotator's output has a folder of its own there,
+// their archives), the public files that the run names are joined to the union's alleles, two plugins of Ensembl VEP
+// annotate the union's alleles in exons, and each family's tables are cut from the union's. Each family's runs of
+// homozygosity and regions of uniparental disomy come from its own VCF, which two published tools read with gnomAD's
+// frequencies from the same archive. The union and what annotates it reveal every family's alleles, so they are
+// published under annotation-unions/<group>/ and never beside a family's tables, which go to
+// annotations/<family>/. The Annotator's output has a folder of its own there,
 // which a later run can reuse in place of annotating again. A family whose row also names VCFs of its larger variants
 // (its structural variants, its copy-number segments or its members' repeats) gets tables of those too. The structural
 // variants and copy-number segments of the group's families go the same way as their alleles: the union of their sites
@@ -18,7 +19,7 @@
 // Including the workflow in another pipeline). The entry workflow reads the families from a sheet and the settings
 // from params, and publishes what ANNOTATE_FAMILIES emits.
 
-include { FAMILY_CHECK ; NORMALISE_FAMILY ; NORMALISE_SV ; UNION_SITES ; SV_SITES ; SV_UNION ; ECHTVAR_VALUES ; JOINED_VALUES ; ANNOTATION_TABLES ; SV_ANNOTATION_TABLES ; ROH_UPD ; FAMILY_TABLES ; groupAnnotation ; svName ; svGroup } from './modules/family_tables'
+include { FAMILY_CHECK ; NORMALISE_FAMILY ; NORMALISE_SV ; UNION_SITES ; SV_SITES ; SV_UNION ; ECHTVAR_VALUES ; JOINED_VALUES ; VEP_SITES ; VEP_PLUGINS ; VEP_PLUGIN_TABLE ; ANNOTATION_TABLES ; SV_ANNOTATION_TABLES ; ROH_UPD ; FAMILY_TABLES ; groupAnnotation ; svName ; svGroup } from './modules/family_tables'
 include { ILLUMINA_ANNOTATE } from './modules/annotator'
 include { ILLUMINA_ANNOTATE as ILLUMINA_ANNOTATE_SV } from './modules/annotator'
 
@@ -83,6 +84,11 @@ params {
     strchive: Path?
     strchive_release: String?
     strchive_release_date: String?
+    // The folder of gene models that `case-annotation gene-models` prepared from Ensembl's and NCBI's public files
+    // (docs/annotation.md): VEP builds its transcripts from them, and reads them afresh in every run. The image that
+    // holds VEP with the UTRannotator plugin (containers/vep) runs that one step.
+    gene_models: Path
+    vep_container: String
     tools_container: String
     output_dir: String?
     arGuid: String?
@@ -158,7 +164,7 @@ workflow ANNOTATE_FAMILIES {
         error("ANNOTATE_FAMILIES takes the settings ${settingNames().join(', ')}, and was given ${settings.keySet().join(', ')}")
     }
     // The settings that the entry workflow's params require of every run or give a default.
-    ['group', 'reference', 'catalog', 'annotation_data', 'sources', 'workers', 'gnomad_joint'].each { name ->
+    ['group', 'reference', 'catalog', 'annotation_data', 'sources', 'workers', 'gnomad_joint', 'gene_models'].each { name ->
         if (settings[name] == null) {
             error("ANNOTATE_FAMILIES: the setting ${name} is null, and every run needs a value of it")
         }
@@ -258,6 +264,10 @@ workflow ANNOTATE_FAMILIES {
         settings.mcr ?: [],
         settings.mpc ?: [],
     )
+    // VEP reads the union's alleles in the exons of the prepared gene models, with their positive controls.
+    vep_sites = VEP_SITES(union, settings.gene_models.resolve('exons.bed'), settings.gene_models.resolve('controls.vcf'))
+    vep = VEP_PLUGINS(vep_sites, reference, settings.gene_models)
+    vep_plugins = VEP_PLUGIN_TABLE(vep_sites, vep, settings.gene_models.resolve('gene-models.json'))
 
     if (settings.annotated != null) {
         def reused = settings.annotated.resolve("out/${settings.group}.json.gz")
@@ -341,7 +351,7 @@ workflow ANNOTATE_FAMILIES {
     sv_published = annotates_sv ? sv_union.union.map { _group, vcf, index -> [vcf, index] }.flatten().mix(sv_tables, sv_map) : channel.empty()
 
     emit:
-    union = union.map { _group, vcf, index -> [vcf, index] }.flatten().mix(tables, archive_values, joined_values, sv_published)
+    union = union.map { _group, vcf, index -> [vcf, index] }.flatten().mix(tables, archive_values, joined_values, vep_plugins, sv_published)
     annotator = annotator
     family_tables = written.map { family, variants, transcripts, roh, manifest, notes, larger ->
         [family: family, files: [variants, transcripts, roh, manifest, notes] + larger]
@@ -349,7 +359,8 @@ workflow ANNOTATE_FAMILIES {
 }
 
 // A family's tables go under the family's id; the folder names the tables' version and the catalog.
-// The union's tables and its values from the echtvar archives and from the joined files are folders. Nextflow's default replaces a published file whose
+// The union's tables, its values from the echtvar archives and from the joined files and its table of VEP's plugins are
+// folders. Nextflow's default replaces a published file whose
 // size or time differs, and compares a folder by its own, which an object store gives every folder alike: a run
 // into a folder that an earlier run wrote would keep that run's tables beside the families' new ones. The union is
 // therefore always replaced, which removes an earlier folder whole and leaves none of its parts among the new ones.
@@ -403,7 +414,7 @@ def pipelineVersion() {
 
 // The settings of ANNOTATE_FAMILIES, each of which the entry workflow takes as the param of the same name.
 def settingNames() {
-    return ['group', 'reference', 'catalog', 'annotation_data', 'sources', 'workers', 'annotator', 'annotator_version', 'license_secret', 'annotated', 'gnomad_joint', 'alphagenome_avi', 'alphagenome_avi_breakdown', 'alphagenome_splicing', 'gnomad_mito', 'mitotip', 'gencode_polya', 'aparent2', 'genomic_constraint', 'mcr', 'mpc', 'strchive', 'strchive_release', 'strchive_release_date']
+    return ['group', 'reference', 'catalog', 'annotation_data', 'sources', 'workers', 'annotator', 'annotator_version', 'license_secret', 'annotated', 'gnomad_joint', 'alphagenome_avi', 'alphagenome_avi_breakdown', 'alphagenome_splicing', 'gnomad_mito', 'mitotip', 'gencode_polya', 'aparent2', 'genomic_constraint', 'mcr', 'mpc', 'strchive', 'strchive_release', 'strchive_release_date', 'gene_models']
 }
 
 // The columns of the families sheet: four that every sheet has, and the optional ones of the larger variants.

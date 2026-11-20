@@ -1,0 +1,15 @@
+##gff-version 3
+#!gff-spec-version 1.21
+#!genome-build Invented reference of the tests in tests/workflows
+#!annotation-source Invented gene models of the tests in tests/workflows
+##sequence-region INV_000001.1 1 600
+INV_000001.1	invented	region	1	600	.	+	.	ID=INV_000001.1:1..600;Name=1;chromosome=1;gbkey=Src;genome=chromosome;mol_type=genomic DNA
+INV_000001.1	invented	gene	70	580	.	+	.	ID=gene-GENEA;Dbxref=GeneID:90001;Name=GENEA;description=an invented gene;gbkey=Gene;gene=GENEA;gene_biotype=protein_coding
+INV_000001.1	invented	mRNA	70	580	.	+	.	ID=rna-NM_01.1;Parent=gene-GENEA;Name=NM_01.1;Dbxref=GeneID:90001,GenBank:NM_01.1;gbkey=mRNA;gene=GENEA;product=an invented gene;transcript_id=NM_01.1
+INV_000001.1	invented	exon	70	180	.	+	.	ID=exon-NM_01.1-1;Parent=rna-NM_01.1;Dbxref=GeneID:90001,GenBank:NM_01.1;gbkey=mRNA;gene=GENEA;product=an invented gene;transcript_id=NM_01.1
+INV_000001.1	invented	exon	193	260	.	+	.	ID=exon-NM_01.1-2;Parent=rna-NM_01.1;Dbxref=GeneID:90001,GenBank:NM_01.1;gbkey=mRNA;gene=GENEA;product=an invented gene;transcript_id=NM_01.1
+INV_000001.1	invented	exon	290	480	.	+	.	ID=exon-NM_01.1-3;Parent=rna-NM_01.1;Dbxref=GeneID:90001,GenBank:NM_01.1;gbkey=mRNA;gene=GENEA;product=an invented gene;transcript_id=NM_01.1
+INV_000001.1	invented	exon	510	580	.	+	.	ID=exon-NM_01.1-4;Parent=rna-NM_01.1;Dbxref=GeneID:90001,GenBank:NM_01.1;gbkey=mRNA;gene=GENEA;product=an invented gene;transcript_id=NM_01.1
+INV_000001.1	invented	CDS	211	260	.	+	0	ID=cds-NP_01.1;Parent=rna-NM_01.1;Dbxref=GeneID:90001,GenBank:NP_01.1;Name=NP_01.1;gbkey=CDS;gene=GENEA;product=an invented protein;protein_id=NP_01.1
+INV_000001.1	invented	CDS	290	480	.	+	1	ID=cds-NP_01.1;Parent=rna-NM_01.1;Dbxref=GeneID:90001,GenBank:NP_01.1;Name=NP_01.1;gbkey=CDS;gene=GENEA;product=an invented protein;protein_id=NP_01.1
+INV_000001.1	invented	CDS	510	559	.	+	2	ID=cds-NP_01.1;Parent=rna-NM_01.1;Dbxref=GeneID:90001,GenBank:NP_01.1;Name=NP_01.1;gbkey=CDS;gene=GENEA;product=an invented protein;protein_id=NP_01.1
