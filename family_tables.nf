@@ -2,7 +2,7 @@
 // normalised, the union of their sites is annotated once with Illumina's Annotator and converted into tables, the
 // union's values from echtvar archives are read (gnomAD's joint values, and AlphaGenome's scores where the run names
 // their archives), the public files that the run names are joined to the union's alleles, two plugins of Ensembl VEP
-// annotate the union's alleles in exons, and each family's tables are cut from the union's. Each family's runs of
+// annotate the union's alleles in exons, and each family's tables are cut from all four. Each family's runs of
 // homozygosity and regions of uniparental disomy come from its own VCF, which two published tools read with gnomAD's
 // frequencies from the same archive. The union and what annotates it reveal every family's alleles, so they are
 // published under annotation-unions/<group>/ and never beside a family's tables, which go to
@@ -347,6 +347,7 @@ workflow ANNOTATE_FAMILIES {
         tables,
         archive_values,
         joined_values,
+        vep_plugins,
         sv_tables,
         sv_map,
         settings.strchive ?: [],

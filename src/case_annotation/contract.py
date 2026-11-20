@@ -22,10 +22,12 @@ from case_annotation import (
     annotation_tables,
     echtvar_values,
     family_tables,
+    gene_models,
     joined_values,
     pedigree,
     roh_upd,
     strchive,
+    vep_plugins,
 )
 
 # A family's id, a sample's, a group's and a catalog's: each names files and folders and goes into command lines.
@@ -400,6 +402,44 @@ def _example_annotation() -> annotation_tables.AnnotationInfo:
     )
 
 
+def _example_plugins() -> family_tables.VepPlugins:
+    """The run of VEP's plugins of the example manifest: invented files, checksums and counts."""
+
+    def recorded(name: str, size: int, digit: str) -> vep_plugins.FileRecord:
+        return vep_plugins.FileRecord(name=name, bytes=size, sha256=digit * 64)
+
+    public = {'Ensembl': 'invented-ensembl.gff3.gz', 'RefSeq': 'invented-refseq.gff.gz'}
+    models = tuple(
+        vep_plugins.GeneModelAnnotated(
+            source=source,
+            file=recorded(gene_models.FILES[source], 90_000_000 + number, 'c'),
+            prepared_from=gene_models.PublicFile(
+                name=public[source], bytes=80_000_000 + number, sha256='d' * 64, stated=('#!invented release 1',)
+            ),
+        )
+        for number, source in enumerate(gene_models.FILES, start=1)
+    )
+    run = vep_plugins.VepPluginsInfo(
+        vep_version='116.3',
+        utrannotator_commit='0' * 40,
+        uorf_evidence=recorded('invented-uorfs.txt', 2_000_000, 'e'),
+        nmd_plugin=recorded('NMD.pm', 5_000, 'b'),
+        options=('--gff', '--fasta', '--synonyms', '--json', '--safe', '--transcript_version'),
+        environment=('PERL_HASH_SEED=0', 'PERL_PERTURB_KEYS=0'),
+        gene_models=models,
+    )
+    matching = tuple(
+        family_tables.PluginMatching(
+            source=source,
+            rows_without_transcript=30 * number,
+            rows_of_other_ids=number - 1,
+            utr5_transcripts_without_values=20 * number,
+        )
+        for number, source in enumerate(gene_models.FILES, start=1)
+    )
+    return family_tables.VepPlugins(run=run, matching=matching)
+
+
 def example_manifest() -> family_tables.FamilyManifest:
     """An invented manifest: a trio with the tables of its larger variants.
 
@@ -485,6 +525,7 @@ def example_manifest() -> family_tables.FamilyManifest:
                 (joined_values.MCR, 'mcr.invented.tsv', 3_500_000, 'd'),
             )
         ),
+        vep_plugins=_example_plugins(),
         omitted_columns=tuple(
             column
             for source in ('dbSNP', 'alphagenome_avi_breakdown', 'mitotip', 'aparent2', 'genomic_constraint', 'mpc')

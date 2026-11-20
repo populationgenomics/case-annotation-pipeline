@@ -233,6 +233,7 @@ workflow {
         tables,
         joint,
         joined,
+        vep_plugins,
         sv_tables,
         sv_union.map,
         file("${fixture}/strchive.json"),
@@ -768,6 +769,12 @@ process INVENTED_ALPHAGENOME_ARCHIVE {
 // raw score and 0.048, as the invented tables have them. The two deletions and the alleles at positions without a row
 // have none, and the alleles at chr1:200 and on chrX those of some archives. The manifest and the table's metadata
 // record each archive, the two that are not for permissive use with their notice.
+// Each row of transcripts has what VEP's plugins say of its allele on the invented transcript, which both the invented
+// annotation and Ensembl's layout of the invented gene models call ENST01.1: the counts of the 5' UTR's reading frames
+// for the three alleles in the UTR, the record of a gained stop for chr1-200-G-A, the NMD plugin's false for the
+// frameshift, and nothing for the alleles that no plugin evaluated. The allele's row of variants has the kind of the
+// effect. The manifest counts the plugins' four rows on the RefSeq transcript, which the invented annotation lacks, and
+// holds the record of the run.
 process CHECK_TABLES {
     input:
     tuple val(family), path(variants), path(transcripts), path(manifest), path(notes)
@@ -910,6 +917,30 @@ for name in ('alphagenome_avi', 'alphagenome_avi_breakdown', 'alphagenome_splici
 notice = 'By using this information, you agree to AlphaGenome Output Terms of Use found at '
 assert manifest['alphagenome_splicing']['terms'].startswith(notice), manifest
 assert not set(added) & set(manifest['omitted_columns']), manifest
+assert variants.column_names[-6] == 'utr5_consequences', variants.column_names
+kinds = {r['variant_id']: r['utr5_consequences'] for r in variants.to_pylist() if r['utr5_consequences']}
+assert kinds == {'chr1-200-G-A': ['uSTOP_gained']}, kinds
+plugins = ('utr5_consequences', 'utr5_uorfs', 'utr5_existing_uorfs', 'utr5_existing_oorfs_out_of_frame',
+           'utr5_existing_oorfs_in_frame', 'nmd_escaping')
+assert transcripts.column_names[-6:] == list(plugins), transcripts.column_names
+said = {r['variant_id']: tuple(r[c] for c in plugins) for r in transcripts.to_pylist()
+        if any(r[c] is not None for c in plugins)}
+assert set(said) == {'chr1-100-G-A', 'chr1-100-G-C', 'chr1-200-G-A', 'chr1-400-TCA-T'}, said
+assert said['chr1-100-G-A'] == said['chr1-100-G-C'] == (None, None, 0, 0, 1, None), said
+assert said['chr1-400-TCA-T'] == (None, None, None, None, None, False), said
+gained = said['chr1-200-G-A']
+assert (gained[0], gained[2:]) == (['uSTOP_gained'], (0, 0, 1, None)), gained
+(record,) = gained[1]
+assert (record['consequence'], record['ref_type'], record['new_stop_distance_to_cds'], record['evidence']) == (
+    'uSTOP_gained', 'InFrame_oORF', 12, False), record
+assert record['type'] is None and record['distance_to_cds'] is None, record
+ran = manifest['vep_plugins']
+assert ran['run']['vep_version'] == '116.3', ran
+assert ran['matching'] == [
+    {'source': 'Ensembl', 'rows_without_transcript': 0, 'rows_of_other_ids': 0, 'utr5_transcripts_without_values': 0},
+    {'source': 'RefSeq', 'rows_without_transcript': 4, 'rows_of_other_ids': 0, 'utr5_transcripts_without_values': 0},
+], ran
+assert json.loads(variants.schema.metadata[b'vep_plugins']) == ran['run'], variants.schema.metadata
 EOF
     """
 }
@@ -962,7 +993,7 @@ added = ('gencode_polya_signal', 'aparent2_min', 'aparent2_max', 'aparent2_ref_u
          'mcr_oe_min', 'mpc_max')
 at = variants.column_names.index('alphagenome_splicing')
 assert tuple(variants.column_names[at + 1:at + 1 + len(added)]) == added, variants.column_names
-assert variants.column_names[at + 1 + len(added)] == 'qual', variants.column_names
+assert variants.column_names[at + 1 + len(added)] == 'utr5_consequences', variants.column_names
 kinds = [variants.schema.field(c).type for c in added]
 assert kinds == [pa.bool_()] + [pa.float32()] * 6, kinds
 assert not variants.schema.field('gencode_polya_signal').nullable, variants.schema
@@ -982,7 +1013,8 @@ assert rows == {
 }, rows
 transcripts = pq.read_table('${transcripts}')
 by_transcript = ('mcr_oe', 'mcr_regions', 'mcr_oe_p', 'mcr_high_coverage', 'mpc')
-assert tuple(transcripts.column_names[-len(by_transcript):]) == by_transcript, transcripts.column_names
+plugins = transcripts.column_names.index('utr5_consequences')
+assert tuple(transcripts.column_names[plugins - len(by_transcript):plugins]) == by_transcript, transcripts.column_names
 kinds = [transcripts.schema.field(c).type for c in by_transcript]
 assert kinds == [pa.float32(), pa.int32(), pa.float64(), pa.bool_(), pa.float32()], kinds
 held = {(r['variant_id'], r['transcript_id']): tuple(r[c] for c in by_transcript) for r in transcripts.to_pylist()}

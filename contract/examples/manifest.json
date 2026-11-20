@@ -259,6 +259,82 @@
       "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
     }
   ],
+  "vep_plugins": {
+    "run": {
+      "vep_version": "116.3",
+      "utrannotator_commit": "0000000000000000000000000000000000000000",
+      "uorf_evidence": {
+        "name": "invented-uorfs.txt",
+        "bytes": 2000000,
+        "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "nmd_plugin": {
+        "name": "NMD.pm",
+        "bytes": 5000,
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "options": [
+        "--gff",
+        "--fasta",
+        "--synonyms",
+        "--json",
+        "--safe",
+        "--transcript_version"
+      ],
+      "environment": [
+        "PERL_HASH_SEED=0",
+        "PERL_PERTURB_KEYS=0"
+      ],
+      "gene_models": [
+        {
+          "source": "Ensembl",
+          "file": {
+            "name": "ensembl.gff3.gz",
+            "bytes": 90000001,
+            "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          "prepared_from": {
+            "name": "invented-ensembl.gff3.gz",
+            "bytes": 80000001,
+            "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "stated": [
+              "#!invented release 1"
+            ]
+          }
+        },
+        {
+          "source": "RefSeq",
+          "file": {
+            "name": "refseq.gff.gz",
+            "bytes": 90000002,
+            "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          "prepared_from": {
+            "name": "invented-refseq.gff.gz",
+            "bytes": 80000002,
+            "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "stated": [
+              "#!invented release 1"
+            ]
+          }
+        }
+      ]
+    },
+    "matching": [
+      {
+        "source": "Ensembl",
+        "rows_without_transcript": 30,
+        "rows_of_other_ids": 0,
+        "utr5_transcripts_without_values": 20
+      },
+      {
+        "source": "RefSeq",
+        "rows_without_transcript": 60,
+        "rows_of_other_ids": 1,
+        "utr5_transcripts_without_values": 40
+      }
+    ]
+  },
   "omitted_columns": [
     "rsids",
     "avi_shap_splicing",

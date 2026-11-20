@@ -240,7 +240,8 @@ def test_an_empty_proband_reaches_the_tools_as_no_proband() -> None:
         assert f'case-annotation {stated}' in FAMILY_MODULES
         options = ['--family', 'f', '--ped', 'p', '--vcf', 'v', '--no-proband', '--pipeline-version', 'p']
         if command == 'family-tables':
-            options += ['--annotation', 'a', '--echtvar-values', 'e', '--joined-values', 'j', '--roh-upd', 'r']
+            options += ['--annotation', 'a', '--echtvar-values', 'e', '--joined-values', 'j', '--vep-plugins', 'v']
+            options += ['--roh-upd', 'r']
             options += ['--schema-version', 's', '--output', 'o']
         assert cli.parser().parse_args([command, *options]).proband is None
 

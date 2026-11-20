@@ -1375,6 +1375,15 @@
           "source": "mpc"
         },
         {
+          "name": "utr5_consequences",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        {
           "name": "qual",
           "type": "float64",
           "nullable": true
@@ -1735,6 +1744,131 @@
           "type": "float32",
           "nullable": true,
           "source": "mpc"
+        },
+        {
+          "name": "utr5_consequences",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        {
+          "name": "utr5_uorfs",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "struct",
+            "nullable": true,
+            "fields": [
+              {
+                "name": "consequence",
+                "type": "string",
+                "nullable": false
+              },
+              {
+                "name": "type",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "ref_type",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "alt_type",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "kozak_context",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "kozak_strength",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "cap_distance_to_start",
+                "type": "int32",
+                "nullable": true
+              },
+              {
+                "name": "distance_to_cds",
+                "type": "int32",
+                "nullable": true
+              },
+              {
+                "name": "distance_to_stop",
+                "type": "int32",
+                "nullable": true
+              },
+              {
+                "name": "ref_start_distance_to_cds",
+                "type": "int32",
+                "nullable": true
+              },
+              {
+                "name": "new_stop_distance_to_cds",
+                "type": "int32",
+                "nullable": true
+              },
+              {
+                "name": "alt_stop",
+                "type": "bool",
+                "nullable": true
+              },
+              {
+                "name": "alt_stop_distance_to_cds",
+                "type": "int32",
+                "nullable": true
+              },
+              {
+                "name": "frame_with_cds",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "ref_type_length",
+                "type": "int32",
+                "nullable": true
+              },
+              {
+                "name": "alt_type_length",
+                "type": "int32",
+                "nullable": true
+              },
+              {
+                "name": "evidence",
+                "type": "bool",
+                "nullable": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "utr5_existing_uorfs",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "utr5_existing_oorfs_out_of_frame",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "utr5_existing_oorfs_in_frame",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "nmd_escaping",
+          "type": "bool",
+          "nullable": true
         }
       ]
     },

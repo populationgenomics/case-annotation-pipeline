@@ -408,6 +408,7 @@ def _family_tables_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--annotation', type=path, required=True, help="annotation-tables' output folder of the union")
     parser.add_argument('--echtvar-values', type=path, required=True, help="echtvar-values' output folder of the union")
     parser.add_argument('--joined-values', type=path, required=True, help="joined-values' output folder of the union")
+    parser.add_argument('--vep-plugins', type=path, required=True, help="vep-plugins' output folder of the union")
     parser.add_argument(
         '--roh-upd',
         type=path,
@@ -462,6 +463,7 @@ def _family_tables(args: argparse.Namespace) -> None:
         args.annotation,
         args.echtvar_values,
         args.joined_values,
+        args.vep_plugins,
         args.output,
         proband=args.proband,
         structural=_structural(args),
@@ -771,8 +773,9 @@ _SUBCOMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Ca
     'family-tables': (
         (
             "writes a family's variants table, with a column of each member's calls, and its transcripts table from "
-            "its VCF and the union's tables, its sv, sv_transcripts and repeats tables from the VCFs of its "
-            "structural variants, copy numbers and repeats where it has them, with the annotation of the group's "
+            "its VCF and the union's tables, with what VEP's plugins say of each transcript, its sv, sv_transcripts "
+            'and repeats tables from the VCFs of its structural variants, copy numbers and repeats where it has '
+            "them, with the annotation of the group's "
             "structural variants and, where the run gives a release of STRchive, STRchive's size ranges of the "
             'repeats, its roh table and, for a family with a child whose parents are both sequenced, its upd table '
             "from roh-upd's output, its manifest with the roles of the proband the run names and of its parents, and "
