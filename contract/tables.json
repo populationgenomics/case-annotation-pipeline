@@ -1375,6 +1375,95 @@
           "source": "mpc"
         },
         {
+          "name": "branch_points",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "struct",
+            "nullable": true,
+            "fields": [
+              {
+                "name": "name",
+                "type": "string",
+                "nullable": false
+              },
+              {
+                "name": "pos",
+                "type": "int32",
+                "nullable": false
+              },
+              {
+                "name": "strand",
+                "type": "string",
+                "nullable": false
+              },
+              {
+                "name": "hit",
+                "type": "list",
+                "nullable": false,
+                "element": {
+                  "type": "int8",
+                  "nullable": true
+                }
+              },
+              {
+                "name": "acceptor_offset",
+                "type": "int32",
+                "nullable": true
+              },
+              {
+                "name": "rank",
+                "type": "int32",
+                "nullable": true
+              },
+              {
+                "name": "total",
+                "type": "int32",
+                "nullable": true
+              },
+              {
+                "name": "sources",
+                "type": "list",
+                "nullable": false,
+                "element": {
+                  "type": "string",
+                  "nullable": true
+                }
+              },
+              {
+                "name": "consensus",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "gene",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "transcript_introns",
+                "type": "list",
+                "nullable": true,
+                "element": {
+                  "type": "string",
+                  "nullable": true
+                }
+              },
+              {
+                "name": "intron_type",
+                "type": "string",
+                "nullable": true
+              },
+              {
+                "name": "intron_length",
+                "type": "int32",
+                "nullable": true
+              }
+            ]
+          },
+          "source": "branch_points"
+        },
+        {
           "name": "utr5_consequences",
           "type": "list",
           "nullable": true,

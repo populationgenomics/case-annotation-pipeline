@@ -126,6 +126,11 @@
           "required": false
         },
         {
+          "name": "branch_points",
+          "type": "Path",
+          "required": false
+        },
+        {
           "name": "strchive",
           "type": "Path",
           "required": false

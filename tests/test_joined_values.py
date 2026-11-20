@@ -3,9 +3,10 @@
 Every allele, frequency, feature, window, region, transcript and score here is invented. The files have the layout of
 the public ones: the INFO fields of gnomAD's sites VCF of the mitochondrial genome, the nine fields of GENCODE's GTF of
 polyadenylation features, and the headers of APARENT2's table of effects, of MitoTIP's table of scores and of gnomAD's
-tables of genomic constraint by window, of regions of missense constraint and of MPC scores. The alleles on chrM have a
-REF that is not the reference's sequence at their position, and those on the other chromosomes lie in the first 10,000
-bases, where the reference has no sequence. The transcripts have ids that Ensembl has not given.
+tables of genomic constraint by window, of regions of missense constraint and of MPC scores, and the columns of the
+catalogue of branch points as this package prepares it. The alleles on chrM have a REF that is not the reference's
+sequence at their position, and those on the other chromosomes lie in the first 10,000 bases, where the reference has
+no sequence. The transcripts have ids that Ensembl has not given.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ import pyarrow.parquet as pq
 import pysam
 import pytest
 
-from case_annotation import cli, joined_values
+from case_annotation import branch_points, cli, joined_values
 
 type Allele = tuple[str, int, str, str]
 
@@ -1140,6 +1141,297 @@ def test_an_allele_and_a_transcript_have_one_row_with_the_values_of_both_files(t
     )
 
 
+# ---- the catalogue of branch points ----
+
+type Intron = tuple[str, str, str, int, int, int, int, str]
+
+# The columns of a row of the paper's table by intron: gene, introns, kind and length of the intron, distance to the
+# acceptor, rank, total and consensus.
+_NEAR: Intron = ('INVENTED1', 'ENST01_IVS2', 'major', 900, -24, 1, 2, '1:YTNAY')
+_FAR: Intron = ('INVENTED1', 'ENST02_IVS1,ENST03_IVS1', 'major', 4000, -30, 1, 1, '2:YTNA')
+_MINOR: Intron = ('INVENTED2', 'ENST04_IVS7', 'minor', 85, -19, 2, 3, '0:none')
+
+
+def _catalogued(
+    chrom: str,
+    pos: int,
+    strand: str,
+    kind: str = 'c',
+    base: str = 'A',
+    intron: Intron | None = None,
+    was: int | None = None,
+) -> str:
+    """A row of the prepared catalogue: an invented branch point, which the lift moved from `was` if that is given."""
+    sources = {'m': 'eBP_Invented,cBP_Invented', 'e': 'eBP_Invented', 'c': 'cBP_Invented'}[kind]
+    name, grch37_name = (f'{kind}BP_{chrom}_{at}_{strand}_{base}' for at in (pos, pos if was is None else was))
+    described = [''] * 8 if intron is None else [str(value) for value in intron]
+    return '\t'.join([chrom, str(pos), strand, name, *described, sources, grch37_name])
+
+
+# Invented branch points: one on each strand of chr1, far from the other; two that lie two bases apart, of which the
+# first is in two introns and the second, which is no adenine, in none; and one on chr2.
+_FORWARD = _catalogued('chr1', 1010, '+', 'm', intron=_NEAR, was=1510)
+_REVERSE = _catalogued('chr1', 2000, '-', 'e', intron=_MINOR)
+_BRANCH_POINTS = (
+    _FORWARD,
+    _REVERSE,
+    _catalogued('chr1', 3010, '+', 'm', intron=_FAR),
+    _catalogued('chr1', 3010, '+', 'm', intron=_NEAR),
+    _catalogued('chr1', 3012, '+', base='C'),
+    _catalogued('chr2', 500, '+'),
+)
+_CATALOGUE_HEADER = '\t'.join(branch_points.COLUMNS)
+_PREAMBLE = (f'{branch_points.PREAMBLE}invented branch points', f'{branch_points.PREAMBLE}chain: invented.chain')
+
+
+def _catalogue(
+    path: pathlib.Path,
+    rows: Sequence[str] = _BRANCH_POINTS,
+    header: str = _CATALOGUE_HEADER,
+    before: Sequence[str] = _PREAMBLE,
+) -> pathlib.Path:
+    """A catalogue with the lines that say what it was made from before its header, gzipped where the name says so."""
+    text = ('\n'.join([*before, header, *rows]) + '\n').encode()
+    path.write_bytes(gzip.compress(text) if path.suffix == '.gz' else text)
+    return path
+
+
+def _hits(rows: Mapping[str, Mapping[str, Any]], allele: Allele) -> list[tuple[str, list[int]]] | None:
+    """The branch points of an allele's row with the positions that it changes, or None for an allele without one."""
+    entries = rows[_vid(allele)]['branch_points']
+    return None if entries is None else [(entry['name'], entry['hit']) for entry in entries]
+
+
+# Alleles around the branch point at chr1:1010 of the forward strand, whose three bases are 1008 to 1010, and around
+# the one at chr1:2000 of the reverse strand, whose three bases are 2002 down to 2000: each with the positions among
+# -2, -1 and 0 that it changes, or None where it overlaps none of the three.
+MOTIF_HITS: dict[str, tuple[Allele, list[int] | None]] = {
+    'a change of the branch point': (('chr1', 1010, 'A', 'G'), [0]),
+    'a change of the base before it': (('chr1', 1009, 'A', 'G'), [-1]),
+    'a change of the base two before it': (('chr1', 1008, 'A', 'G'), [-2]),
+    'a change of the base three before it': (('chr1', 1007, 'A', 'G'), None),
+    'a change of the base after it': (('chr1', 1011, 'A', 'G'), None),
+    'a change of two bases that ends at the base two before it': (('chr1', 1007, 'AC', 'GT'), [-2]),
+    'a deletion of the three bases and more': (('chr1', 1000, 'T' * 20, 'T'), [-2, -1, 0]),
+    'a deletion of the branch point and the base after it': (('chr1', 1009, 'TCA', 'T'), [0]),
+    'a deletion that ends before the three bases': (('chr1', 1005, 'TCA', 'T'), None),
+    'a deletion after the branch point, written from its base': (('chr1', 1010, 'AC', 'A'), None),
+    'an insertion between the branch point and the base before it': (('chr1', 1009, 'A', 'ACC'), []),
+    'an insertion between the two bases before it': (('chr1', 1008, 'A', 'AC'), []),
+    'an insertion before the three bases': (('chr1', 1007, 'A', 'AC'), None),
+    'an insertion after the branch point': (('chr1', 1010, 'A', 'AC'), None),
+    'on the reverse strand, a change of the branch point': (('chr1', 2000, 'T', 'C'), [0]),
+    'on the reverse strand, a change of the base before it': (('chr1', 2001, 'T', 'C'), [-1]),
+    'on the reverse strand, a change of the base two before it': (('chr1', 2002, 'T', 'C'), [-2]),
+    'on the reverse strand, a change of the base three before it': (('chr1', 2003, 'T', 'C'), None),
+    'on the reverse strand, a change of the base after it': (('chr1', 1999, 'T', 'C'), None),
+    'on the reverse strand, a deletion of the branch point and the base before it': (
+        ('chr1', 1999, 'TCA', 'T'),
+        [-1, 0],
+    ),
+    'on the reverse strand, an insertion between the branch point and the base after it': (
+        ('chr1', 1999, 'T', 'TC'),
+        None,
+    ),
+    'on the reverse strand, an insertion between the branch point and the base before it': (
+        ('chr1', 2000, 'T', 'TC'),
+        [],
+    ),
+    'a change at its position on a chromosome without one': (('chr3', 1010, 'A', 'G'), None),
+    'an allele on chrM': (('chrM', 1010, 'A', 'G'), None),
+}
+
+
+@pytest.mark.parametrize('name', ['branch-points.tsv.gz', 'branch-points.tsv'])
+def test_an_allele_has_the_branch_point_whose_three_bases_it_changes(tmp_path: pathlib.Path, name: str) -> None:
+    alleles = [allele for allele, _ in MOTIF_HITS.values()]
+    rows = _convert(tmp_path, alleles, {'branch_points': _catalogue(tmp_path / name)})
+    found = {case: _hits(rows, allele) for case, (allele, _) in MOTIF_HITS.items()}
+    assert found == {
+        case: None if hit is None else [('mBP_chr1_1010_+_A' if allele[1] < 1500 else 'eBP_chr1_2000_-_A', hit)]
+        for case, (allele, hit) in MOTIF_HITS.items()
+    }
+    # An allele without a branch point has no list, and an entry holds what the catalogue's row holds.
+    schema = pq.read_schema(tmp_path / 'out' / joined_values.TABLE_NAME)
+    assert schema.field('branch_points') == joined_values.BRANCH_POINTS.fields[0]
+    assert schema.field('branch_points').nullable
+    assert rows['chr1-1010-A-G']['branch_points'] == [
+        {
+            'name': 'mBP_chr1_1010_+_A',
+            'pos': 1010,
+            'strand': '+',
+            'hit': [0],
+            'acceptor_offset': -24,
+            'rank': 1,
+            'total': 2,
+            'sources': ['eBP_Invented', 'cBP_Invented'],
+            'consensus': '1:YTNAY',
+            'gene': 'INVENTED1',
+            'transcript_introns': ['ENST01_IVS2'],
+            'intron_type': 'major',
+            'intron_length': 900,
+        }
+    ]
+
+
+def test_an_allele_has_an_entry_for_each_row_of_each_branch_point_that_it_changes(tmp_path: pathlib.Path) -> None:
+    # Beside the invented ones, a branch point on each strand at one position, and one whose three bases lie over the
+    # end of a stretch of 1,024 bases, which the join looks in.
+    more = [_catalogued('chr2', 500, '-'), _catalogued('chr1', 2049, '+')]
+    alleles: dict[Allele, list[tuple[str, list[int], int | None]] | None] = {
+        # The base of a branch point in two introns, which is the base two before the next branch point: the entries
+        # are in the order of position, and those of one branch point with the nearer acceptor first.
+        ('chr1', 3010, 'A', 'G'): [
+            ('mBP_chr1_3010_+_A', [0], -24),
+            ('mBP_chr1_3010_+_A', [0], -30),
+            ('cBP_chr1_3012_+_C', [-2], None),
+        ],
+        ('chr1', 3012, 'C', 'G'): [('cBP_chr1_3012_+_C', [0], None)],
+        ('chr1', 3009, 'TAAC', 'T'): [
+            ('mBP_chr1_3010_+_A', [0], -24),
+            ('mBP_chr1_3010_+_A', [0], -30),
+            ('cBP_chr1_3012_+_C', [-2, -1, 0], None),
+        ],
+        # The forward strand's entry stands before the reverse strand's.
+        ('chr2', 500, 'A', 'G'): [('cBP_chr2_500_+_A', [0], None), ('cBP_chr2_500_-_A', [0], None)],
+        ('chr2', 502, 'A', 'G'): [('cBP_chr2_500_-_A', [-2], None)],
+        # An allele and three bases that share two stretches give one entry.
+        ('chr1', 2040, 'T' * 20, 'T'): [('cBP_chr1_2049_+_A', [-2, -1, 0], None)],
+        ('chr1', 2048, 'A', 'G'): [('cBP_chr1_2049_+_A', [-1], None)],
+        ('chr1', 2050, 'A', 'G'): None,
+    }
+    file = _catalogue(tmp_path / 'branch-points.tsv', [*_BRANCH_POINTS, *more])
+    rows = _convert(tmp_path, list(alleles), {'branch_points': file})
+    found = {
+        allele: None
+        if (entries := rows[_vid(allele)]['branch_points']) is None
+        else [(entry['name'], entry['hit'], entry['acceptor_offset']) for entry in entries]
+        for allele in alleles
+    }
+    assert found == alleles
+    # The entry of a branch point that the paper gives no intron has its name, its place and its sources alone.
+    (alone,) = rows['chr1-3012-C-G']['branch_points']
+    assert {name for name, value in alone.items() if value is None} == {
+        'acceptor_offset',
+        'rank',
+        'total',
+        'consensus',
+        'gene',
+        'transcript_introns',
+        'intron_type',
+        'intron_length',
+    }
+    assert alone['sources'] == ['cBP_Invented']
+    # An entry gives the introns of one row as a list.
+    assert rows['chr1-3010-A-G']['branch_points'][1]['transcript_introns'] == ['ENST02_IVS1', 'ENST03_IVS1']
+
+
+def test_a_catalogue_is_read_with_and_without_the_lines_before_its_header(tmp_path: pathlib.Path) -> None:
+    alleles = [('chr1', 1010, 'A', 'G')]
+    for number, before in enumerate([(), _PREAMBLE[:1], _PREAMBLE]):
+        folder = tmp_path / str(number)
+        folder.mkdir()
+        rows = _convert(folder, alleles, {'branch_points': _catalogue(folder / 'branch-points.tsv.gz', before=before)})
+        assert _hits(rows, alleles[0]) == [('mBP_chr1_1010_+_A', [0])]
+
+
+def _recatalogued(row: str, **columns: str) -> str:
+    """A row of the catalogue with other text in the columns named."""
+    fields = dict(zip(branch_points.COLUMNS, row.split('\t'), strict=True)) | columns
+    return '\t'.join(fields.values())
+
+
+_REFUSED_ROW = 'rows without chrom, pos, strand, name, gene, .*, sources, grch37_name as a primary chromosome'
+CATALOGUE_REFUSED: dict[str, tuple[dict[str, Any], str]] = {
+    'another header': (
+        {'header': _CATALOGUE_HEADER.replace('acceptor_offset', 'dist_3ss')},
+        r"its header is \['chrom', 'pos', .*'dist_3ss'.*, and the catalogue's is \['chrom', 'pos'",
+    ),
+    'a line before the header that does not start as the others': (
+        {'before': ('# invented',)},
+        r"its header is \['# invented'\], and the catalogue's is",
+    ),
+    'a row of thirteen fields': (
+        {'rows': [_FORWARD.rsplit('\t', 1)[0]]},
+        'not the prepared catalogue of branch points',
+    ),
+    'a chromosome that the tables lack': (
+        {'rows': [_catalogued('chrUn_test', 10, '+')]},
+        _REFUSED_ROW,
+    ),
+    'a position that is no number': (
+        {'rows': [_recatalogued(_FORWARD, pos='1e3', name='mBP_chr1_1e3_+_A')]},
+        _REFUSED_ROW,
+    ),
+    'a strand that is neither': (
+        {'rows': [_recatalogued(_FORWARD, strand='.', name='mBP_chr1_1010_._A')]},
+        _REFUSED_ROW,
+    ),
+    'a name of another position': ({'rows': [_recatalogued(_FORWARD, name='mBP_chr1_1011_+_A')]}, _REFUSED_ROW),
+    'a name of the other strand': ({'rows': [_recatalogued(_FORWARD, name='mBP_chr1_1010_-_A')]}, _REFUSED_ROW),
+    'a name without a kind': ({'rows': [_recatalogued(_FORWARD, name='BP_chr1_1010_+_A')]}, _REFUSED_ROW),
+    'a name whose base is none': ({'rows': [_recatalogued(_FORWARD, name='mBP_chr1_1010_+_N')]}, _REFUSED_ROW),
+    'no name as the paper wrote it': ({'rows': [_recatalogued(_FORWARD, grch37_name='')]}, _REFUSED_ROW),
+    'a name as the paper wrote it of another kind': (
+        {'rows': [_recatalogued(_FORWARD, grch37_name='cBP_chr1_1510_+_A')]},
+        _REFUSED_ROW,
+    ),
+    'a name as the paper wrote it with another base': (
+        {'rows': [_recatalogued(_FORWARD, grch37_name='mBP_chr1_1510_+_C')]},
+        _REFUSED_ROW,
+    ),
+    'sources that are no names of sources': ({'rows': [_recatalogued(_FORWARD, sources='Invented')]}, _REFUSED_ROW),
+    'no source': ({'rows': [_recatalogued(_FORWARD, sources='')]}, _REFUSED_ROW),
+    'an intron without its gene': ({'rows': [_recatalogued(_FORWARD, gene='')]}, _REFUSED_ROW),
+    'a gene alone': ({'rows': [_recatalogued(_catalogued('chr1', 1010, '+'), gene='INVENTED1')]}, _REFUSED_ROW),
+    'an intron without its consensus': ({'rows': [_recatalogued(_FORWARD, consensus='')]}, _REFUSED_ROW),
+    'introns that are no labels': ({'rows': [_recatalogued(_FORWARD, transcript_introns='ENST01')]}, _REFUSED_ROW),
+    'another kind of intron': ({'rows': [_recatalogued(_FORWARD, intron_type='U12')]}, _REFUSED_ROW),
+    'a length that is no number': ({'rows': [_recatalogued(_FORWARD, intron_length='long')]}, _REFUSED_ROW),
+    'a distance that is not negative': ({'rows': [_recatalogued(_FORWARD, acceptor_offset='24')]}, _REFUSED_ROW),
+    'a distance of 0': ({'rows': [_recatalogued(_FORWARD, acceptor_offset='-0')]}, _REFUSED_ROW),
+    'a rank of 0': ({'rows': [_recatalogued(_FORWARD, rank='0')]}, _REFUSED_ROW),
+    'a rank above its total': ({'rows': [_recatalogued(_FORWARD, rank='3')]}, _REFUSED_ROW),
+    'a total that is no number': ({'rows': [_recatalogued(_FORWARD, total='two')]}, _REFUSED_ROW),
+    'another consensus': ({'rows': [_recatalogued(_FORWARD, consensus='YTNAY')]}, _REFUSED_ROW),
+    'a branch point twice in the same introns': (
+        {'rows': [_FORWARD, _recatalogued(_FORWARD, acceptor_offset='-25')]},
+        r"several rows for one branch point and its introns, such as \[\('mBP_chr1_1510_\+_A', \['ENST01_IVS2'\]\)\]",
+    ),
+    'a branch point without an intron twice': (
+        {'rows': [_catalogued('chr2', 500, '+'), _catalogued('chr2', 500, '+')]},
+        r"several rows for one branch point and its introns, such as \[\('cBP_chr2_500_\+_A', None\)\]",
+    ),
+    'no row': ({'rows': []}, 'no branch point, and the prepared catalogue holds some'),
+}
+
+
+@pytest.mark.parametrize('case', CATALOGUE_REFUSED)
+def test_a_file_that_is_not_the_prepared_catalogue_is_refused(tmp_path: pathlib.Path, case: str) -> None:
+    written, message = CATALOGUE_REFUSED[case]
+    file = _catalogue(tmp_path / 'branch-points.tsv.gz', **written)
+    with pytest.raises(ValueError, match=message):
+        _convert(tmp_path, [('chr1', 1010, 'A', 'G')], {'branch_points': file})
+
+
+def test_a_refused_row_of_the_catalogue_is_shown_as_the_file_writes_it(tmp_path: pathlib.Path) -> None:
+    row = _recatalogued(_FORWARD, rank='3')
+    file = _catalogue(tmp_path / 'branch-points.tsv', [_REVERSE, row])
+    with pytest.raises(ValueError, match=_REFUSED_ROW) as refused:
+        _convert(tmp_path, [('chr1', 1010, 'A', 'G')], {'branch_points': file})
+    assert str(row.split('\t')) in str(refused.value)
+    assert 'eBP_chr1_2000' not in str(refused.value)
+
+
+def test_a_catalogue_that_is_cut_off_is_refused(tmp_path: pathlib.Path) -> None:
+    rows = [_catalogued('chr1', 3 * number, '+') for number in range(1, 2000)]
+    whole = _catalogue(tmp_path / 'whole.tsv.gz', rows)
+    cut = tmp_path / 'branch-points.tsv.gz'
+    cut.write_bytes(whole.read_bytes()[: whole.stat().st_size // 2])
+    with pytest.raises(ValueError, match=r'branch-points\.tsv\.gz: not the prepared catalogue of branch points'):
+        _convert(tmp_path, [('chr1', 1010, 'A', 'G')], {'branch_points': cut})
+
+
 # ---- the conversion ----
 
 _ALLELES: tuple[Allele, ...] = (
@@ -1159,6 +1451,7 @@ def _files(tmp_path: pathlib.Path) -> dict[str, pathlib.Path]:
         'genomic_constraint': _windows(tmp_path / 'windows.txt.gz'),
         'mcr': _regions(tmp_path / 'mcrs.tsv'),
         'mpc': _mpc(tmp_path / 'mpc.tsv'),
+        'branch_points': _catalogue(tmp_path / 'branch-points.tsv.gz'),
     }
 
 
@@ -1203,6 +1496,7 @@ SOME_FILES = {
     'the two files on polyadenylation': ('gencode_polya', 'aparent2'),
     'the MPC scores without the regions': ('mpc',),
     "gnomAD's windows and its regions": ('genomic_constraint', 'mcr'),
+    'the branch points alone': ('branch_points',),
 }
 
 
@@ -1225,7 +1519,7 @@ def test_a_run_without_a_file_has_none_of_its_columns(tmp_path: pathlib.Path, ca
     assert info.given() == tuple(sources)
 
 
-def test_the_columns_are_32_bit_numbers_text_flags_one_list_of_names_and_one_p_value() -> None:
+def test_the_columns_are_32_bit_numbers_text_flags_two_lists_and_one_p_value() -> None:
     kinds = {
         field.name: field.type
         for source in joined_values.SOURCES.values()
@@ -1233,6 +1527,11 @@ def test_the_columns_are_32_bit_numbers_text_flags_one_list_of_names_and_one_p_v
     }
     assert kinds.pop('gnomad_mito_filters') == pa.list_(pa.string())
     assert kinds.pop('mcr_oe_p') == pa.float64()
+    # The entries of a branch point are structs of the same kinds, with lists of text and one of 8-bit numbers.
+    entry = kinds.pop('branch_points').value_type
+    lists = {field.name: field.type.value_type for field in entry if isinstance(field.type, pa.ListType)}
+    assert lists == {'hit': pa.int8(), 'sources': pa.string(), 'transcript_introns': pa.string()}
+    assert {field.type for field in entry if field.name not in lists} == {pa.int32(), pa.string()}
     assert set(kinds.values()) == {pa.int32(), pa.float32(), pa.string(), pa.bool_()}
     # A source's name starts each of its columns, so that a column says which file it is from, and no column has the
     # name of another or of a key.

@@ -365,7 +365,8 @@ _JOINED_COLUMNS = tuple(column for source in _JOINED_SOURCES for column in sourc
 # Invented values of the union's alleles from the joined files, by source: gnomAD's mitochondrial sites hold the allele
 # on chrM, which MitoTIP scores, a polyadenylation signal holds the first allele, and APARENT2 scores the second, a
 # single-base change. The first two alleles lie in a window of gnomAD's genomic constraint, the first two in regions of
-# missense constraint, and the second and the fourth have MPC scores.
+# missense constraint, and the second and the fourth have MPC scores. The second allele changes the base of one invented
+# branch point, which the catalogue gives an intron, and the base two before another, which it gives none.
 _JOINED: dict[str, dict[str, dict[str, Any]]] = {
     'gnomad_mito': {
         _ALLELES[4]: {
@@ -399,6 +400,42 @@ _JOINED: dict[str, dict[str, dict[str, Any]]] = {
     },
     'mcr': {_ALLELES[0]: {'mcr_oe_min': _float32(0.6)}, _ALLELES[1]: {'mcr_oe_min': _float32(0.25)}},
     'mpc': {_ALLELES[1]: {'mpc_max': _float32(2.75)}, _ALLELES[3]: {'mpc_max': _float32(0.5)}},
+    'branch_points': {
+        _ALLELES[1]: {
+            'branch_points': [
+                {
+                    'name': 'mBP_chr2_100_+_A',
+                    'pos': 100,
+                    'strand': '+',
+                    'hit': [0],
+                    'acceptor_offset': -24,
+                    'rank': 1,
+                    'total': 2,
+                    'sources': ['eBP_Invented', 'cBP_Invented'],
+                    'consensus': '1:YTNAY',
+                    'gene': 'INVENTED1',
+                    'transcript_introns': ['ENST01_IVS2', 'ENST09_IVS3'],
+                    'intron_type': 'major',
+                    'intron_length': 900,
+                },
+                {
+                    'name': 'cBP_chr2_102_+_C',
+                    'pos': 102,
+                    'strand': '+',
+                    'hit': [-2],
+                    'acceptor_offset': None,
+                    'rank': None,
+                    'total': None,
+                    'sources': ['cBP_Invented'],
+                    'consensus': None,
+                    'gene': None,
+                    'transcript_introns': None,
+                    'intron_type': None,
+                    'intron_length': None,
+                },
+            ]
+        }
+    },
 }
 # Invented values of an allele and a transcript from the joined files, by source, with the transcript as the files write
 # it: Ensembl's id without its version. The union's rows are of ENST01.1, so the first allele's region, which is of
@@ -2441,6 +2478,7 @@ JOINED_RUNS = {
     'the two files on polyadenylation': (joined_values.GENCODE_POLYA, joined_values.APARENT2),
     'the regions of missense constraint without the MPC scores': (joined_values.MCR,),
     'the MPC scores without the regions': (joined_values.MPC,),
+    'the branch points alone': (joined_values.BRANCH_POINTS,),
     'every file': _JOINED_SOURCES,
 }
 

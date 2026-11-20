@@ -73,6 +73,12 @@ How a cell destroys a transcript whose reading frame ends early, so that a varia
 leaves no protein at all. A variant near the transcript's end, or near its start, can escape the decay, and the
 shortened protein is then made.
 
+### Branch point
+
+The base inside an intron, most often an adenine 18 to 44 bases before the intron's end, that the cell joins the start
+of the intron to when it splices the intron out. A variant that changes it, or the short motif around it, can leave the
+intron in the transcript or drop the next exon ([Catalogued branch points](family-tables.md#catalogued-branch-points)).
+
 ### Structural variant
 
 A change of 50 bases or more, or a rearrangement: a deletion, an insertion, a duplication, an inversion, or a junction

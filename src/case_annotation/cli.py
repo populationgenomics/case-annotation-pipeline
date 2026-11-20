@@ -11,6 +11,7 @@ from collections.abc import Callable, Sequence
 from case_annotation import (
     alphagenome_archives,
     annotation_tables,
+    branch_points,
     contract,
     echtvar_values,
     family_tables,
@@ -338,6 +339,41 @@ def _gene_models(args: argparse.Namespace) -> None:
     gene_models.prepare(
         {'Ensembl': args.ensembl, 'RefSeq': args.refseq}, args.assembly_report, args.reference, args.output
     )
+
+
+def _branch_points_arguments(parser: argparse.ArgumentParser) -> None:
+    path = pathlib.Path
+    parser.add_argument(
+        '--dataset-s1',
+        type=path,
+        required=True,
+        help="Dataset S1 of the paper's supplement, the text file of every branch point on GRCh37, gzipped or not",
+    )
+    parser.add_argument(
+        '--dataset-s2',
+        type=path,
+        required=True,
+        help="Dataset S2 of the paper's supplement, the text file of the branch points by intron, gzipped or not",
+    )
+    parser.add_argument(
+        '--chain',
+        type=path,
+        required=True,
+        help=(
+            'a chain file from GRCh37 to GRCh38, gzipped or not, whose chromosomes are named as UCSC names them '
+            '(chr1) or as Ensembl does (1)'
+        ),
+    )
+    parser.add_argument(
+        '--output',
+        type=path,
+        required=True,
+        help=(f'the folder to write {branch_points.FILE_NAME} and {branch_points.RECORD_NAME} into; it must not exist'),
+    )
+
+
+def _branch_points(args: argparse.Namespace) -> None:
+    branch_points.prepare(args.dataset_s1, args.dataset_s2, args.chain, args.output)
 
 
 def _vep_plugins_arguments(parser: argparse.ArgumentParser) -> None:
@@ -720,8 +756,8 @@ _SUBCOMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Ca
             'writes the values of a sites union from the public files that a run joins to its alleles by allele or by '
             "position, as a table by allele and one by allele and transcript, with each file's record: gnomAD's "
             "mitochondrial frequencies, MitoTIP's scores, GENCODE's polyadenylation signals, APARENT2's effects on "
-            "polyadenylation, and gnomAD's genomic constraint by window, regions of missense constraint and MPC "
-            'scores; fails for a file that is not what its source publishes'
+            "polyadenylation, gnomAD's genomic constraint by window, regions of missense constraint and MPC scores, "
+            'and the prepared catalogue of branch points; fails for a file that is not what its source publishes'
         ),
         _joined_values_arguments,
         _joined_values,
@@ -761,6 +797,16 @@ _SUBCOMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Ca
         ),
         _gene_models_arguments,
         _gene_models,
+    ),
+    'branch-points': (
+        (
+            'prepares the catalogue of branch points that a run joins to its alleles, from Datasets S1 and S2 of '
+            'Zhang et al. (PNAS 2022) and a chain file: every branch point that lifts to GRCh38 with the two bases '
+            'before it, sorted and bgzipped, with a record of the three files and of the counts; fails for a dataset '
+            'that is not what the paper published'
+        ),
+        _branch_points_arguments,
+        _branch_points,
     ),
     'vep-plugins': (
         (

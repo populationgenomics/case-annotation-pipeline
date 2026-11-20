@@ -528,7 +528,15 @@ def example_manifest() -> family_tables.FamilyManifest:
         vep_plugins=_example_plugins(),
         omitted_columns=tuple(
             column
-            for source in ('dbSNP', 'alphagenome_avi_breakdown', 'mitotip', 'aparent2', 'genomic_constraint', 'mpc')
+            for source in (
+                'dbSNP',
+                'alphagenome_avi_breakdown',
+                'mitotip',
+                'aparent2',
+                'genomic_constraint',
+                'mpc',
+                'branch_points',
+            )
             for column in family_tables.VARIANT_SOURCES[source]
         ),
         transcripts_omitted_columns=family_tables.TRANSCRIPT_SOURCES['mpc'],

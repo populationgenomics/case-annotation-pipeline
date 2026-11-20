@@ -54,6 +54,10 @@
 // names and the invented transcripts of the annotation. The union's alleles on chr1 and chr2 lie in a window each and
 // those on chrX in none; ENST01, the transcript of every row of the annotation, has two regions on chr1, and ENST02,
 // which the annotation lacks, one on chr2 and a score, so its values are in variants and on no row of transcripts.
+// branch_points.tsv stands in for the prepared catalogue of branch points, with invented branch points under the
+// catalogue's column names and two lines before its header: a single-base change at one branch point, a deletion that
+// ends at one of the reverse strand, and a deletion over two branch points that lie two bases apart, of which the first
+// is in two introns and the second in none.
 // The run names no file of gnomAD's mitochondrial sites and none of MitoTIP's scores, so the families' tables lack
 // those columns. gnomad_mito.vcf and mitotip.tsv stand in for those files, with invented values under the field names
 // of gnomAD's file and the column names of MitoTIP's, and are joined to mito-union.vcf, an invented union on an
@@ -176,14 +180,15 @@ workflow {
     if (archivesDisk([small, [], [], []]) != 51.GB || archivesDisk([small, small, small, small]) != 51.GB) {
         error("the disk of four small archives is ${archivesDisk([small, small, small, small])}, and of one ${archivesDisk([small, [], [], []])}")
     }
-    // The two files on polyadenylation and gnomAD's three tables of constraint, joined to the union, and no file of
-    // gnomAD's mitochondrial sites or of MitoTIP's scores.
+    // The two files on polyadenylation, gnomAD's three tables of constraint and the catalogue of branch points,
+    // joined to the union, and no file of gnomAD's mitochondrial sites or of MitoTIP's scores.
     polya = file("${fixture}/gencode_polya.gtf")
     effects = file("${fixture}/aparent2.tsv")
     windows = file("${fixture}/genomic_constraint.tsv")
     regions = file("${fixture}/mcr.tsv")
     scores = file("${fixture}/mpc.tsv")
-    joined = JOINED_VALUES(union, reference, [], [], polya, effects, windows, regions, scores)
+    catalogue = file("${fixture}/branch_points.tsv")
+    joined = JOINED_VALUES(union, reference, [], [], polya, effects, windows, regions, scores, catalogue)
     // gnomAD's mitochondrial sites and MitoTIP's scores, joined to an invented union on an invented chrM.
     mito = file("${fixture}/gnomad_mito.vcf")
     mitotip = file("${fixture}/mitotip.tsv")
@@ -193,6 +198,7 @@ workflow {
             channel.value(tuple(file("${fixture}/mito-reference.fa"), file("${fixture}/mito-reference.fa.fai"))),
             mito,
             mitotip,
+            [],
             [],
             [],
             [],
@@ -246,7 +252,7 @@ workflow {
     // tables that only some families have.
     CHECK_TABLES(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[0], w[1], w[2], w[4], w[5]) }, archive)
     CHECK_NO_ROLES(written.filter { w -> w[0] == 'family-b' }.map { w -> w[4] })
-    CHECK_JOINED(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[1], w[2], w[4]) }, polya, effects, windows, regions, scores)
+    CHECK_JOINED(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[1], w[2], w[4]) }, polya, effects, windows, regions, scores, catalogue)
     CHECK_LARGER(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[1], w[4], w[6]) })
     CHECK_SEGMENTS(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[3], w[4], w[6]) }, archive)
     // A family whose row names no such VCF gets no table of them. Family B's son has both parents sequenced, so it
@@ -967,9 +973,13 @@ process INVENTED_MITO_UNION {
 // chr2; the lowest ratio among the regions that hold the allele's position; and the highest MPC score of the allele.
 // The last two also count a transcript that the annotation lacks. transcripts holds the ratio, the number of regions,
 // the p-value, the coverage and the MPC score on the row of the allele's transcript, which the files write without its
-// version, and nothing of the transcript that the annotation lacks. The manifest and the tables' metadata record the
-// five files by name, size and SHA-256, and the manifest lists the columns of gnomAD's mitochondrial sites and of
-// MitoTIP's scores, which the run did not name, as left out, after those of the dated sources.
+// version, and nothing of the transcript that the annotation lacks. After them variants holds the branch points whose
+// three bases an allele changes, as a list: one entry for the single-base change at a branch point, with the intron
+// that the invented catalogue gives it; one for the deletion whose last base is a branch point of the reverse strand,
+// which the catalogue gives no intron; and three for the deletion over two branch points, two of them for the two
+// introns of the first. Every other allele has no list. The manifest and the tables' metadata record the six files by
+// name, size and SHA-256, and the manifest lists the columns of gnomAD's mitochondrial sites and of MitoTIP's scores,
+// which the run did not name, as left out, after those of the dated sources.
 process CHECK_JOINED {
     input:
     tuple path(variants), path(transcripts), path(manifest)
@@ -978,6 +988,7 @@ process CHECK_JOINED {
     path windows
     path regions
     path scores
+    path catalogue
 
     script:
     """
@@ -993,7 +1004,8 @@ added = ('gencode_polya_signal', 'aparent2_min', 'aparent2_max', 'aparent2_ref_u
          'mcr_oe_min', 'mpc_max')
 at = variants.column_names.index('alphagenome_splicing')
 assert tuple(variants.column_names[at + 1:at + 1 + len(added)]) == added, variants.column_names
-assert variants.column_names[at + 1 + len(added)] == 'utr5_consequences', variants.column_names
+after = variants.column_names[at + 1 + len(added):at + 3 + len(added)]
+assert after == ['branch_points', 'utr5_consequences'], variants.column_names
 kinds = [variants.schema.field(c).type for c in added]
 assert kinds == [pa.bool_()] + [pa.float32()] * 6, kinds
 assert not variants.schema.field('gencode_polya_signal').nullable, variants.schema
@@ -1011,6 +1023,34 @@ assert rows == {
     'chrX-100-T-A': (False, None, None, None, None, None, None),
     'chrX-100-T-C': (False, 1.5, 1.5, 0.0625, None, None, 6.0),
 }, rows
+entry = variants.schema.field('branch_points').type.value_type
+assert [(f.name, str(f.type), f.nullable) for f in entry] == [
+    ('name', 'string', False), ('pos', 'int32', False), ('strand', 'string', False),
+    ('hit', 'list<element: int8>', False), ('acceptor_offset', 'int32', True), ('rank', 'int32', True),
+    ('total', 'int32', True), ('sources', 'list<element: string>', False), ('consensus', 'string', True),
+    ('gene', 'string', True), ('transcript_introns', 'list<element: string>', True), ('intron_type', 'string', True),
+    ('intron_length', 'int32', True)], entry
+found = {r['variant_id']: r['branch_points'] for r in variants.to_pylist() if r['branch_points'] is not None}
+alone = {'acceptor_offset': None, 'rank': None, 'total': None, 'consensus': None, 'gene': None,
+         'transcript_introns': None, 'intron_type': None, 'intron_length': None}
+both = ['eBP_Invented', 'cBP_Invented']
+assert found == {
+    'chr1-200-G-A': [
+        {'name': 'mBP_chr1_200_+_G', 'pos': 200, 'strand': '+', 'hit': [0], 'acceptor_offset': -24, 'rank': 1,
+         'total': 1, 'sources': both, 'consensus': '1:YTNAY', 'gene': 'INVENTED1',
+         'transcript_introns': ['ENST01_IVS2'], 'intron_type': 'major', 'intron_length': 900}],
+    'chr1-400-TCA-T': [
+        {'name': 'cBP_chr1_402_-_A', 'pos': 402, 'strand': '-', 'hit': [0], 'sources': ['cBP_Invented'], **alone}],
+    'chr2-90-GCGTAAA-G': [
+        {'name': 'eBP_chr2_92_+_A', 'pos': 92, 'strand': '+', 'hit': [-1, 0], 'acceptor_offset': -20, 'rank': 1,
+         'total': 2, 'sources': ['eBP_Invented'], 'consensus': '0:none', 'gene': 'INVENTED2',
+         'transcript_introns': ['ENST01_IVS4'], 'intron_type': 'minor', 'intron_length': 85},
+        {'name': 'eBP_chr2_92_+_A', 'pos': 92, 'strand': '+', 'hit': [-1, 0], 'acceptor_offset': -31, 'rank': 2,
+         'total': 2, 'sources': ['eBP_Invented'], 'consensus': '3:TNA', 'gene': 'INVENTED2',
+         'transcript_introns': ['ENST02_IVS1', 'ENST03_IVS1'], 'intron_type': 'major', 'intron_length': 4000},
+        {'name': 'cBP_chr2_94_+_C', 'pos': 94, 'strand': '+', 'hit': [-2, -1, 0], 'sources': ['cBP_Invented'],
+         **alone}],
+}, found
 transcripts = pq.read_table('${transcripts}')
 by_transcript = ('mcr_oe', 'mcr_regions', 'mcr_oe_p', 'mcr_high_coverage', 'mpc')
 plugins = transcripts.column_names.index('utr5_consequences')
@@ -1034,7 +1074,7 @@ assert held == {
 }, held
 manifest = json.load(open('${manifest}'))
 files = {'gencode_polya': '${polya}', 'aparent2': '${effects}', 'genomic_constraint': '${windows}',
-         'mcr': '${regions}', 'mpc': '${scores}'}
+         'mcr': '${regions}', 'mpc': '${scores}', 'branch_points': '${catalogue}'}
 assert manifest['joined_files'] == [
     {'source': source, 'file': name, 'bytes': len(open(name, 'rb').read()),
      'sha256': hashlib.sha256(open(name, 'rb').read()).hexdigest()}
