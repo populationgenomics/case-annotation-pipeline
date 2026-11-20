@@ -131,6 +131,27 @@
           }
         },
         {
+          "name": "regulatory_features",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "struct",
+            "nullable": true,
+            "fields": [
+              {
+                "name": "id",
+                "type": "string",
+                "nullable": false
+              },
+              {
+                "name": "type",
+                "type": "string",
+                "nullable": false
+              }
+            ]
+          }
+        },
+        {
           "name": "gnomad_genomes_af",
           "type": "float32",
           "nullable": true
@@ -206,12 +227,27 @@
           "nullable": true
         },
         {
+          "name": "promoterai_min",
+          "type": "float64",
+          "nullable": true
+        },
+        {
+          "name": "promoterai_max",
+          "type": "float64",
+          "nullable": true
+        },
+        {
           "name": "dann",
           "type": "float64",
           "nullable": true
         },
         {
           "name": "phylop",
+          "type": "float64",
+          "nullable": true
+        },
+        {
+          "name": "phylop_primate",
           "type": "float64",
           "nullable": true
         },
@@ -590,8 +626,53 @@
           "nullable": true
         },
         {
+          "name": "spliceai_acceptor_gain",
+          "type": "float64",
+          "nullable": true
+        },
+        {
+          "name": "spliceai_acceptor_gain_distance",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "spliceai_acceptor_loss",
+          "type": "float64",
+          "nullable": true
+        },
+        {
+          "name": "spliceai_acceptor_loss_distance",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "spliceai_donor_gain",
+          "type": "float64",
+          "nullable": true
+        },
+        {
+          "name": "spliceai_donor_gain_distance",
+          "type": "int32",
+          "nullable": true
+        },
+        {
+          "name": "spliceai_donor_loss",
+          "type": "float64",
+          "nullable": true
+        },
+        {
+          "name": "spliceai_donor_loss_distance",
+          "type": "int32",
+          "nullable": true
+        },
+        {
           "name": "promoterai_score",
           "type": "float64",
+          "nullable": true
+        },
+        {
+          "name": "promoterai_tss_distance",
+          "type": "int32",
           "nullable": true
         }
       ]

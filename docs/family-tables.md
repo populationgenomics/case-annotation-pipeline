@@ -1028,6 +1028,86 @@ for row in transcripts_of_variant.to_pylist():
 The VCF equivalent, `bcftools +split-vep -d -r chr2:1234567 -f '%Allele %Feature %HGVSc %HGVSp\n' family.vcf.gz`, prints
 the entries of every allele at the position, and the reader keeps those whose `Allele` is `T`.
 
+### Splice sites, promoters, regulatory features and conservation
+
+`spliceai_max` says that an allele may change the splicing of a gene, and `transcripts` says how. For the gene of each
+row it has SpliceAI's four scores, `spliceai_acceptor_gain`, `spliceai_acceptor_loss`, `spliceai_donor_gain` and
+`spliceai_donor_loss`, and beside each the distance from the allele to the splice site that the score is of, in a column
+of the same name with `_distance`:
+
+```python
+splicing_of_variant = con.sql(
+    """
+    SELECT transcript_id, gene_symbol, COLUMNS('^spliceai_')
+    FROM transcripts
+    WHERE variant_id = $variant_id AND spliceai_max IS NOT NULL
+    ORDER BY transcript_id
+    """,
+    params={'variant_id': 'chr2-1234567-C-T'},
+).to_arrow_table()
+```
+
+`COLUMNS('^spliceai_')` stands for every column whose name starts that way: `spliceai_max`, which is the highest of the
+four scores, and the four with their distances.
+
+PromoterAI scores what an allele does to the expression of a gene from the promoter of one transcript, from -1 to 1. A
+score below 0 predicts less expression and a score above 0 more, and Illumina treats a score between -0.05 and 0.05 as
+no effect. `promoterai_score` in `transcripts` is the score for the row's transcript, and `promoterai_tss_distance` the
+distance of the allele from the start of that transcript (its TSS). `variants` has the lowest and the highest score
+among an allele's PromoterAI entries, `promoterai_min` and `promoterai_max`, and the regulatory features that the allele
+overlaps, `regulatory_features`. This query finds the alleles of a region that have a promoter effect in either
+direction or lie in a feature of one type:
+
+```python
+promoter_candidates = con.sql(
+    """
+    SELECT variant_id, promoterai_min, promoterai_max,
+           list_transform(regulatory_features, lambda f: f.type) AS regulatory_types
+    FROM variants
+    WHERE chrom = $chrom AND pos BETWEEN $start AND $end
+      AND (promoterai_min <= -$min_effect
+           OR promoterai_max >= $min_effect
+           OR len(list_filter(regulatory_features, lambda f: f.type = $type)) > 0)
+    ORDER BY pos
+    """,
+    params={'chrom': 'chr2', 'start': 1_200_000, 'end': 1_300_000, 'min_effect': 0.1, 'type': 'promoter'},
+).to_arrow_table()
+```
+
+A query on these columns has to allow for the following.
+
+- A search for a promoter effect reads both `promoterai_min` and `promoterai_max`, as above, because a threshold on
+  `promoterai_max` alone misses every allele whose scores are all below 0. Both columns hold the same value for an
+  allele with one PromoterAI entry, and both are null for an allele without an entry.
+- A SpliceAI score is null where SpliceAI gives the gene no score of that kind, which is the case for a score below the
+  threshold of Illumina's release, and a distance is null with its score.
+- A RefSeq row has the SpliceAI scores of the Ensembl gene with its symbol, because a SpliceAI entry is matched to a
+  transcript by the id of the transcript's Ensembl gene.
+- Illumina gives the transcript of a PromoterAI entry by its Ensembl id, so both PromoterAI columns are null on the
+  RefSeq rows of `transcripts`. `is_mane_select` is true on RefSeq rows only, so a condition on it together with one on
+  `promoterai_score` matches no row.
+- `regulatory_features` has an entry for each feature, sorted by `id`, with the feature's `id` and its `type` in the
+  Annotator's words, such as `promoter` or `enhancer`. An allele that overlaps no feature has no list rather than an
+  empty one. The column is a list of structs like `genes`, so a condition on a field of an entry is written with
+  `list_filter` or `list_transform` and cannot skip a row group ([An allele's genes](#an-alleles-genes)).
+- `phylop_primate` in `variants` is the Annotator's phyloP score over primates, a conservation score beside `phylop`.
+
+Illumina states neither how the two distances are counted nor which alleles have a phyloP score. The tables hold every
+distance as the Annotator writes it, and the following was measured on the Annotator's output for one whole genome with
+catalog `202610`.
+
+- A SpliceAI distance is counted from the allele's `pos`. A positive distance points to a higher genomic coordinate on
+  both strands, whatever the direction of the transcript.
+- For an SNV at the intron offset `c.N+k` or `c.N-k` whose loss score is of that intron's own splice site, the distance
+  is k-1 bases long, so it leads from the allele to the base at the intron's edge.
+- A SpliceAI distance can be long. Of the distances of SNVs, 2% are more than 500 bases, and the longest about 32,000.
+  Of those of insertions and deletions, nine in ten are more than 500 bases, almost all towards higher coordinates and
+  spread evenly up to 32,765. The SpliceAI score of an insertion or a deletion therefore mostly refers to a place far
+  from the allele, and a query can discount such a score by its distance.
+- `promoterai_tss_distance` is negative for an allele upstream of the transcript's start, in the transcript's direction,
+  and runs from -500 to 500.
+- `phylop_primate` and `phylop` have a value for SNVs only, and are null for every insertion and deletion.
+
 ### A variant by its rsID
 
 `rsids` holds an allele's dbSNP ids as a list, and `list_contains` finds an id wherever it stands in the list, also
@@ -1935,7 +2015,7 @@ The tables share these properties:
 | key-value metadata | the tables' version (`schema_version`), the table's name, the family, and the annotation's provenance (`annotation` and `gnomad_joint`, as in the manifest); `sv` and `sv_transcripts` carry the provenance of the annotation of the structural variants instead (`annotation`, which is the manifest's `sv_annotation`), and `repeats` none, since nothing annotated it                                                                                                                              |
 | variant id         | `<chrom>-<pos>-<ref>-<alt>` with the VCF's contig name, such as `chr2-1234567-C-T`                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | shared columns     | a column that means the same thing has the same name and type in every table ([Shared column names](#shared-column-names))                                                                                                                                                                                                                                                                                                                                                                            |
-| a missing value    | a null. That holds for the list columns `rsids`, `hgnc_ids`, `genes`, `clinvar_records`, `clinvar_conditions`, `gnomad_sv_matches`, `pl` and `ft` too, and for `cipos`, `ciend` and the lists of a repeat's genotype: an allele without an rsID has no `rsids`, not an empty list. `filters` differs: in every table it holds the VCF record's FILTER values, and an empty list for a record whose FILTER is `.`                                                                                      |
+| a missing value    | a null. That holds for the list columns `rsids`, `hgnc_ids`, `genes`, `regulatory_features`, `clinvar_records`, `clinvar_conditions`, `gnomad_sv_matches`, `pl` and `ft` too, and for `cipos`, `ciend` and the lists of a repeat's genotype: an allele without an rsID has no `rsids`, not an empty list. `filters` differs: in every table it holds the VCF record's FILTER values, and an empty list for a record whose FILTER is `.`                                                               |
 
 The tables hold no gene-level knowledge beyond a gene's identifiers. What OMIM, ClinGen and other gene–disease sources
 say about a gene is knowledge that the reader brings.
