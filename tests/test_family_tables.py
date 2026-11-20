@@ -24,8 +24,8 @@ import case_annotation
 from case_annotation import (
     annotation_tables,
     cli,
+    echtvar_values,
     family_tables,
-    gnomad_joint,
     pedigree,
     repeat_tables,
     sv_annotation,
@@ -253,17 +253,50 @@ def _write_union(path: pathlib.Path, alleles: Sequence[str], info: annotation_ta
     (path / 'annotation.json').write_text(info.model_dump_json())
 
 
-_JOINT_INFO = gnomad_joint.GnomadJointInfo(
+_JOINT_INFO = echtvar_values.ArchiveInfo(
     archive='invented.zip',
     bytes=1,
     sha256='0' * 64,
     echtvar_version='echtvar 0.0.0',
     fields=(
-        gnomad_joint.ArchiveField(
+        echtvar_values.ArchiveField(
             field='AC_joint', alias='AC', ftype='Integer', multiplier=1, missing_value=-1, missing_string='MISSING'
         ),
     ),
 )
+_GNOMAD_COLUMNS = tuple(echtvar_values.GNOMAD_JOINT.columns)
+# The archives of AlphaGenome's scores, which a run need not read.
+_SCORE_SOURCES = tuple(s for s in echtvar_values.SOURCES.values() if s is not echtvar_values.REQUIRED)
+_SCORE_COLUMNS = tuple(column for source in _SCORE_SOURCES for column in source.columns)
+
+
+def _score_info(source: echtvar_values.Source) -> echtvar_values.ArchiveInfo:
+    """An invented record of the archive of one of AlphaGenome's tables, with the notice where the source has one."""
+    record: dict[str, Any] = {
+        **_JOINT_INFO.model_dump(),
+        'archive': f'{source.name}.invented.zip',
+        'fields': (
+            echtvar_values.ArchiveField(
+                field='invented', alias='invented', ftype='Float', multiplier=10, missing_value=0, missing_string='.'
+            ),
+        ),
+    }
+    if source.notice is None:
+        return echtvar_values.ArchiveInfo(**record)
+    return echtvar_values.NoticedArchiveInfo(**record, terms=source.notice)
+
+
+def _scores(source: echtvar_values.Source, seed: float) -> dict[str, float]:
+    """Invented values of every column of a source for one allele, each its own."""
+    return {column: _float32(round(seed + index / 1000, 6)) for index, column in enumerate(source.columns)}
+
+
+# AlphaGenome's scores of the union's alleles, by source: every archive holds the first allele, the scores alone the
+# second, and none holds the others, among them the insertion and the allele on chrM.
+_SCORES: dict[str, dict[str, dict[str, float]]] = {
+    source.name: {vid: _scores(source, seed) for vid, seed in ((_ALLELES[0], 0.5), (_ALLELES[1], -1.25))[: 2 - at]}
+    for at, source in enumerate(_SCORE_SOURCES[:2])
+} | {_SCORE_SOURCES[2].name: {_ALLELES[0]: _scores(_SCORE_SOURCES[2], 0.25)}}
 # gnomAD's joint values of the union's alleles as (AF, AC, homozygotes, FAF95): the first allele is one gnomAD lacks,
 # the second one it counted 0 times, and the other family's allele has values of its own.
 _JOINT_OTHER = (0.25, 400_000, 50_000, _float32(0.24))
@@ -277,14 +310,24 @@ _JOINT: dict[str, tuple[float, int, int, float] | None] = {
 }
 
 
-def _write_joint(path: pathlib.Path, values: Mapping[str, tuple[float, int, int, float] | None]) -> None:
+def _write_joint(
+    path: pathlib.Path,
+    values: Mapping[str, tuple[float, int, int, float] | None],
+    scores: Sequence[echtvar_values.Source] = (),
+) -> None:
+    """The union's values from the archive of gnomAD's joint release and from those of the sources given."""
     path.mkdir()
     rows = [
-        {'variant_id': vid} | ({} if joint is None else dict(zip(gnomad_joint.COLUMNS, joint, strict=True)))
+        {'variant_id': vid}
+        | ({} if joint is None else dict(zip(_GNOMAD_COLUMNS, joint, strict=True)))
+        | {column: value for source in scores for column, value in _SCORES[source.name].get(vid, {}).items()}
         for vid, joint in values.items()
     ]
-    pq.write_table(pa.Table.from_pylist(rows, schema=gnomad_joint.TABLE), path / gnomad_joint.TABLE_NAME)
-    (path / gnomad_joint.INFO_NAME).write_text(_JOINT_INFO.model_dump_json())
+    schema = echtvar_values.schema([echtvar_values.GNOMAD_JOINT, *scores])
+    pq.write_table(pa.Table.from_pylist(rows, schema=schema), path / echtvar_values.TABLE_NAME)
+    records = {source.name: _score_info(source) if source in scores else None for source in _SCORE_SOURCES}
+    info = echtvar_values.Archives.model_validate({'gnomad_joint': _JOINT_INFO, **records})
+    (path / echtvar_values.INFO_NAME).write_text(info.model_dump_json())
 
 
 # The tables of a family's alleles, which every family has.
@@ -301,17 +344,18 @@ def _inputs(
     joint: Mapping[str, tuple[float, int, int, float] | None] = _JOINT,
     proband: str | None = 'S3',
     structural: family_tables.Structural | None = None,
+    scores: Sequence[echtvar_values.Source] = _SCORE_SOURCES,
 ) -> dict[str, Any]:
     _write_vcf(tmp_path / 'family.vcf.gz', records)
     (tmp_path / 'family.ped').write_text(ped)
     _write_union(tmp_path / 'union', _ALLELES, info or _info('Ensembl', 'dbSNP', 'clinvar'))
-    _write_joint(tmp_path / 'joint', joint)
+    _write_joint(tmp_path / 'joint', joint, scores)
     return {
         'family': 'fam-1',
         'vcf_path': tmp_path / 'family.vcf.gz',
         'ped_path': tmp_path / 'family.ped',
         'annotation': tmp_path / 'union',
-        'joint': tmp_path / 'joint',
+        'archive_values': tmp_path / 'joint',
         'output': tmp_path / 'out',
         'proband': proband,
         'structural': structural or _NO_STRUCTURAL,
@@ -548,13 +592,13 @@ def test_each_allele_has_gnomads_joint_values_and_one_gnomad_lacks_has_none(tmp_
     manifest = family_tables.assemble(**_inputs(tmp_path))
     path = tmp_path / 'out' / 'variants.parquet'
     schema = pq.read_schema(path)
-    assert [(c, str(schema.field(c).type)) for c in gnomad_joint.COLUMNS] == [
+    assert [(c, str(schema.field(c).type)) for c in _GNOMAD_COLUMNS] == [
         ('gnomad_joint_af', 'float'),
         ('gnomad_joint_ac', 'int32'),
         ('gnomad_joint_hom', 'int32'),
         ('gnomad_joint_faf95_max', 'float'),
     ]
-    rows = {v['variant_id']: tuple(v[c] for c in gnomad_joint.COLUMNS) for v in _rows(path)}
+    rows = {v['variant_id']: tuple(v[c] for c in _GNOMAD_COLUMNS) for v in _rows(path)}
     # The family's alleles alone, each with its own values: none for an allele gnomAD lacks, 0 where gnomAD has 0. A
     # frequency is the union's 32-bit float, bit for bit.
     assert rows == {vid: (None, None, None, None) if _JOINT[vid] is None else _JOINT[vid] for vid in _ALLELES}
@@ -565,7 +609,7 @@ def test_each_allele_has_gnomads_joint_values_and_one_gnomad_lacks_has_none(tmp_
     # Illumina's separate genomes and exomes columns stay, their frequencies as 32-bit floats too, and the joint
     # columns are no dated source's.
     assert {str(schema.field(c).type) for c in ('gnomad_genomes_af', 'gnomad_exomes_af')} == {'float'}
-    assert not set(gnomad_joint.COLUMNS) & set(manifest.omitted_columns)
+    assert not set(_GNOMAD_COLUMNS) & set(manifest.omitted_columns)
 
 
 def test_an_alleles_dbsnp_ids_are_a_list_and_an_allele_without_any_has_none(tmp_path: pathlib.Path) -> None:
@@ -746,7 +790,7 @@ def _tables_command(
 ) -> list[str]:
     """The family-tables command of the inputs, without its proband."""
     args = ['family-tables', '--family', 'fam-1', '--ped', str(inputs['ped_path']), '--vcf', str(inputs['vcf_path'])]
-    args += ['--annotation', str(inputs['annotation']), '--gnomad-joint', str(inputs['joint'])]
+    args += ['--annotation', str(inputs['annotation']), '--echtvar-values', str(inputs['archive_values'])]
     args += ['--output', str(output or inputs['output'])]
     return [*args, '--schema-version', version, '--pipeline-version', pipeline]
 
@@ -833,9 +877,9 @@ REFUSED = {
         {'records': [*_RECORDS, ('chr2', 900, 'T', 'A', (_HET, _REF, _HET))]},
         "alleles the union's annotation lacks",
     ),
-    "an allele the union's gnomAD joint values lack": (
+    "an allele the union's values from the echtvar archives lack": (
         {'joint': {vid: _JOINT[vid] for vid in _ALLELES[1:]}},
-        "alleles the union's gnomAD joint values lack, such as \\['chr1-5-C-T'\\]",
+        "alleles the union's values from the echtvar archives lack, such as \\['chr1-5-C-T'\\]",
     ),
     'an allele off the primary chromosomes': (
         {'records': [*_RECORDS, ('chr1_KI270706v1_random', 9, 'T', 'A', (_HET, _REF, _HET))]},
@@ -1851,3 +1895,64 @@ def test_an_annotation_that_is_not_the_familys_is_refused(tmp_path: pathlib.Path
     larger, message = ANNOTATION_REFUSED[case]
     with pytest.raises(ValueError, match=message):
         family_tables.assemble(**{**_inputs(tmp_path), **larger(tmp_path)})
+
+
+SCORE_RUNS = {
+    'no archive of the scores': (),
+    'the scores alone': _SCORE_SOURCES[:1],
+    'the scores and the splicing scores': (_SCORE_SOURCES[0], _SCORE_SOURCES[2]),
+    'all three archives': _SCORE_SOURCES,
+}
+
+
+@pytest.mark.parametrize('case', SCORE_RUNS)
+def test_a_family_has_the_score_columns_of_the_archives_its_run_read(tmp_path: pathlib.Path, case: str) -> None:
+    given = SCORE_RUNS[case]
+    manifest = family_tables.assemble(**_inputs(tmp_path, scores=given))
+    path = tmp_path / 'out' / 'variants.parquet'
+    schema = pq.read_schema(path)
+    assert schema.equals(family_tables.variants_schema(('S1', 'S2', 'S3'), manifest.omitted_columns))
+    # The columns of an archive that the run did not read are left out and listed, after those of the dated sources.
+    held = [column for source in given for column in source.columns]
+    left_out = [column for column in _SCORE_COLUMNS if column not in held]
+    assert [name for name in schema.names if name in _SCORE_COLUMNS] == held
+    assert manifest.omitted_columns == tuple(left_out)
+    assert {schema.field(column).type for column in held} <= {pa.float32()}
+    # The columns of the archives stand between gnomAD's joint values and the family's record.
+    order = [name for name in schema.names if name in (*_GNOMAD_COLUMNS, *held, 'qual')]
+    assert order == [*_GNOMAD_COLUMNS, *held, 'qual']
+    # An allele has the scores of each archive that holds it, and no value where the archive lacks it.
+    rows = {row['variant_id']: row for row in _rows(path)}
+    for source in given:
+        for vid in _ALLELES:
+            scores = _SCORES[source.name].get(vid, dict.fromkeys(source.columns))
+            assert {column: rows[vid][column] for column in source.columns} == scores
+    # The manifest and the table's metadata record each archive under its source's name, and null for one not read.
+    written = json.loads((tmp_path / 'out' / 'manifest.json').read_text())
+    for source in _SCORE_SOURCES:
+        record = getattr(manifest, source.name)
+        assert (record is not None) == (source in given)
+        assert written[source.name] == json.loads(schema.metadata[source.name.encode()])
+        if record is not None:
+            assert record == _score_info(source)
+            assert written[source.name].get('terms') == source.notice
+        else:
+            assert written[source.name] is None
+    assert manifest.gnomad_joint == _JOINT_INFO
+
+
+def test_a_run_without_the_archives_writes_the_other_columns_as_a_run_with_them(tmp_path: pathlib.Path) -> None:
+    for run in ('with', 'without'):
+        (tmp_path / run).mkdir()
+    family_tables.assemble(**_inputs(tmp_path / 'with'))
+    family_tables.assemble(**_inputs(tmp_path / 'without', scores=()))
+    with_scores = _rows(tmp_path / 'with' / 'out' / 'variants.parquet')
+    assert [{name: value for name, value in row.items() if name not in _SCORE_COLUMNS} for row in with_scores] == _rows(
+        tmp_path / 'without' / 'out' / 'variants.parquet'
+    )
+
+
+def test_a_sample_cannot_take_the_name_of_a_score_column_whatever_the_run_reads() -> None:
+    for column in ('avi_phred', 'AVI_SHAP_ATAC', 'alphagenome_splicing'):
+        with pytest.raises(ValueError, match=f'the VCF sample {column!r} would share the column name'):
+            family_tables.check_column_names(['S1', column])

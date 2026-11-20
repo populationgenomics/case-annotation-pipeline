@@ -1,7 +1,8 @@
 // Runs the family tables' processes on two invented families, wired as family_tables.nf wires them, and checks what
 // they write: FAMILY_CHECK, NORMALISE_FAMILY and UNION_SITES; ANNOTATION_TABLES on an invented annotation of the union,
 // which INVENTED_ANNOTATION writes in the Annotator's layout, with bundle.json and run.json standing in for the
-// configs; GNOMAD_JOINT on an invented echtvar archive, which INVENTED_ARCHIVE encodes; and FAMILY_TABLES, which reads
+// configs; ECHTVAR_VALUES on invented echtvar archives, which INVENTED_ARCHIVE and INVENTED_ALPHAGENOME_ARCHIVE
+// encode; and FAMILY_TABLES, which reads
 // each family's PED file and proband as family_tables.nf passes them. The sheet's proband is the daughter in family A
 // and empty in family B, whose affected son therefore has no role. Everything under family_tables/ is invented, the PED
 // files too: family-a.vcf holds a record of two alleles that both members carry, one of two alleles of which one nobody
@@ -39,14 +40,16 @@
 // and a splicing score; other positions lack the breakdown, the splicing score or both; the position of a deletion
 // has scores of its single-base changes; and other positions of the union have no row. One raw score is 0, another is
 // negative, a PHRED is 0, one is above 67, where a 32-bit float is coarser than the millionths that the archive
-// stores, and one contribution is in scientific notation.
+// stores, and one contribution is in scientific notation. ECHTVAR_VALUES reads the three archives with gnomAD's in one
+// echtvar call, and a second time gnomAD's alone, as in a run that names no archive of the scores.
 // Refused inputs must fail, and so must Annotator outputs without the group's annotation. The case-annotation and
 // echtvar steps run in the tools image, built first. Run with Docker from the repository's root, with this folder's
 // config alone (-C), because a run from the root would otherwise read the pipeline's nextflow.config over it:
 //   docker build -f containers/tools/Dockerfile -t case-annotation-tools-test .
 //   nextflow -C tests/workflows/nextflow.config run tests/workflows/family_tables.nf
 
-include { FAMILY_CHECK ; NORMALISE_FAMILY ; NORMALISE_SV ; UNION_SITES ; SV_SITES ; SV_UNION ; GNOMAD_JOINT ; ANNOTATION_TABLES ; SV_ANNOTATION_TABLES ; FAMILY_TABLES ; groupAnnotation ; svName ; svGroup } from '../../modules/family_tables'
+include { FAMILY_CHECK ; NORMALISE_FAMILY ; NORMALISE_SV ; UNION_SITES ; SV_SITES ; SV_UNION ; ECHTVAR_VALUES ; ANNOTATION_TABLES ; SV_ANNOTATION_TABLES ; FAMILY_TABLES ; groupAnnotation ; svName ; svGroup ; archivesDisk } from '../../modules/family_tables'
+include { ECHTVAR_VALUES as ECHTVAR_VALUES_GNOMAD_ALONE } from '../../modules/family_tables'
 include { SV_SITES as SV_SITES_NO_END } from '../../modules/family_tables'
 include { SV_UNION as SV_UNION_NO_END_REFUSED } from '../../modules/family_tables'
 include { NORMALISE_SV as NORMALISE_SV_REF_MISMATCH_REFUSED } from '../../modules/family_tables'
@@ -111,12 +114,23 @@ workflow {
         '209901',
     ).first()
     archive = INVENTED_ARCHIVE(file("${fixture}/gnomad-joint.vcf"), file("${fixture}/echtvar-config.json"))
-    joint = GNOMAD_JOINT(union, archive)
     // An archive of each of the three invented tables of AlphaGenome's scores, built and checked.
-    INVENTED_ALPHAGENOME_ARCHIVE(
+    scores = INVENTED_ALPHAGENOME_ARCHIVE(
         channel.of('alphagenome_avi', 'alphagenome_avi_breakdown', 'alphagenome_splicing').map { table -> tuple(table, file("${fixture}/${table}.tsv")) },
         file("${fixture}/reference.fa.fai"),
     )
+    avi = scores.filter { table, _zip -> table == 'alphagenome_avi' }.map { _table, zip -> zip }.first()
+    breakdown = scores.filter { table, _zip -> table == 'alphagenome_avi_breakdown' }.map { _table, zip -> zip }.first()
+    splicing = scores.filter { table, _zip -> table == 'alphagenome_splicing' }.map { _table, zip -> zip }.first()
+    joint = ECHTVAR_VALUES(union, archive, avi, breakdown, splicing)
+    // A run that names no archive of the scores gives the step an empty list for each.
+    CHECK_GNOMAD_ALONE(ECHTVAR_VALUES_GNOMAD_ALONE(union, archive, [], [], []))
+    // The step's disk is 50 GB and the size of its archives, rounded up to whole GB, and an archive that the run does
+    // not have adds nothing.
+    def small = file("${fixture}/reference.fa")
+    if (archivesDisk([small, [], [], []]) != 51.GB || archivesDisk([small, small, small, small]) != 51.GB) {
+        error("the disk of four small archives is ${archivesDisk([small, small, small, small])}, and of one ${archivesDisk([small, [], [], []])}")
+    }
     // The union of the group's structural variants and copy-number segments, which are family A's, and its tables.
     sv_sites = SV_SITES(
         structural.join(checked.map { f -> [f] }).filter { _f, sv, cnv, _repeats -> sv || cnv }.map { f, sv, cnv, _repeats -> tuple(f, sv, cnv) }
@@ -477,6 +491,12 @@ process INVENTED_ALPHAGENOME_ARCHIVE {
 // archive by its size and SHA-256, with its fields and echtvar's version. The folder's notes on the tables are the
 // file of the tools' package, byte for byte, and the manifest names it with its size and SHA-256. The manifest gives
 // the pipeline's version as the installed package has it.
+// An allele has AlphaGenome's scores from each archive that holds it, as 32-bit floats rounded to the decimals of the
+// invented tables, which gives the tables' values back: the score and its PHRED from the first archive, the sixteen
+// contributions from the second and the splicing score from the third. The contributions of an allele add up to its
+// raw score and 0.048, as the invented tables have them. The two deletions and the alleles at positions without a row
+// have none, and the alleles at chr1:200 and on chrX those of some archives. The manifest and the table's metadata
+// record each archive, the two that are not for permissive use with their notice.
 process CHECK_TABLES {
     input:
     tuple val(family), path(variants), path(transcripts), path(manifest), path(notes)
@@ -583,6 +603,63 @@ assert fields == [
     ('nhomalt_joint', 'gnomad_HomAlt', 'Integer', 1, -2147483648),
     ('fafmax_faf95_max_joint', 'gnomad_faf95max', 'Float', 2000000, 0),
 ], fields
+shown = ('avi_phred', 'avi_raw', 'avi_shap_atac', 'avi_shap_procap', 'alphagenome_splicing')
+scores = {r['variant_id']: tuple(r[c] for c in shown) for r in variants.to_pylist()}
+none = (None,) * len(shown)
+expected = {
+    'chr1-100-G-A': (1.20713, -0.04245, 0.001293, 0.000053, 0.002873),
+    'chr1-100-G-C': (0.0, -1.25109, 0.00062, 0.000441, 0.000015),
+    'chr1-200-G-A': (97.31337, 2.44971, None, None, None),
+    'chr1-300-T-A': none,
+    'chr1-400-TCA-T': none,
+    'chr2-60-C-A': (48.90215, 2.75691, 0.003406, 0.007602, 1.207),
+    'chr2-80-C-T': none,
+    'chr2-90-GCGTAAA-G': none,
+    'chrX-100-T-A': (2.50794, -0.00597, 0.002019, 0.002793, None),
+    'chrX-100-T-C': (20.00001, 0.55782, 0.01204, 0.09413, None),
+}
+assert scores == {
+    v: tuple(None if x is None else float32(x) for x in values) for v, values in expected.items()}, scores
+contributions = [c for c in variants.column_names if c.startswith('avi_shap_')]
+assert len(contributions) == 16, contributions
+added = ('avi_phred', 'avi_raw', *contributions, 'alphagenome_splicing')
+at = variants.column_names.index('gnomad_joint_faf95_max')
+assert tuple(variants.column_names[at + 1:at + 1 + len(added)]) == added, variants.column_names
+assert {variants.schema.field(c).type for c in added} == {pa.float32()}, variants.schema
+broken_down = [r for r in variants.to_pylist() if r['avi_shap_atac'] is not None]
+assert len(broken_down) == 5, broken_down
+assert all(abs(sum(r[c] for c in contributions) - r['avi_raw'] - 0.048) < 0.00001 for r in broken_down), broken_down
+for name in ('alphagenome_avi', 'alphagenome_avi_breakdown', 'alphagenome_splicing'):
+    recorded = manifest[name]
+    assert (recorded['archive'], recorded['echtvar_version']) == (name + '.zip', '0.2.4'), recorded
+    assert ('terms' in recorded) == (name != 'alphagenome_avi'), recorded
+    assert json.loads(variants.schema.metadata[name.encode()]) == recorded, variants.schema.metadata
+notice = 'By using this information, you agree to AlphaGenome Output Terms of Use found at '
+assert manifest['alphagenome_splicing']['terms'].startswith(notice), manifest
+assert not set(added) & set(manifest['omitted_columns']), manifest
+EOF
+    """
+}
+
+// The values of a run that names no archive of AlphaGenome's scores: gnomAD's joint columns alone, with the record of
+// gnomAD's archive and of no other.
+process CHECK_GNOMAD_ALONE {
+    input:
+    path values
+
+    script:
+    """
+    python3 - <<'EOF'
+import json
+
+import pyarrow.parquet as pq
+
+columns = pq.read_schema('${values}/echtvar_values.parquet').names
+assert columns == ['variant_id', 'gnomad_joint_af', 'gnomad_joint_ac', 'gnomad_joint_hom',
+                   'gnomad_joint_faf95_max'], columns
+records = json.load(open('${values}/echtvar_values.json'))
+assert len(records) == 4, records
+assert [name for name, record in records.items() if record is not None] == ['gnomad_joint'], records
 EOF
     """
 }

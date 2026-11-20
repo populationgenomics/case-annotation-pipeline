@@ -1,9 +1,9 @@
 // The steps of the family tables (family_tables.nf, docs/annotation.md) other than the Annotator's own: checking a
 // family's inputs, normalising its VCF and the sequences of its structural variants, taking the union of the families'
-// sites, reading the union's gnomAD joint values from an echtvar archive, converting the union's annotation, and
-// writing each family's tables. The structural variants and copy-number segments of a group have a union of their own,
+// sites, reading the union's values from echtvar archives, converting the union's annotation, and writing each
+// family's tables. The structural variants and copy-number segments of a group have a union of their own,
 // which SV_SITES cuts from each family's VCFs, SV_UNION joins and SV_ANNOTATION_TABLES converts the annotation of.
-// NORMALISE_FAMILY, NORMALISE_SV, UNION_SITES and SV_SITES run bcftools alone, GNOMAD_JOINT echtvar and
+// NORMALISE_FAMILY, NORMALISE_SV, UNION_SITES and SV_SITES run bcftools alone, ECHTVAR_VALUES echtvar and
 // case-annotation, SV_UNION case-annotation and bcftools, and the others case-annotation, all in the tools image (label
 // 'tools').
 //
@@ -213,50 +213,60 @@ process UNION_SITES {
     """
 }
 
-// gnomAD's joint values of the union's alleles, from an echtvar archive of gnomAD's joint release. echtvar adds the
-// archive's fields to each record, matching position, REF and ALT exactly; it takes one allele per record, as the union
-// has them. case-annotation writes the values as a table keyed by variant id, fails unless its alleles are exactly the
-// union's, and records the archive's size, SHA-256 and fields with echtvar's version. The archive is copied to the
-// task's disk, which holds it beside the union. The annotated BCF gets an index only because htslib reports a file it
-// opens without one.
+// The values of the union's alleles that come from echtvar archives: gnomAD's joint values, from an archive of
+// gnomAD's joint release, and AlphaGenome's scores, from up to three archives that a run need not have
+// (docs/annotation.md). An archive that the run does not have is an empty list. One echtvar call adds the fields of
+// every archive to each record, matching position, REF and ALT exactly; it takes one allele per record, as the union
+// has them. case-annotation writes the values as a table keyed by variant id, and records each archive's size, SHA-256
+// and fields with echtvar's version. It fails unless the table's alleles are exactly the union's, and where two
+// archives add a field of the same name, which echtvar does not check. The archives are copied to the task's disk,
+// which archivesDisk sizes from them. The annotated BCF gets an index only because htslib reports a file it opens
+// without one.
 // The stub gives its folder a fixed time, as an object store gives every folder: a second stub run's folder then
 // looks to Nextflow like the one the first run published, which is what a run into a bucket meets.
-process GNOMAD_JOINT {
+process ECHTVAR_VALUES {
     tag "${group}"
     label 'tools'
     machineType 'n2d-standard-4'
     cpus 4
     memory 16.GB
-    disk 50.GB
+    disk { archivesDisk([gnomad_joint, alphagenome_avi, alphagenome_avi_breakdown, alphagenome_splicing]) }
 
     input:
     tuple val(group), path(sites), path(sites_index)
-    path archive, stageAs: 'archive/*'
+    path gnomad_joint, stageAs: 'gnomad_joint/*'
+    path alphagenome_avi, stageAs: 'alphagenome_avi/*'
+    path alphagenome_avi_breakdown, stageAs: 'alphagenome_avi_breakdown/*'
+    path alphagenome_splicing, stageAs: 'alphagenome_splicing/*'
 
     output:
-    path 'gnomad_joint'
+    path 'echtvar_values'
 
     script:
+    // Each archive of the run under the name that case-annotation knows it by, which is its param's.
+    def archives = [gnomad_joint: gnomad_joint, alphagenome_avi: alphagenome_avi, alphagenome_avi_breakdown: alphagenome_avi_breakdown, alphagenome_splicing: alphagenome_splicing].findAll { _source, archive -> archive }
     """
+    echo "${archives.size()} archives, on a disk of ${task.disk}"
     version=\$(echtvar --version)
-    echtvar anno -e ${archive} ${sites} annotated.bcf
+    echtvar anno ${archives.collect { _source, archive -> "-e ${archive}" }.join(' ')} ${sites} annotated.bcf
     bcftools index annotated.bcf
-    case-annotation gnomad-joint --annotated annotated.bcf --sites ${sites} --archive ${archive} \\
-        --echtvar-version "\${version#echtvar }" --output gnomad_joint
+    case-annotation echtvar-values --annotated annotated.bcf --sites ${sites} \\
+        ${archives.collect { source, archive -> "--archive ${source} ${archive}" }.join(' ')} \\
+        --echtvar-version "\${version#echtvar }" --output echtvar_values
     """
 
     stub:
     """
-    mkdir gnomad_joint
-    touch gnomad_joint/gnomad_joint.parquet gnomad_joint/gnomad_joint.json
-    touch -t 200001010000 gnomad_joint
+    mkdir echtvar_values
+    touch echtvar_values/echtvar_values.parquet echtvar_values/echtvar_values.json
+    touch -t 200001010000 echtvar_values
     """
 }
 
 // The union's variants and transcripts tables from its Annotator JSON, checked against its sites. The JSON is read
 // twice: its genes section, which ends it, gives the HGNC ids that the rows of its positions hold. CPU-bound: one
 // process inflates the JSON and the others parse its lines.
-// The stub gives its folder a fixed time, as the stub of GNOMAD_JOINT does.
+// The stub gives its folder a fixed time, as the stub of ECHTVAR_VALUES does.
 process ANNOTATION_TABLES {
     tag "${group}"
     label 'tools'
@@ -289,7 +299,7 @@ process ANNOTATION_TABLES {
 
 // The sv and sv_transcripts tables of the union of a group's structural variants, from its Annotator JSON, checked
 // against its sites. One process reads the JSON, which holds far fewer positions than the union of the alleles.
-// The stub gives its folder a fixed time, as the stub of GNOMAD_JOINT does.
+// The stub gives its folder a fixed time, as the stub of ECHTVAR_VALUES does.
 process SV_ANNOTATION_TABLES {
     tag "${group}"
     label 'tools'
@@ -321,8 +331,8 @@ process SV_ANNOTATION_TABLES {
 }
 
 // One family's variants table, which holds a column of each member's calls, its transcripts table, its manifest and
-// the notes on the tables (tables.md, a copy of the file in the tools' package), from the union's tables and its gnomAD
-// joint values. The manifest's roles are those of the proband the sheet names
+// the notes on the tables (tables.md, a copy of the file in the tools' package), from the union's tables and its values
+// from the echtvar archives. The manifest's roles are those of the proband the sheet names
 // and of its parents; nobody has one where the sheet names none. DuckDB sorts the union's tables down to the family's
 // alleles, spilling to the boot disk.
 // A family with a structural-variant or a copy-number VCF also gets sv, which holds a column of each member's calls
@@ -341,7 +351,7 @@ process FAMILY_TABLES {
     input:
     tuple val(family), path(vcf), path(vcf_index), path(ped, stageAs: 'input/*'), val(proband), path(sv, stageAs: 'sv/*'), path(cnv, stageAs: 'cnv/*'), path(repeats, stageAs: 'repeats/*'), path(sv_alleles, stageAs: 'sv-alleles/*')
     path tables
-    path gnomad_joint
+    path echtvar_values
     path sv_annotation, stageAs: 'sv-union/*'
     path sv_map, stageAs: 'sv-union/*'
     val schema_version
@@ -357,7 +367,7 @@ process FAMILY_TABLES {
     case-annotation family-tables --family ${family} --ped ${ped} --vcf ${vcf} ${probandOption(proband)} \\
         ${structuralOptions(sv, cnv, repeats)} ${vcfs(sv_alleles).collect { f -> "--sv-alleles ${f}" }.join(' ')} \\
         ${annotated} \\
-        --annotation ${tables} --gnomad-joint ${gnomad_joint} --schema-version ${schema_version} \\
+        --annotation ${tables} --echtvar-values ${echtvar_values} --schema-version ${schema_version} \\
         --pipeline-version ${pipeline_version} --output out --scratch /tmp
     mv out/* .
     """
@@ -387,6 +397,14 @@ def structuralOptions(sv, cnv, repeats) {
     options += vcfs(cnv).collect { f -> "--cnv-vcf ${f}" }
     options += vcfs(repeats).collect { f -> "--repeat-vcf ${f}" }
     return options.join(' ')
+}
+
+// The disk of ECHTVAR_VALUES: 50 GB for the image, the union and its annotated copy, and the size of every archive
+// of the run, each of which is copied to the disk, rounded up to whole GB. An archive that the run does not have is an
+// empty list among them.
+def archivesDisk(archives) {
+    def bytes = [archives].flatten().sum { archive -> archive.size() }
+    return 1.GB * (50 + (bytes + 1024 * 1024 * 1024 - 1).intdiv(1024 * 1024 * 1024))
 }
 
 // The group's annotation among the files an Annotator run wrote, which is the one named after the group. A run that

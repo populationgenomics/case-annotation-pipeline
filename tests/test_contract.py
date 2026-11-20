@@ -24,7 +24,7 @@ import structural_vcfs
 import test_family_tables
 
 import case_annotation
-from case_annotation import cli, contract, family_tables, gnomad_joint
+from case_annotation import cli, contract, echtvar_values, family_tables
 
 REPOSITORY = pathlib.Path(__file__).parent.parent
 CONTRACT = REPOSITORY / 'contract'
@@ -149,12 +149,21 @@ def test_the_example_manifest_is_one_that_the_model_reads_and_writes() -> None:
     assert [table.table for table in manifest.tables] == list(family_tables.TABLES)
     assert manifest.alleles == manifest.tables[0].rows
     assert all(member.sequenced for member in manifest.members if member.role is not None)
-    named = set(manifest.annotation.sources)
+    named = set(manifest.annotation.sources) | {
+        name for name in echtvar_values.SOURCES if getattr(manifest, name) is not None
+    }
     for omitted, table in ((manifest.omitted_columns, 'variants'), (manifest.sv_omitted_columns, 'sv')):
         sources = family_tables.TABLES[table].sources
         assert omitted == tuple(c for source, columns in sources.items() if source not in named for c in columns)
-    # Its archive holds the fields that a run reads gnomAD's joint values from.
-    assert gnomad_joint.column_fields(manifest.gnomad_joint.fields, pathlib.Path(manifest.gnomad_joint.archive))
+    # Each of its archives holds the fields that a run reads the source's values from, and it shows an archive that
+    # the run read, one with a notice and one that the run was not given.
+    for name, source in echtvar_values.SOURCES.items():
+        record = getattr(manifest, name)
+        assert record is None or echtvar_values.column_fields(source, record.fields, pathlib.Path(record.archive))
+    assert manifest.alphagenome_avi is not None
+    assert manifest.alphagenome_avi_breakdown is None
+    assert manifest.alphagenome_splicing is not None
+    assert manifest.alphagenome_splicing.terms == echtvar_values.ALPHAGENOME_SPLICING.notice
     assert manifest.sv_annotation is not None
     assert (manifest.sv_annotation.catalog, manifest.sv_annotation.sources) == (
         manifest.annotation.catalog,
@@ -213,7 +222,7 @@ def test_an_empty_proband_reaches_the_tools_as_no_proband() -> None:
         assert f'case-annotation {stated}' in FAMILY_MODULES
         options = ['--family', 'f', '--ped', 'p', '--vcf', 'v', '--no-proband', '--pipeline-version', 'p']
         if command == 'family-tables':
-            options += ['--annotation', 'a', '--gnomad-joint', 'g', '--schema-version', 's', '--output', 'o']
+            options += ['--annotation', 'a', '--echtvar-values', 'e', '--schema-version', 's', '--output', 'o']
         assert cli.parser().parse_args([command, *options]).proband is None
 
 
@@ -569,9 +578,15 @@ FOLDERS = {
 
 
 def _assemble(
-    tmp_path: pathlib.Path, named: Sequence[str], sources: Sequence[str] = test_family_tables._SOURCES
+    tmp_path: pathlib.Path,
+    named: Sequence[str],
+    sources: Sequence[str] = test_family_tables._SOURCES,
+    scores: Sequence[echtvar_values.Source] = test_family_tables._SCORE_SOURCES,
 ) -> family_tables.FamilyManifest:
-    """Writes the folder of the invented family of test_family_tables, for a row that names the columns given."""
+    """Writes the folder of the invented family of test_family_tables, for a row that names the columns given.
+
+    Its run named the sources given and read the archives of the scores given.
+    """
     larger = test_family_tables._larger(
         tmp_path,
         sv=structural_vcfs.SV_RECORDS if 'sv_vcf' in named else None,
@@ -580,7 +595,7 @@ def _assemble(
         repeats='repeat_vcfs' in named,
         sources=sources,
     )
-    inputs = test_family_tables._inputs(tmp_path, info=test_family_tables._info(*sources))
+    inputs = test_family_tables._inputs(tmp_path, info=test_family_tables._info(*sources), scores=scores)
     return family_tables.assemble(**{**inputs, **larger})
 
 
@@ -663,22 +678,40 @@ def _schema(table: Mapping[str, Any], samples: Sequence[str], sources: Sequence[
     return pa.schema([pa.field(c['name'], _arrow(c), nullable=c['nullable']) for c in (*columns, *members)])
 
 
-@pytest.mark.parametrize('sources', [test_family_tables._SOURCES, ('Ensembl',)], ids=['every source', 'no dated one'])
-def test_the_columns_of_each_table_are_the_ones_its_file_declares(
-    tmp_path: pathlib.Path, sources: Sequence[str]
-) -> None:
-    manifest = _assemble(tmp_path, FOLDERS['every VCF of the larger variants'], sources)
+RUNS = {
+    'every source and every archive': (test_family_tables._SOURCES, test_family_tables._SCORE_SOURCES),
+    'no dated source': (('Ensembl',), test_family_tables._SCORE_SOURCES),
+    'no archive of scores': (test_family_tables._SOURCES, ()),
+    'the scores alone': (test_family_tables._SOURCES, test_family_tables._SCORE_SOURCES[:1]),
+    'nothing that a run can leave out': (('Ensembl',), ()),
+}
+
+
+@pytest.mark.parametrize('case', RUNS)
+def test_the_columns_of_each_table_are_the_ones_its_file_declares(tmp_path: pathlib.Path, case: str) -> None:
+    sources, scores = RUNS[case]
+    manifest = _assemble(tmp_path, FOLDERS['every VCF of the larger variants'], sources, scores)
     assert [table.table for table in manifest.tables] == list(TABLES)
     samples = [member.sample_id for member in manifest.members if member.sequenced]
+    # A run names a dated source in its sources and an archive by giving it.
+    named = (*sources, *(source.name for source in scores))
     for name, table in TABLES.items():
         written = pq.read_schema(tmp_path / 'out' / table['file'])
-        assert written.equals(_schema(table, samples, sources), check_metadata=False), name
+        assert written.equals(_schema(table, samples, named), check_metadata=False), name
     # The columns that the contract gives a source are the ones the manifest lists as left out.
     for name, omitted in (('variants', manifest.omitted_columns), ('sv', manifest.sv_omitted_columns)):
-        left_out = [c['name'] for c in TABLES[name]['columns'] if 'source' in c and c['source'] not in sources]
+        left_out = [c['name'] for c in TABLES[name]['columns'] if 'source' in c and c['source'] not in named]
         assert tuple(sorted(left_out)) == tuple(sorted(omitted))
-        assert bool(left_out) == (sources == ('Ensembl',))
+    assert bool(manifest.omitted_columns) == (case != 'every source and every archive')
+    assert bool(manifest.sv_omitted_columns) == (sources == ('Ensembl',))
     assert all('source' not in c for name in set(TABLES) - {'variants', 'sv'} for c in TABLES[name]['columns'])
+    # An archive's columns are those of its source, and the archive that every run reads is no column's source.
+    by_source: dict[str, list[str]] = {}
+    for column in TABLES['variants']['columns']:
+        by_source.setdefault(column.get('source', ''), []).append(column['name'])
+    for source in echtvar_values.SOURCES.values():
+        expected = [] if source is echtvar_values.REQUIRED else list(source.columns)
+        assert by_source.get(source.name, []) == expected
 
 
 def test_a_table_with_the_members_columns_reserves_the_names_of_its_other_columns() -> None:

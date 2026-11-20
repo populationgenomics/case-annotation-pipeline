@@ -76,6 +76,21 @@
           "required": true
         },
         {
+          "name": "alphagenome_avi",
+          "type": "Path",
+          "required": false
+        },
+        {
+          "name": "alphagenome_avi_breakdown",
+          "type": "Path",
+          "required": false
+        },
+        {
+          "name": "alphagenome_splicing",
+          "type": "Path",
+          "required": false
+        },
+        {
           "name": "tools_container",
           "type": "String",
           "required": true

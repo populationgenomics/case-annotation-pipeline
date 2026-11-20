@@ -143,8 +143,9 @@ it, and a family's manifest records the versions that the run pinned and the sou
 ### AlphaGenome
 
 Google DeepMind's model of DNA sequence. DeepMind publishes tables of scores that it computed with the model for every
-single-base change, among them the AlphaGenome Variant Impact (AVI) score, and an echtvar archive can be built from each
-table ([AlphaGenome's archives](annotation.md#alphagenomes-archives)).
+single-base change, among them the AlphaGenome Variant Impact (AVI) score. An echtvar archive can be built from each
+table ([AlphaGenome's archives](annotation.md#alphagenomes-archives)), and a run that is given one adds the scores to
+`variants` ([AlphaGenome's scores](family-tables.md#alphagenomes-scores)).
 
 ### Families sheet
 
