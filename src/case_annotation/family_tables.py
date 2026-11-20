@@ -421,8 +421,9 @@ class FamilyManifest(pydantic.BaseModel, frozen=True, extra='forbid'):
     # without one left out; None and no columns in a family without the repeats table.
     strchive: strchive.StrchiveFile | None
     repeats_omitted_columns: tuple[str, ...]
-    # What found the runs of roh and the regions of upd, with the members and the children it read. A family whose
-    # record names no child has no upd table: an upd table without rows is of a child without a region.
+    # What found the runs of roh and the regions of upd, with the members and the children it read, and the children
+    # that upd could not assess. A family whose record names no child in either list has no upd table. An upd table
+    # has no row of an assessed child without a region, and none of a child that was not assessed.
     roh_upd: roh_upd.RohUpdInfo
 
 
@@ -996,9 +997,9 @@ def assemble(
             queries[table], declared[table] = query, schema
             metadata[table] = sv_metadata if table in ('sv', 'sv_transcripts') else repeats_metadata
         # The runs and the regions as the step wrote them, sorted as the other tables are. The file of the regions is
-        # there where upd assessed a child.
+        # there where the family has a child with both parents sequenced, whether or not upd could assess it.
         segment_tables = {'roh': (roh_upd.ROH_NAME, roh_upd.ROH)}
-        if segment_info.upd_children:
+        if segment_info.upd_children or segment_info.upd_not_assessed:
             segment_tables[TRIO_TABLE] = (roh_upd.UPD_NAME, roh_upd.UPD)
         for table, (name, schema) in segment_tables.items():
             con.read_parquet(str(segments / name)).create_view(f'{table}_rows')

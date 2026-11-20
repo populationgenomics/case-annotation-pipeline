@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import importlib.metadata
 import json
 import pathlib
@@ -261,12 +262,20 @@ def test_a_family_without_an_assessed_child_has_runs_and_no_table_of_regions(tmp
 
 
 CONVERSIONS_REFUSED = {
-    'a prepared VCF without a record': ({'sites': 0}, 'no record, so the tools were given nothing to read'),
-    'regions of a member who is no assessed child': (
+    'a number of sites below 0': ({'sites': -1}, '-1 is no number of records'),
+    'regions of a member who is no child of two samples': (
         {'regions': {'S3': (), 'S1': ()}},
-        r"regions of \['S1', 'S3'\] were given, and the children .* are \['S3'\]",
+        r"regions of \['S1', 'S3'\] were given and \[\] as not assessed, and the children .* are \['S3'\]",
     ),
-    'no regions of the assessed child': ({'regions': {}}, r'regions of \[\] were given'),
+    'neither regions of the child nor the child as not assessed': ({'regions': {}}, r'regions of \[\] were given'),
+    'a child with regions that is also given as not assessed': (
+        {'regions': {'S3': ()}, 'not_assessed': ('S3',)},
+        r"regions of \['S3'\] were given and \['S3'\] as not assessed",
+    ),
+    'a member who is no child of two samples as not assessed': (
+        {'not_assessed': ('S3', 'S2')},
+        r"\['S2', 'S3'\] as not assessed",
+    ),
 }
 
 
@@ -277,6 +286,114 @@ def test_a_conversion_of_what_the_step_did_not_run_is_refused(tmp_path: pathlib.
     with pytest.raises(ValueError, match=message):
         invented_roh_upd.folder(tmp_path / 'work', _FAMILY, ped, vcf, **changed)
     assert not (tmp_path / 'work' / 'roh_upd').exists()
+
+
+def _prepared(tmp_path: pathlib.Path, *records: tuple[str, tuple[str, ...]]) -> pathlib.Path:
+    """A prepared VCF of three samples, as text: for each record its INFO and its three calls after `0/1`."""
+    path = tmp_path / 'prepared.vcf.gz'
+    with gzip.open(path, 'wt') as vcf:
+        vcf.write('##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\tS2\tS3\n')
+        for number, (info, calls) in enumerate(records, start=1):
+            keys = 'GT:GQ' if all(calls) else 'GT'
+            samples = '\t'.join(f'0/1:{call}' if call else '0/1' for call in calls)
+            vcf.write(f'chr1\t{number * 100}\t.\tA\tC\t50\tPASS\t{info}\t{keys}\t{samples}\n')
+    return path
+
+
+_GOOD = ('gnomad_AF=0.1', ('60', '60', '60'))
+_LAST = ('gnomad_AF=0', ('60', '60', '60'))
+# Each case: the records of a prepared VCF, and whether upd keeps one of them at 0.05 and GQ 30.
+SITES = {
+    'a common site with high GQs, before another record': ((_GOOD, _LAST), True),
+    'a site at both thresholds': ((('gnomad_AF=0.05', ('30', '30', '30')), _LAST), True),
+    'such a site after sites that upd leaves out': ((_LAST, _LAST, _GOOD, _LAST), True),
+    'a frequency in another notation': ((('gnomad_AF=5e-2;gnomad_AC=3', ('30', '31', '32')), _LAST), True),
+    'no record': ((), False),
+    'such a site as the only record, which upd never reads': ((_GOOD,), False),
+    'such a site as the last record': ((_LAST, _GOOD), False),
+    'a frequency below the threshold': ((('gnomad_AF=0.049', ('60', '60', '60')), _LAST), False),
+    'an allele that the archive lacks': ((_LAST, _LAST), False),
+    'a record without the frequency': ((('.', ('60', '60', '60')), _LAST), False),
+    'a GQ below the threshold in the father': ((('gnomad_AF=0.1', ('29', '60', '60')), _LAST), False),
+    'a GQ below the threshold in the child': ((('gnomad_AF=0.1', ('60', '60', '29')), _LAST), False),
+    'a missing GQ': ((('gnomad_AF=0.1', ('60', '.', '60')), _LAST), False),
+    'calls without GQ': ((('gnomad_AF=0.1', ('', '', '')), _LAST), False),
+}
+
+
+@pytest.mark.parametrize('case', SITES)
+def test_upd_is_asked_for_only_where_it_would_keep_a_site(tmp_path: pathlib.Path, case: str) -> None:
+    records, kept = SITES[case]
+    assert roh_upd.keeps_a_site(_prepared(tmp_path, *records), 'gnomad_AF', 0.05, 30) is kept
+
+
+def test_the_thresholds_are_the_ones_given(tmp_path: pathlib.Path) -> None:
+    prepared = _prepared(tmp_path, ('gnomad_AF=0.01', ('20', '20', '20')), _LAST)
+    assert not roh_upd.keeps_a_site(prepared, 'gnomad_AF', 0.05, 30)
+    assert not roh_upd.keeps_a_site(prepared, 'gnomad_AF', 0.01, 30)
+    assert roh_upd.keeps_a_site(prepared, 'gnomad_AF', 0.01, 20)
+    # Another field's value is not the frequency.
+    assert not roh_upd.keeps_a_site(prepared, 'gnomad_AC', 0.01, 20)
+
+
+SITES_REFUSED = {
+    'a frequency that is no number': (('gnomad_AF=common', ('60', '60', '60')), "gnomad_AF is 'common'"),
+}
+
+
+@pytest.mark.parametrize('case', SITES_REFUSED)
+def test_a_prepared_vcf_that_upd_could_not_read_is_refused(tmp_path: pathlib.Path, case: str) -> None:
+    record, message = SITES_REFUSED[case]
+    with pytest.raises(ValueError, match=message):
+        roh_upd.keeps_a_site(_prepared(tmp_path, record, _LAST), 'gnomad_AF', 0.05, 30)
+    sites_only = tmp_path / 'sites.vcf.gz'
+    with gzip.open(sites_only, 'wt') as vcf:
+        vcf.write(
+            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\nchr1\t1\t.\tA\tC\t.\t.\t.\nchr1\t2\t.\tA\tC\t.\t.\t.\n'
+        )
+    with pytest.raises(ValueError, match='not a record of a VCF with samples'):
+        roh_upd.keeps_a_site(sites_only, 'gnomad_AF', 0.05, 30)
+
+
+def test_the_sites_command_prints_what_upd_would_keep(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    options = ['--af-tag', 'gnomad_AF', '--min-af', '0.05', '--min-gq', '30']
+    cli.main(['roh-upd-sites', '--prepared', str(_prepared(tmp_path, _GOOD, _LAST)), *options])
+    assert capsys.readouterr().out == 'kept\n'
+    cli.main(['roh-upd-sites', '--prepared', str(_prepared(tmp_path, _GOOD)), *options])
+    assert capsys.readouterr().out == 'none\n'
+
+
+def test_a_child_that_upd_was_not_run_for_is_recorded_and_has_no_row(tmp_path: pathlib.Path) -> None:
+    ped, vcf = _ped(tmp_path), _vcf(tmp_path, ('S4', 'S1', 'S2', 'S3'))
+    # Without the list, the conversion refuses the family: no region was given for either child.
+    with pytest.raises(ValueError, match=r'regions of \[\] were given and \[\] as not assessed'):
+        invented_roh_upd.folder(tmp_path / 'refused', _FAMILY, ped, vcf, regions={})
+    folder = invented_roh_upd.folder(tmp_path / 'work', _FAMILY, ped, vcf, sites=0, not_assessed=('S4', 'S3'))
+    info = roh_upd.read_info(folder)
+    assert (info.upd_children, info.sites) == ((), 0)
+    assert [(entry.child, entry.mother, entry.father, entry.reason) for entry in info.upd_not_assessed] == [
+        ('S4', 'S2', 'S1', 'no informative site'),
+        ('S3', 'S2', 'S1', 'no informative site'),
+    ]
+    # The family has the table, which holds no row of a child that was not assessed.
+    assert pq.read_table(folder / 'upd.parquet').num_rows == 0
+    roh_upd.check(info, pedigree.read(ped), ('S4', 'S1', 'S2', 'S3'))
+    # One child assessed and the other not, as the record can also say.
+    mixed = invented_roh_upd.folder(
+        tmp_path / 'mixed', _FAMILY, ped, vcf, regions={'S3': (_REGION,)}, not_assessed=('S4',)
+    )
+    info = roh_upd.read_info(mixed)
+    assert [trio.child for trio in info.upd_children] == ['S3']
+    assert [entry.child for entry in info.upd_not_assessed] == ['S4']
+    assert {row['member'] for row in pq.read_table(mixed / 'upd.parquet').to_pylist()} == {'S3'}
+    roh_upd.check(info, pedigree.read(ped), ('S4', 'S1', 'S2', 'S3'))
+    with pytest.raises(ValueError, match='reason'):
+        roh_upd.RohUpdInfo.model_validate(
+            json.loads((mixed / 'roh_upd.json').read_text())
+            | {'upd_not_assessed': [{'child': 'S4', 'mother': 'S2', 'father': 'S1', 'reason': 'too few reads'}]}
+        )
 
 
 def test_a_record_without_a_tools_version_is_refused(tmp_path: pathlib.Path) -> None:
@@ -310,8 +427,20 @@ def test_a_folder_of_another_family_is_refused(tmp_path: pathlib.Path) -> None:
     # The same samples under a pedigree in which nobody is a child of two of them.
     unrelated = pedigree.read(_ped(tmp_path, ('S1', 'S2', 'S5')))
     renamed = info.model_copy(update={'roh_members': ('S1', 'S2', 'S5')})
-    with pytest.raises(ValueError, match=r"upd assessed \['S3'\], and the children .* are \[\]"):
+    with pytest.raises(
+        ValueError, match=r"upd assessed \['S3'\] and did not assess \[\], and the children .* are \[\]"
+    ):
         roh_upd.check(renamed, unrelated, ('S1', 'S2', 'S5'))
+    # A child that the record lists as assessed and as not assessed.
+    twice = info.model_copy(
+        update={
+            'upd_not_assessed': (
+                roh_upd.NotAssessed(**info.upd_children[0].model_dump(), reason='no informative site'),
+            )
+        }
+    )
+    with pytest.raises(ValueError, match=r"upd assessed \['S3'\] and did not assess \['S3'\]"):
+        roh_upd.check(twice, ped, ('S1', 'S2', 'S3'))
 
 
 class _Installed:

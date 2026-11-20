@@ -376,7 +376,7 @@
       "echtvar anno"
     ],
     "roh_command": "bcftools roh --AF-tag gnomad_AF -G30 -O r",
-    "upd_command": "upd --af-tag gnomad_AF regions",
+    "upd_command": "upd --af-tag gnomad_AF --min-af 0.05 --min-gq 30 regions",
     "frequency_archive": {
       "archive": "gnomad-joint.invented.zip",
       "bytes": 1000000,
@@ -403,6 +403,7 @@
         "mother": "S0102",
         "father": "S0101"
       }
-    ]
+    ],
+    "upd_not_assessed": []
   }
 }

@@ -8,6 +8,9 @@ they are given and turns what they write into rows:
   INFO field that holds an allele's frequency and the children that `upd` assesses;
 - the step (ROH_UPD in modules/family_tables.nf) prepares one VCF for both tools with bcftools and echtvar, and runs
   the tools on it;
+- `keeps_a_site` says whether upd would keep any site of the prepared VCF, by upd's own rule. upd fails on a VCF of
+  which it keeps none, as a call set of a few regions can be, so the step does not run it then, and the record lists
+  the family's children as not assessed;
 - `convert` reads the tools' output and writes a table of each, `roh` and `upd`, with a record of what ran.
 
 The prepared VCF holds the family's PASS sites on the autosomes with one alternate allele of one base, genotypes
@@ -25,12 +28,13 @@ the region says what the type would have: the region is then an isodisomy or a d
 from __future__ import annotations
 
 import dataclasses
+import gzip
 import hashlib
 import importlib.metadata
 import json
 import pathlib
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import Any, Literal
 
 import pyarrow as pa
@@ -111,6 +115,16 @@ class Trio(pydantic.BaseModel, frozen=True, extra='forbid'):
     father: str
 
 
+# Why upd did not assess a child: it would have kept no site of the prepared VCF (keeps_a_site).
+type Reason = Literal['no informative site']
+
+
+class NotAssessed(Trio, frozen=True, extra='forbid'):
+    """A child whose parents are both sequenced and that upd was not run for, with the reason."""
+
+    reason: Reason
+
+
 class FrequencyArchive(pydantic.BaseModel, frozen=True, extra='forbid'):
     """The echtvar archive that gave each site its frequency, and the echtvar that read it."""
 
@@ -132,10 +146,13 @@ class RohUpdInfo(pydantic.BaseModel, frozen=True, extra='forbid'):
     roh_command: str = pydantic.Field(min_length=1)  # without its files
     upd_command: str = pydantic.Field(min_length=1)  # without its files and its three samples
     frequency_archive: FrequencyArchive
-    sites: int  # the records of the prepared VCF
+    sites: int  # the records of the prepared VCF, which is 0 where the family has no such site
     roh_members: tuple[str, ...]  # every sequenced member, in the VCF's order
-    # The children that upd assessed, in the VCF's order. The family has the upd table where there is one.
+    # The children that upd assessed, in the VCF's order.
     upd_children: tuple[Trio, ...]
+    # The children with both parents sequenced that upd was not run for, each with the reason, in the VCF's order. The
+    # family has the upd table where it has a child of either list, and the table has no row of a child of this one.
+    upd_not_assessed: tuple[NotAssessed, ...]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -312,6 +329,56 @@ def read_upd(path: pathlib.Path, child: str) -> list[dict[str, Any]]:
     return rows
 
 
+def _kept(line: str, tag: str, min_af: float, min_gq: int, where: str) -> bool:
+    """Whether upd keeps a record of the prepared VCF, by the rule of its code at the commit that the image installs.
+
+    upd keeps a record whose frequency is at least `min_af` and whose GQ is at least `min_gq` in every sample of the
+    VCF, the ones outside the trio too. It reads a record without the frequency as one of frequency 0, and a call
+    without GQ, or with one that is no integer, as one of GQ 0.
+    """
+    fields = line.rstrip('\n').split('\t')
+    if len(fields) < 10:
+        raise ValueError(f'{where}: not a record of a VCF with samples: {line!r}')
+    info = {key: value for key, _, value in (pair.partition('=') for pair in fields[7].split(';'))}
+    try:
+        frequency = float(info.get(tag) or 0)
+    except ValueError as malformed:
+        raise ValueError(f'{where}: the frequency {tag} is {info[tag]!r}, not a number') from malformed
+    if frequency < min_af:
+        return False
+    keys = fields[8].split(':')
+    for call in fields[9:]:
+        try:
+            quality = int(dict(zip(keys, call.split(':'), strict=False)).get('GQ', '0'))
+        except ValueError:
+            quality = 0
+        if quality < min_gq:
+            return False
+    return True
+
+
+def keeps_a_site(prepared: pathlib.Path, tag: str, min_af: float, min_gq: int) -> bool:
+    """Whether upd, with these thresholds, would keep at least one site of the prepared VCF.
+
+    upd fails with a TypeError on a VCF of which it keeps no site, so the step asks before it runs upd. The answer
+    follows upd's own reading of the file: its text, line by line, with the rule of _kept. upd never reads the last
+    record of a file, so a site counts only where a record follows it. The reading stops at the first site that
+    counts, which a whole genome has among its first records.
+
+    Raises:
+        ValueError: if a record is not one of a VCF with samples, or its frequency is no number.
+    """
+    with gzip.open(prepared, 'rt') as vcf:
+        records = ((number, line) for number, line in enumerate(vcf, start=1) if not line.startswith('#'))
+        previous = None
+        for record in records:
+            # `previous` has a record after it.
+            if previous is not None and _kept(previous[1], tag, min_af, min_gq, f'{prepared}:{previous[0]}'):
+                return True
+            previous = record
+    return False
+
+
 def _digest(path: pathlib.Path) -> str:
     with path.open('rb') as f:
         return hashlib.file_digest(f, 'sha256').hexdigest()
@@ -326,6 +393,7 @@ def convert(
     regions: Mapping[str, pathlib.Path],
     output: pathlib.Path,
     *,
+    not_assessed: Collection[str] = (),
     sites: int,
     bcftools_version: str,
     echtvar_version: str,
@@ -338,32 +406,35 @@ def convert(
 
     The inputs are the family's PED file, the prepared VCF that both tools read, the archive that gave its sites their
     frequency, the output of `bcftools roh` and that of `upd regions` for each assessed child, by the child's sample.
-    The folder gets the runs as ROH_NAME, the regions as UPD_NAME where upd assessed a child, and the record as
-    INFO_NAME. `upd` is the installed upd's version and commit (installed_upd), and the commands are what the step
-    ran.
+    `not_assessed` are the children that the step did not run upd for, because upd would have kept no site
+    (keeps_a_site). The folder gets the runs as ROH_NAME, the regions as UPD_NAME where the family has a child with
+    both parents sequenced, assessed or not, and the record as INFO_NAME. `upd` is the installed upd's version and
+    commit (installed_upd), and the commands are what the step ran.
 
     Raises:
-        ValueError: if the prepared VCF has no record, if the regions given are not of exactly the children that the
-            family's pedigree and the VCF's samples give, or if a tool's output is not what the tool writes.
+        ValueError: if the number of sites is below 0, if the children with regions and those not assessed are not
+            together exactly the children that the family's pedigree and the VCF's samples give, each once, or if a
+            tool's output is not what the tool writes.
     """
     samples, _formats = _samples(prepared)
     ped = pedigree.read(ped_path)
     pedigree.check_family(ped, family, samples)
-    if sites < 1:
-        raise ValueError(f'{prepared}: no record, so the tools were given nothing to read')
-    assessed = trios(ped, samples)
-    children = [trio.child for trio in assessed]
-    if sorted(regions) != sorted(children):
+    if sites < 0:
+        raise ValueError(f'{prepared}: {sites} is no number of records')
+    with_parents = trios(ped, samples)
+    children = [trio.child for trio in with_parents]
+    if sorted([*regions, *not_assessed]) != sorted(children):
         raise ValueError(
-            f'regions of {sorted(regions)} were given, and the children of {family!r} with both parents sequenced '
-            f'are {sorted(children)}'
+            f'regions of {sorted(regions)} were given and {sorted(not_assessed)} as not assessed, and the children '
+            f'of {family!r} with both parents sequenced are {sorted(children)}'
         )
+    assessed = tuple(trio for trio in with_parents if trio.child in regions)
     field = frequency_field(archive)
     runs = read_roh(roh, samples)
-    found = [row for child in children for row in read_upd(regions[child], child)]
+    found = [row for trio in assessed for row in read_upd(regions[trio.child], trio.child)]
     output.mkdir(parents=True)
     pq.write_table(pa.Table.from_pylist(runs, schema=ROH), output / ROH_NAME, compression='zstd')
-    if assessed:
+    if with_parents:
         pq.write_table(pa.Table.from_pylist(found, schema=UPD), output / UPD_NAME, compression='zstd')
     info = RohUpdInfo(
         bcftools_version=bcftools_version,
@@ -382,6 +453,11 @@ def convert(
         sites=sites,
         roh_members=tuple(samples),
         upd_children=assessed,
+        upd_not_assessed=tuple(
+            NotAssessed(**trio.model_dump(), reason='no informative site')
+            for trio in with_parents
+            if trio.child not in regions
+        ),
     )
     (output / INFO_NAME).write_text(info.model_dump_json(indent=2) + '\n')
     return info
@@ -396,16 +472,19 @@ def check(info: RohUpdInfo, ped: pedigree.Pedigree, samples: Sequence[str]) -> N
     """Fails unless a folder's record is of a family with this pedigree and these samples.
 
     Raises:
-        ValueError: if the runs are of other members than the family's samples, or upd assessed other children than
-            those the pedigree and the samples give.
+        ValueError: if the runs are of other members than the family's samples, or the children that upd assessed
+            and those it did not are not together the children that the pedigree and the samples give, each once.
     """
     if list(info.roh_members) != list(samples):
         raise ValueError(
             f'the runs of homozygosity are of {list(info.roh_members)}, and the samples of {ped.family!r} are '
             f'{list(samples)}'
         )
-    if info.upd_children != (expected := trios(ped, samples)):
+    recorded = [*info.upd_children, *(Trio(**entry.model_dump(exclude={'reason'})) for entry in info.upd_not_assessed)]
+    expected = trios(ped, samples)
+    if len(recorded) != len(expected) or set(recorded) != set(expected):
         raise ValueError(
-            f'upd assessed {[trio.child for trio in info.upd_children]}, and the children of {ped.family!r} with '
-            f'both parents sequenced are {[trio.child for trio in expected]}'
+            f'upd assessed {[trio.child for trio in info.upd_children]} and did not assess '
+            f'{[entry.child for entry in info.upd_not_assessed]}, and the children of {ped.family!r} with both '
+            f'parents sequenced are {[trio.child for trio in expected]}'
         )

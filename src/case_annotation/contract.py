@@ -513,7 +513,7 @@ def example_manifest() -> family_tables.FamilyManifest:
                 'echtvar anno',
             ),
             roh_command='bcftools roh --AF-tag gnomad_AF -G30 -O r',
-            upd_command='upd --af-tag gnomad_AF regions',
+            upd_command='upd --af-tag gnomad_AF --min-af 0.05 --min-gq 30 regions',
             frequency_archive=roh_upd.FrequencyArchive(
                 archive='gnomad-joint.invented.zip',
                 bytes=1_000_000,
@@ -535,6 +535,7 @@ def example_manifest() -> family_tables.FamilyManifest:
             sites=4_000_000,
             roh_members=_EXAMPLE_SAMPLES,
             upd_children=(roh_upd.Trio(child=child, mother=mother, father=father),),
+            upd_not_assessed=(),
         ),
     )
 

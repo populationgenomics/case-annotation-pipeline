@@ -405,9 +405,12 @@ process SV_ANNOTATION_TABLES {
 // stops at a site of several alleles, at an INFO header line with a key beside ID, Number, Type and Description and at
 // a frequency of `.`, and reads a phased genotype as no call. X, Y and M are left out: a haploid call is no genotype
 // that upd reads.
-// A prepared VCF without a record fails the task, and so does a tool that fails, whose output is then never read. upd
-// fails where it keeps no site of a child and its parents, which are the sites with a frequency of at least 0.05 and a
-// GQ of at least 30 in all three: a VCF with records and no such site is not one that upd can assess.
+// upd keeps the sites with a frequency of at least 0.05 and a GQ of at least 30 in every sample, which are its own
+// thresholds and are given to it from the array that the question below takes them from. It fails with a TypeError on
+// a VCF of which it keeps no site, as a call set of a few regions can be, and as one without a site on chr1 to chr22
+// is. case-annotation therefore reads the prepared VCF by upd's rule first, and upd is not run where it would keep
+// none: the family's children are then recorded as not assessed, and the family gets its tables. A tool that fails for
+// any other reason fails the task, and its output is then never read.
 // case-annotation writes the tools' output as tables, with a record of the commands that ran, which the step passes
 // from the arrays it ran them with. The archive is copied to the task's disk, which archivesDisk sizes. The prepared
 // VCF gets an index only because htslib reports a file it opens without one.
@@ -438,23 +441,23 @@ process ROH_UPD {
         | bcftools +setGT --no-version -Ob -o prepared.bcf -- "\${unphased[@]}"
     sites=\$(bcftools view --no-version -H prepared.bcf | wc -l)
     echo "\${sites} sites for bcftools roh and upd"
-    if [[ \${sites} -eq 0 ]]; then
-        echo "${family}: no PASS site with one alternate allele of one base on chr1 to chr22, so nothing for bcftools roh and upd to read" >&2
-        exit 1
-    fi
     echtvar_version=\$(echtvar --version)
     echtvar anno -e ${gnomad_joint} prepared.bcf prepared.vcf.gz
     bcftools index -t prepared.vcf.gz
     roh=(roh --AF-tag "\${tag}" -G30 -O r)
     bcftools "\${roh[@]}" -o roh.txt prepared.vcf.gz
-    called=(--af-tag "\${tag}" regions)
+    thresholds=(--af-tag "\${tag}" --min-af 0.05 --min-gq 30)
+    called=("\${thresholds[@]}" regions)
+    sites_of_upd=\$(case-annotation roh-upd-sites --prepared prepared.vcf.gz "\${thresholds[@]}")
     mkdir upd
     regions=()
     while IFS=\$'\\t' read -r child mother father; do
-        if ! upd --vcf prepared.vcf.gz --proband "\${child}" --mother "\${mother}" --father "\${father}" "\${called[@]}" --out "upd/\${child}.bed"; then
-            echo "${family}: upd failed for \${child}; it also fails, with a TypeError, where no site has a frequency of at least 0.05 and a GQ of at least 30 in all three" >&2
-            exit 1
+        if [[ \${sites_of_upd} == none ]]; then
+            echo "${family}: upd would keep no site, so it is not run for \${child}"
+            regions+=(--not-assessed "\${child}")
+            continue
         fi
+        upd --vcf prepared.vcf.gz --proband "\${child}" --mother "\${mother}" --father "\${father}" "\${called[@]}" --out "upd/\${child}.bed"
         regions+=(--regions "\${child}" "upd/\${child}.bed")
     done < trios.tsv
     case-annotation roh-upd --family ${family} --ped ${ped} --archive ${gnomad_joint} --prepared prepared.vcf.gz \\

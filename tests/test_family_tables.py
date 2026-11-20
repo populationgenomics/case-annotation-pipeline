@@ -475,12 +475,16 @@ def _inputs(
     runs: Sequence[Mapping[str, Any]] = (),
     regions: Sequence[Mapping[str, Any]] = (),
     samples: Sequence[str] = _SAMPLES,
+    assessed: bool = True,
 ) -> dict[str, Any]:
     _write_vcf(tmp_path / 'family.vcf.gz', records)
     (tmp_path / 'family.ped').write_text(ped)
     # A folder of its own for each call, since a test can write a family's inputs twice.
     segments = tmp_path / f'segments-{len(list(tmp_path.glob("segments-*")))}'
-    invented_roh_upd.written(segments, samples, _assessed(ped, samples), runs, regions)
+    children = _assessed(ped, samples)
+    invented_roh_upd.written(
+        segments, samples, children if assessed else (), runs, regions, not_assessed=() if assessed else children
+    )
     _write_union(tmp_path / 'union', _ALLELES, info or _info('Ensembl', 'dbSNP', 'clinvar'))
     _write_joint(tmp_path / 'joint', joint, scores)
     _write_joined(tmp_path / 'joined', joined_alleles, joined)
@@ -2454,6 +2458,23 @@ def test_a_family_without_a_child_of_two_sequenced_parents_has_no_table_of_regio
     assert len(_rows(tmp_path / 'out' / 'roh.parquet')) == len(_RUNS)
 
 
+def test_a_child_that_upd_could_not_assess_has_a_table_without_rows_and_an_entry_in_the_manifest(
+    tmp_path: pathlib.Path,
+) -> None:
+    manifest = family_tables.assemble(**_inputs(tmp_path, runs=_RUNS, assessed=False))
+    # The table is there as for an assessed child without a region, and only the manifest tells the two apart.
+    assert [t.table for t in manifest.tables] == [*_ALLELE_TABLES, *_SEGMENT_TABLES]
+    assert _rows(tmp_path / 'out' / 'upd.parquet') == []
+    written = json.loads((tmp_path / 'out' / 'manifest.json').read_text())['roh_upd']
+    assert written['upd_children'] == []
+    assert written['upd_not_assessed'] == [
+        {'child': 'S3', 'mother': 'S2', 'father': 'S1', 'reason': 'no informative site'}
+    ]
+    (tmp_path / 'again').mkdir()
+    assessed = family_tables.assemble(**_inputs(tmp_path / 'again', runs=_RUNS))
+    assert (assessed.roh_upd.upd_not_assessed, len(assessed.roh_upd.upd_children)) == ((), 1)
+
+
 def test_runs_and_regions_of_another_family_are_refused(tmp_path: pathlib.Path) -> None:
     inputs = _inputs(tmp_path)
     others = invented_roh_upd.written(tmp_path / 'others', ('S1', 'S2'), [])
@@ -2461,7 +2482,9 @@ def test_runs_and_regions_of_another_family_are_refused(tmp_path: pathlib.Path) 
         family_tables.assemble(**{**inputs, 'segments': others})
     # A folder whose record says that upd assessed nobody, for a family with a child of two sequenced parents.
     unassessed = invented_roh_upd.written(tmp_path / 'unassessed', _SAMPLES, [])
-    with pytest.raises(ValueError, match=r"upd assessed \[\], and the children of 'fam-1' .* are \['S3'\]"):
+    with pytest.raises(
+        ValueError, match=r"upd assessed \[\] and did not assess \[\], and the children of 'fam-1' .* are \['S3'\]"
+    ):
         family_tables.assemble(**{**inputs, 'output': tmp_path / 'second', 'segments': unassessed})
 
 

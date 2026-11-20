@@ -428,6 +428,22 @@ def _roh_upd_plan(args: argparse.Namespace) -> None:
     print(planned.frequency.alias)
 
 
+def _roh_upd_sites_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        '--prepared', type=pathlib.Path, required=True, help='the VCF that the step prepared for both tools, bgzipped'
+    )
+    parser.add_argument(
+        '--af-tag', required=True, help='the INFO field of the frequency, as upd is given it and roh-upd-plan prints it'
+    )
+    parser.add_argument('--min-af', type=float, required=True, help="upd's lowest frequency of a site, as upd is given")
+    parser.add_argument('--min-gq', type=int, required=True, help="upd's lowest GQ of a call, as upd is given it")
+
+
+def _roh_upd_sites(args: argparse.Namespace) -> None:
+    kept = roh_upd.keeps_a_site(args.prepared, args.af_tag, args.min_af, args.min_gq)
+    print('kept' if kept else 'none')
+
+
 def _roh_upd_arguments(parser: argparse.ArgumentParser) -> None:
     path = pathlib.Path
     _roh_upd_family_arguments(parser)
@@ -447,7 +463,17 @@ def _roh_upd_arguments(parser: argparse.ArgumentParser) -> None:
         metavar=('CHILD', 'BED'),
         help=(
             "a child's sample and the output of `upd regions` for it and its parents; given once for each child "
-            'that roh-upd-plan lists, and not at all for a family without one'
+            'that roh-upd-plan lists and upd ran for'
+        ),
+    )
+    parser.add_argument(
+        '--not-assessed',
+        action='append',
+        default=[],
+        metavar='CHILD',
+        help=(
+            'a child that roh-upd-plan lists and upd was not run for, because roh-upd-sites found no site that upd '
+            'keeps; given once for each such child'
         ),
     )
     parser.add_argument('--bcftools-version', required=True, help='the version of the bcftools that ran')
@@ -467,7 +493,7 @@ def _roh_upd_arguments(parser: argparse.ArgumentParser) -> None:
         type=path,
         required=True,
         help=(
-            f'the folder to write {roh_upd.ROH_NAME}, {roh_upd.UPD_NAME} for a family with an assessed child, and '
+            f'the folder to write {roh_upd.ROH_NAME}, {roh_upd.UPD_NAME} for a family with a child of two samples, and '
             f'{roh_upd.INFO_NAME} into; it must not exist'
         ),
     )
@@ -482,6 +508,7 @@ def _roh_upd(args: argparse.Namespace) -> None:
         args.roh,
         _by_source('--regions', args.regions),
         args.output,
+        not_assessed=args.not_assessed,
         sites=args.sites,
         bcftools_version=args.bcftools_version,
         echtvar_version=args.echtvar_version,
@@ -628,6 +655,15 @@ _SUBCOMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Ca
         ),
         _roh_upd_plan_arguments,
         _roh_upd_plan,
+    ),
+    'roh-upd-sites': (
+        (
+            'says whether upd would keep a site of the prepared VCF, by the rule of its code: prints `kept` where a '
+            'record that is not the last has a frequency of at least --min-af and a GQ of at least --min-gq in every '
+            'sample, and `none` otherwise, where upd would fail'
+        ),
+        _roh_upd_sites_arguments,
+        _roh_upd_sites,
     ),
     'roh-upd': (
         (

@@ -315,6 +315,34 @@
       "title": "JoinedFile",
       "type": "object"
     },
+    "NotAssessed": {
+      "description": "A child whose parents are both sequenced and that upd was not run for, with the reason.",
+      "properties": {
+        "child": {
+          "title": "Child",
+          "type": "string"
+        },
+        "mother": {
+          "title": "Mother",
+          "type": "string"
+        },
+        "father": {
+          "title": "Father",
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "#/$defs/Reason"
+        }
+      },
+      "required": [
+        "child",
+        "mother",
+        "father",
+        "reason"
+      ],
+      "title": "NotAssessed",
+      "type": "object"
+    },
     "NotesFile": {
       "description": "The notes on the tables in a family's folder, named as a table's file is (TableFile).",
       "properties": {
@@ -409,6 +437,10 @@
       "title": "OmittedSource",
       "type": "object"
     },
+    "Reason": {
+      "const": "no informative site",
+      "type": "string"
+    },
     "RohUpdInfo": {
       "description": "What made a family's roh and upd tables.",
       "properties": {
@@ -464,6 +496,13 @@
           },
           "title": "Upd Children",
           "type": "array"
+        },
+        "upd_not_assessed": {
+          "items": {
+            "$ref": "#/$defs/NotAssessed"
+          },
+          "title": "Upd Not Assessed",
+          "type": "array"
         }
       },
       "required": [
@@ -476,7 +515,8 @@
         "frequency_archive",
         "sites",
         "roh_members",
-        "upd_children"
+        "upd_children",
+        "upd_not_assessed"
       ],
       "title": "RohUpdInfo",
       "type": "object"

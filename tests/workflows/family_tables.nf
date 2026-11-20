@@ -70,8 +70,8 @@ include { FAMILY_CHECK ; NORMALISE_FAMILY ; NORMALISE_SV ; UNION_SITES ; SV_SITE
 include { ROH_UPD as ROH_UPD_TRIO } from '../../modules/family_tables'
 include { ROH_UPD as ROH_UPD_DUO } from '../../modules/family_tables'
 include { ROH_UPD as ROH_UPD_NO_GQ_REFUSED } from '../../modules/family_tables'
-include { ROH_UPD as ROH_UPD_NO_SITE_REFUSED } from '../../modules/family_tables'
-include { ROH_UPD as ROH_UPD_NO_KEPT_SITE_REFUSED } from '../../modules/family_tables'
+include { ROH_UPD as ROH_UPD_NO_SITE } from '../../modules/family_tables'
+include { ROH_UPD as ROH_UPD_NO_KEPT_SITE } from '../../modules/family_tables'
 include { ROH_UPD as ROH_UPD_FAILING_UPD_REFUSED } from '../../modules/family_tables'
 include { ECHTVAR_VALUES as ECHTVAR_VALUES_GNOMAD_ALONE } from '../../modules/family_tables'
 include { JOINED_VALUES as JOINED_VALUES_MITO } from '../../modules/family_tables'
@@ -255,6 +255,14 @@ workflow {
     ref_n = NORMALISE_REF_N(channel.of(tuple('ref-n', file("${fixture}/ref-n.vcf"))), reference)
     CHECK_REF_N(ref_n.family.map { _f, vcf, index -> tuple(vcf, index) })
 
+    // Where upd would keep no site it is not run, and the family gets its tables: the trio with the archive of the
+    // families' alleles, which gives none of its sites a frequency that upd keeps, and the trio's record on X alone,
+    // which leaves no site on chr1 to chr22.
+    CHECK_NOT_ASSESSED(
+        ROH_UPD_NO_KEPT_SITE(channel.of(tuple('trio-t', trio, trio_ped)), archive).map { _f, folder -> folder },
+        ROH_UPD_NO_SITE(derived.filter { name, _vcf -> name == 'only-x' }.map { _name, vcf -> tuple('trio-t', vcf, trio_ped) }, frequencies).map { _f, folder -> folder },
+    )
+
     // The group's annotation is the Annotator's output named after the group, alone or among others; outputs without
     // it are refused with the group's name.
     def outputs = [file('union.json.gz'), file('union.json.gz.jsi')]
@@ -278,10 +286,8 @@ workflow {
     // where it has an IUPAC code that the base fits; a proband that is not an individual of the family's PED file;
     // repeat VCFs of two of the family's three members; a structural-variant VCF whose samples are another family's; a
     // structural variant written as a sequence whose REF is not the reference's; a union of sites with a deletion that
-    // has no INFO END, which the Annotator would annotate as a single base; for ROH_UPD, a trio whose VCF has no GQ, a
-    // VCF without a site on chr1 to chr22, a trio none of whose sites has a frequency that upd keeps, which the archive
-    // of the families' alleles gives the invented trio, and an upd that fails after it has written a region, which
-    // failing-upd stands in for (nextflow.config).
+    // has no INFO END, which the Annotator would annotate as a single base; for ROH_UPD, a trio whose VCF has no GQ,
+    // and an upd that fails after it has written a region, which failing-upd stands in for (nextflow.config).
     unprefixed = NORMALISE_UNPREFIXED_REFUSED(channel.of(tuple('unprefixed', file("${fixture}/unprefixed.vcf"))), reference)
     mismatch = NORMALISE_REF_MISMATCH_REFUSED(channel.of(tuple('mismatch', file("${fixture}/ref-mismatch.vcf"))), reference)
     repeated = NORMALISE_REPEATED_REFUSED(channel.of(tuple('repeated', file("${fixture}/repeated.vcf"))), reference)
@@ -325,18 +331,11 @@ workflow {
         derived.filter { name, _vcf -> name == 'no-gq' }.map { _name, vcf -> tuple('trio-t', vcf, trio_ped) },
         frequencies,
     )
-    no_site = ROH_UPD_NO_SITE_REFUSED(
-        derived.filter { name, _vcf -> name == 'only-x' }.map { _name, vcf -> tuple('trio-t', vcf, trio_ped) },
-        frequencies,
-    )
-    no_kept_site = ROH_UPD_NO_KEPT_SITE_REFUSED(channel.of(tuple('trio-t', trio, trio_ped)), archive)
     failing_upd = ROH_UPD_FAILING_UPD_REFUSED(channel.of(tuple('trio-t', trio, trio_ped)), frequencies)
     unprefixed.sites
         .map { _s -> 'unprefixed contigs' }
         .mix(
             no_gq.map { _f, _folder -> 'a trio without GQ' },
-            no_site.map { _f, _folder -> 'a VCF without a site on the autosomes' },
-            no_kept_site.map { _f, _folder -> 'a trio without a site that upd keeps' },
             failing_upd.map { _f, _folder -> 'an upd that fails' },
             no_end_union.map.map { _m -> 'a deletion without END' },
             two_repeats.map { _f -> "repeat VCFs of two of three members" },
@@ -1136,7 +1135,7 @@ assert record['preparation'] == [
     'bcftools view -f PASS,. --trim-alt-alleles -t ' + ','.join(f'chr{n}' for n in range(1, 23)),
     'bcftools view -m2 -M2 -v snps', 'bcftools annotate -x INFO', 'bcftools +setGT -- -t a -n u', 'echtvar anno'], record
 assert record['roh_command'] == 'bcftools roh --AF-tag gnomad_AF -G30 -O r', record
-assert record['upd_command'] == 'upd --af-tag gnomad_AF regions', record
+assert record['upd_command'] == 'upd --af-tag gnomad_AF --min-af 0.05 --min-gq 30 regions', record
 archive = open('${archive}', 'rb').read()
 used = record['frequency_archive']
 assert (used['archive'], used['bytes'], used['sha256']) == (
@@ -1148,6 +1147,7 @@ assert (used['echtvar_version'], used['field']['field'], used['field']['alias'])
 assert record['sites'] == 4, record
 assert record['roh_members'] == ['A1', 'A2', 'A3'], record
 assert record['upd_children'] == [{'child': 'A3', 'mother': 'A2', 'father': 'A1'}], record
+assert record['upd_not_assessed'] == [], record
 for table in (roh, upd):
     assert json.loads(table.schema.metadata[b'roh_upd']) == record, table.schema.metadata
 EOF
@@ -1194,6 +1194,7 @@ assert regions == [
 record = json.load(open('trio/roh_upd/roh_upd.json'))
 assert record['roh_members'] == ['T1', 'T2', 'T3'], record
 assert record['upd_children'] == [{'child': 'T3', 'mother': 'T2', 'father': 'T1'}], record
+assert record['upd_not_assessed'] == [], record
 # The share of each region that a run of the same member covers.
 query = (
     'SELECT u.chrom, coalesce(sum(least(u.end_pos, r.end_pos) - greatest(u.pos, r.pos) + 1) '
@@ -1208,6 +1209,41 @@ alone = json.load(open('duo/roh_upd/roh_upd.json'))
 assert (alone['roh_members'], alone['upd_children']) == (['T2', 'T3'], []), alone
 runs = [r for r in pq.read_table('duo/roh_upd/roh.parquet').to_pylist() if r['member'] == 'T3']
 assert [(r['chrom'], r['pos'] <= 1000, r['end_pos'] >= 3000) for r in runs] == [('chr1', True, True)], runs
+EOF
+    """
+}
+
+// What ROH_UPD writes where upd would keep no site, in which case upd is not run. The invented trio with the archive of
+// the families' alleles has 74 sites, none of them with a frequency that upd keeps: with its own frequencies the same
+// trio is assessed (CHECK_ROH_UPD). The trio's record on X alone leaves no site at all. In both the child is recorded
+// as not assessed, with the reason, and not as assessed, and the family has the table of the regions without a row.
+// Neither has a run of homozygosity, which bcftools roh needs a frequency for.
+process CHECK_NOT_ASSESSED {
+    input:
+    path rare, stageAs: 'rare/*'
+    path empty, stageAs: 'empty/*'
+
+    script:
+    """
+    python3 - <<'EOF'
+import json
+import os
+
+import pyarrow.parquet as pq
+
+sites = {}
+for name in ('rare', 'empty'):
+    folder = f'{name}/roh_upd'
+    assert sorted(os.listdir(folder)) == ['roh.parquet', 'roh_upd.json', 'upd.parquet'], os.listdir(folder)
+    record = json.load(open(f'{folder}/roh_upd.json'))
+    assert record['upd_children'] == [], record
+    assert record['upd_not_assessed'] == [
+        {'child': 'T3', 'mother': 'T2', 'father': 'T1', 'reason': 'no informative site'}], record
+    assert record['roh_members'] == ['T1', 'T2', 'T3'], record
+    assert pq.read_table(f'{folder}/upd.parquet').num_rows == 0
+    assert pq.read_table(f'{folder}/roh.parquet').num_rows == 0
+    sites[name] = record['sites']
+assert sites == {'rare': 74, 'empty': 0}, sites
 EOF
     """
 }

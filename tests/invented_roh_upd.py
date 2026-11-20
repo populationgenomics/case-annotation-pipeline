@@ -42,7 +42,7 @@ RAN: Mapping[str, Any] = {
     'upd': ('0.0', '0' * 40),
     'preparation': ('bcftools view --invented', 'echtvar anno'),
     'roh_command': 'bcftools roh --AF-tag gnomad_AF -G30 -O r',
-    'upd_command': 'upd --af-tag gnomad_AF regions',
+    'upd_command': 'upd --af-tag gnomad_AF --min-af 0.05 --min-gq 30 regions',
 }
 HEADER = (
     '# This file was produced by: bcftools roh(0.0+htslib-0.0)\n'
@@ -98,23 +98,33 @@ def folder(
     runs: Sequence[str] = (),
     regions: Mapping[str, Sequence[str]] | None = None,
     sites: int = 5,
+    not_assessed: Sequence[str] = (),
 ) -> pathlib.Path:
     """The folder that roh_upd.convert writes for a family from these lines of the tools, under `work`.
 
     `regions` holds the lines of `upd regions` by child, and by default none for each child that the family's pedigree
-    and the VCF's samples give.
+    and the VCF's samples give and that is not among `not_assessed`, the children that upd was not run for.
     """
     work.mkdir()
     (work / 'roh.txt').write_text(HEADER + ''.join(f'{line}\n' for line in runs))
     if regions is None:
         planned = roh_upd.plan(family, ped, vcf, archive(work / 'planned.zip'))
-        regions = {trio.child: () for trio in planned.trios}
+        regions = {trio.child: () for trio in planned.trios if trio.child not in not_assessed}
     beds = {}
     for child, lines in regions.items():
         beds[child] = work / f'{child}.bed'
         beds[child].write_text(''.join(f'{line}\n' for line in lines))
     roh_upd.convert(
-        family, ped, vcf, archive(work / 'invented.zip'), work / 'roh.txt', beds, work / 'roh_upd', sites=sites, **RAN
+        family,
+        ped,
+        vcf,
+        archive(work / 'invented.zip'),
+        work / 'roh.txt',
+        beds,
+        work / 'roh_upd',
+        not_assessed=not_assessed,
+        sites=sites,
+        **RAN,
     )
     return work / 'roh_upd'
 
@@ -125,11 +135,15 @@ def written(
     children: Sequence[roh_upd.Trio],
     runs: Sequence[Mapping[str, Any]] = (),
     regions: Sequence[Mapping[str, Any]] = (),
+    not_assessed: Sequence[roh_upd.Trio] = (),
 ) -> pathlib.Path:
-    """A folder as roh_upd.convert writes one, with these rows, for a family whose inputs nothing has checked."""
+    """A folder as roh_upd.convert writes one, with these rows, for a family whose inputs nothing has checked.
+
+    `children` are the children that upd assessed, and `not_assessed` those that it was not run for.
+    """
     folder.mkdir()
     pq.write_table(pa.Table.from_pylist(list(runs), schema=roh_upd.ROH), folder / roh_upd.ROH_NAME)
-    if children:
+    if children or not_assessed:
         pq.write_table(pa.Table.from_pylist(list(regions), schema=roh_upd.UPD), folder / roh_upd.UPD_NAME)
     frequency = next(field for field in CONFIG if field['field'] == 'AF_joint')
     info = roh_upd.RohUpdInfo(
@@ -149,6 +163,9 @@ def written(
         sites=5,
         roh_members=tuple(samples),
         upd_children=tuple(children),
+        upd_not_assessed=tuple(
+            roh_upd.NotAssessed(**trio.model_dump(), reason='no informative site') for trio in not_assessed
+        ),
     )
     (folder / roh_upd.INFO_NAME).write_text(info.model_dump_json(indent=2) + '\n')
     return folder
