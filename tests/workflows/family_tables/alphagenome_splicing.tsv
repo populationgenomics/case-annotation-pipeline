@@ -1,0 +1,7 @@
+#CHROM	POS	REF	ALT	alphagenome_splicing
+chr1	100	G	A	0.002873
+chr1	100	G	C	1.52e-05
+chr1	100	G	T	0.04127
+chr2	60	C	A	1.207
+chr2	60	C	G	4.116
+chr2	60	C	T	0.003481

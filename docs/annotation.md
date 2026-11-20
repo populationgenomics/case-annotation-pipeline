@@ -816,6 +816,141 @@ gnomAD's joint release has no chrM. The Annotator's gnomAD columns of `variants`
 ancestry group and per sex and the filter status, for the genomes and for the exomes apart. The notes on the tables,
 [`tables.md`](../src/case_annotation/tables.md), have the part of this that a query has to know.
 
+### AlphaGenome's archives
+
+AlphaGenome is Google DeepMind's model of DNA sequence. DeepMind publishes three tables of scores that it computed with
+the model for the single-base changes of GRCh38: the AlphaGenome Variant Impact (AVI) score, the breakdown of that score
+by input, and a splicing score. The tables hold no insertion, no deletion and no change on chrM. This section says how
+to build an echtvar archive of each table. DeepMind publishes no archive, so whoever wants one builds it from the
+download, and the tools image holds what that takes.
+
+| Archive                     | DeepMind's download                                                                   | The table in it                                                                           | Value columns                                           | Offered for                       |
+| --------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------- | --------------------------------- |
+| `alphagenome_avi`           | AVI SNV scores, `avi_scores_snvs_tabix.zip`, 88.5 GB                                  | `alphagenome_variant_impact_score_snvs.tsv.gz`                                            | `raw_score` and `PHRED`                                 | commercial and non-commercial use |
+| `alphagenome_avi_breakdown` | AVI SNV feature importance scores, `avi_feature_importances_snvs_tabix.zip`, 283.9 GB | `combined_ag_cond_linear_ensemble_20260417_feature_importance_indels_with_am_snvs.tsv.gz` | 16 contributions, then `IS_INSERTION` and `IS_DELETION` | non-commercial use only           |
+| `alphagenome_splicing`      | AlphaGenome 1 SNV merged splicing scores, `combined_splicing_snvs_tabix.zip`, 20.6 GB | `combined_alphagenome_splicing_snvs.tsv.gz`                                               | `alphagenome_splicing`                                  | non-commercial use only           |
+
+The files are on DeepMind's [downloads page](https://deepmind.google.com/science/alphagenome/downloads), which gave
+these names and sizes on 20 November 2026. Each download is a zip that holds one table, bgzipped and sorted by position,
+with its tabix index. A table has the columns `#CHROM`, `POS`, `REF` and `ALT`, then its value columns, and one row for
+each single-base change. The score table and the breakdown have three rows at every position of chr1 to chr22, chrX and
+chrY that they cover, which is about 8.7 billion rows each. The splicing table covers stretches of the genome and has
+about 3.9 billion rows. Both counts are estimates.
+
+### The terms of AlphaGenome's files
+
+The downloads page lists the score file under "Permissive Use Downloadable artifacts for commercial and non-commercial
+use", and the breakdown and the splicing file under "Downloadable artifacts for non-commercial use only". DeepMind's
+[terms](https://deepmind.google.com/science/alphagenome/terms), last modified on 6 November 2026, bind whoever downloads
+a file, builds an archive of it or passes on tables that hold its values. Read them in full before using a file. The
+passages below are quoted as DeepMind writes them, and they decide whether an organisation can use the two files that
+are not for permissive use.
+
+- The breakdown does not share the terms of the score: "For clarity, the AVI Score Feature Breakdown (defined below)
+  does not form part of AVI Score."
+- Who may use the two files: "only individuals and non-commercial organizations (universities, non-profit organizations
+  and research institutes, educational and government bodies) may use the AlphaGenome Assets and only for non-commercial
+  purposes (except for the Permissive Use Downloadable Artifacts for Commercial and Non-Commercial Use, which may be
+  used for commercial purposes)."
+- Sharing: "You must not share Output or Derivatives with any commercial organization or use any AlphaGenome Services in
+  a manner that will grant a commercial organization any rights in Output or Derivatives, in each case aside from
+  indirectly via a scientific publication, open source release or to support journalism."
+- Training: the two files may not be used "to train machine learning models or related technology for predicting the
+  effects of genetic variants similar to AlphaGenome".
+- The notice: the two files may not be used "without providing conspicuous notice that any Output or Derivatives you
+  publish or distribute are provided under and subject to AlphaGenome Output Terms of Use and of any modifications you
+  make to Output". The terms give this notice as an example: "By using this information, you agree to AlphaGenome Output
+  Terms of Use found at https://deepmind.google.com/science/alphagenome/output-terms".
+- Clinical use, of all three files: "AlphaGenome Assets are for theoretical modelling only. They are not intended,
+  validated, or approved for clinical use. You should not use AlphaGenome Assets for clinical purposes or rely on them
+  for medical or other professional advice."
+
+The terms count "computational predictions, descriptions, modifications, copies, or adaptations that are substantially
+derived from Output" as Derivatives, so an archive of a table is under the table's terms, and so is a file that holds
+values read from the archive. The encode configurations of the breakdown and of the splicing table therefore put the
+example notice into the description of every field. echtvar embeds the descriptions in the archive and writes them into
+the header of each VCF that it annotates with the archive.
+
+### Building an AlphaGenome archive
+
+`echtvar encode` reads a VCF and a configuration that says which INFO fields to store. `case-annotation` has a command
+for each: `alphagenome-vcf` writes a table's rows as that VCF, with one INFO field per value column under the column's
+name, and `alphagenome-config` writes the table's configuration, which is one of three files in
+[`src/case_annotation/echtvar/`](../src/case_annotation/echtvar). All the commands below run in the tools image, which
+holds `case-annotation`, bcftools and echtvar 0.2.4.
+
+```sh
+set -euo pipefail
+table=alphagenome_avi
+tsv=alphagenome_variant_impact_score_snvs.tsv.gz
+# The zip holds the table and its index.
+python3 -m zipfile -e avi_scores_snvs_tabix.zip .
+case-annotation alphagenome-config --table "${table}" > "${table}.json"
+for chromosome in chr{1..22} chrX chrY; do
+  case-annotation alphagenome-vcf --table "${table}" --reference-index GRCh38.fa.fai \
+    --tsv "${tsv}" --chromosome "${chromosome}" |
+    bcftools view --no-version -Ob -o "${table}.${chromosome}.bcf"
+done
+echtvar encode "${table}.zip" "${table}.json" "${table}".chr{1..22}.bcf "${table}".chr{X,Y}.bcf
+```
+
+The conversion goes chromosome by chromosome because it is the slow part and the chromosomes do not depend on each
+other, so the turns of the loop can run side by side, each on a core of its own. `--chromosome` reads one chromosome's
+rows through the table's index, and stops for a chromosome that the table has no row of. Without `--tsv` the command
+reads a table's text from standard input, header first.
+
+`--reference-index` is the `.fai` of the reference that the families' VCFs are called against. The VCF's header declares
+that reference's primary chromosomes, and every file of one archive has to declare the same ones, because echtvar takes
+them from the first file.
+
+The conversion writes a value as the table writes it and stops at anything that it does not expect:
+
+- a header other than the table's
+- a row with another number of cells, a position that is no number, or an allele that is not one base
+- a value that is no number, or one too large for echtvar to store with the field's multiplier
+- a row on a chromosome that the reference's index lacks
+- a value other than 0 in `IS_INSERTION` or `IS_DELETION`
+
+The breakdown's last two columns are the contributions of two inputs that mark an insertion and a deletion. They were 0
+in every row of the table that was read, about 115,000, so the archive leaves them out, and the conversion stops at a
+row where one of them is not.
+
+On one core of a laptop (Apple M4 Max) the conversion wrote 1.6 million rows a second of the score table, 320,000 of the
+breakdown and 2.1 million of the splicing table, measured on 1.4 to 4.3 million rows of each. At that rate the breakdown
+takes about eight hours as one stream. The speed on a cloud VM is not measured. From the size of archives of a sample,
+the three archives should come to about 49 GB, 190 GB and 10 GB, which is an estimate too.
+
+The configurations store each value as echtvar stores a float: as a whole number of steps, cut down and not rounded, in
+32-bit arithmetic.
+
+| Setting         | Value                                                                                 | Why                                                                                                                                                          |
+| --------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `multiplier`    | 1,000,000 for the two scores; 10,000,000 for the contributions and the splicing score | the steps are millionths and ten-millionths, one decimal finer than the score table writes, so that a value cut down by one step still rounds to the table's |
+| `zigzag`        | `true`                                                                                | a raw score and a contribution can be negative, and echtvar stores a negative number only with it                                                            |
+| `missing_value` | 2139095041                                                                            | with it echtvar writes a missing value (`.`) for an allele that the archive lacks; any other stand-in is a number, which a score could be                    |
+
+The score table writes up to five decimals. The breakdown writes four significant digits, so a contribution below 0.001
+can have digits beyond the ten-millionths, which the archive drops.
+
+### Checking an AlphaGenome archive
+
+A check annotates rows of the table with the archive and compares what comes back. It takes a sample of the table's
+rows, here every 100,000th, writes their alleles without the values, lets echtvar add the archive's values, and compares
+those with the rows.
+
+```sh
+gzip -dc "${tsv}" | awk 'NR == 1 || NR % 100000 == 0' > sample.tsv
+case-annotation alphagenome-vcf --table "${table}" --reference-index GRCh38.fa.fai < sample.tsv |
+  bcftools annotate --no-version -x INFO -Ob -o sample.bcf
+echtvar anno -e "${table}.zip" sample.bcf sample.annotated.bcf
+bcftools index sample.annotated.bcf
+case-annotation alphagenome-check --table "${table}" --annotated sample.annotated.bcf < sample.tsv
+```
+
+`alphagenome-check` fails when the archive lacks an allele of the sample, or returns a value further from the row's than
+the encoding explains: one step of the field, plus the resolution of a 32-bit float at the value's size (the value times
+2<sup>-22</sup>). For a PHRED of 50 that is 0.000013.
+
 ### De novo variants
 
 The tables hold no de novo calls. Calls from fixed thresholds missed de novo variants planted in synthetic trios, for

@@ -5,9 +5,18 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import sys
 from collections.abc import Callable, Sequence
 
-from case_annotation import annotation_tables, contract, family_tables, gnomad_joint, sv_annotation, sv_sites
+from case_annotation import (
+    alphagenome_archives,
+    annotation_tables,
+    contract,
+    family_tables,
+    gnomad_joint,
+    sv_annotation,
+    sv_sites,
+)
 
 
 def _proband_arguments(parser: argparse.ArgumentParser) -> None:
@@ -278,6 +287,67 @@ def _family_tables(args: argparse.Namespace) -> None:
     )
 
 
+def _alphagenome_table_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        '--table',
+        required=True,
+        choices=tuple(alphagenome_archives.TABLES),
+        help="which of DeepMind's tables, by the name of the archive that is built from it",
+    )
+
+
+def _alphagenome_vcf_arguments(parser: argparse.ArgumentParser) -> None:
+    path = pathlib.Path
+    _alphagenome_table_argument(parser)
+    parser.add_argument(
+        '--reference-index',
+        type=path,
+        required=True,
+        help="the .fai of the reference, whose primary chromosomes the VCF's header declares with their lengths",
+    )
+    parser.add_argument(
+        '--tsv',
+        type=path,
+        help=(
+            'the table as DeepMind publishes it, bgzipped and with its .tbi beside it; without the option the '
+            "table's text is read from standard input, header first"
+        ),
+    )
+    parser.add_argument(
+        '--chromosome', help='with --tsv: the one chromosome to write the rows of, such as chr1, rather than all'
+    )
+
+
+def _alphagenome_vcf(args: argparse.Namespace) -> None:
+    if args.chromosome is not None and args.tsv is None:
+        raise SystemExit('--chromosome picks the rows of an indexed table, which --tsv gives')
+    table = alphagenome_archives.TABLES[args.table]
+    lines = sys.stdin if args.tsv is None else alphagenome_archives.indexed_lines(args.tsv, args.chromosome)
+    alphagenome_archives.to_vcf(table, lines, alphagenome_archives.read_contigs(args.reference_index), sys.stdout)
+
+
+def _alphagenome_config(args: argparse.Namespace) -> None:
+    sys.stdout.write(alphagenome_archives.config_text(alphagenome_archives.TABLES[args.table]))
+
+
+def _alphagenome_check_arguments(parser: argparse.ArgumentParser) -> None:
+    _alphagenome_table_argument(parser)
+    parser.add_argument(
+        '--annotated',
+        type=pathlib.Path,
+        required=True,
+        help=(
+            'the alleles of the rows on standard input as alphagenome-vcf writes them, in the same order, after '
+            "`echtvar anno` annotated them with the table's archive"
+        ),
+    )
+
+
+def _alphagenome_check(args: argparse.Namespace) -> None:
+    compared = alphagenome_archives.check(alphagenome_archives.TABLES[args.table], sys.stdin, args.annotated)
+    print(f'the archive returns the {compared} rows of {args.table} that were compared')
+
+
 def _contract_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         '--out',
@@ -340,6 +410,28 @@ _SUBCOMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Ca
         ),
         _family_tables_arguments,
         _family_tables,
+    ),
+    'alphagenome-vcf': (
+        (
+            "writes one of AlphaGenome's tables of scores as the VCF that `echtvar encode` reads with the table's "
+            "configuration, on standard output; fails on a header that is not the table's, on a malformed row and "
+            'on a row with another value than 0 in a column that the archive leaves out'
+        ),
+        _alphagenome_vcf_arguments,
+        _alphagenome_vcf,
+    ),
+    'alphagenome-config': (
+        "writes the configuration that `echtvar encode` takes for one of AlphaGenome's tables, on standard output",
+        _alphagenome_table_argument,
+        _alphagenome_config,
+    ),
+    'alphagenome-check': (
+        (
+            "compares rows of one of AlphaGenome's tables, read from standard input with the table's header, with "
+            "what `echtvar anno` returned for their alleles from the table's archive; fails on a value that differs"
+        ),
+        _alphagenome_check_arguments,
+        _alphagenome_check,
     ),
     'contract': (
         (
