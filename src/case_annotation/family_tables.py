@@ -2,9 +2,9 @@
 
 The input is the family's normalised VCF (one allele per record, primary chromosomes only, each allele carried by some
 member), its PED file, the proband that the run's sheet names for it, if any, and the tables, the values from the
-echtvar archives and from the joined files and the table of VEP's plugins of the union that its alleles were annotated
-in, and the runs of homozygosity and regions of uniparental disomy that two tools found in its own VCF (roh_upd). The
-output folder holds three Parquet files, a manifest and the notes on the tables:
+echtvar archives and from the joined files and the table of the transcript rules of the union that its alleles were
+annotated in, and the runs of homozygosity and regions of uniparental disomy that two tools found in its own VCF
+(roh_upd). The output folder holds three Parquet files, a manifest and the notes on the tables:
 
 - `variants.parquet`: one row per allele. It holds the union's `variants` row of the allele, less the columns of the
   dated sources the run did not name, its values from the archives that the run read (gnomAD's joint values, and
@@ -13,11 +13,11 @@ output folder holds three Parquet files, a manifest and the notes on the tables:
   VCF, one column per sequenced member, named as the member's sample in the VCF and in the VCF's order, with that
   member's own call of the allele;
 - `transcripts.parquet`: the union's `transcripts` rows of the family's alleles, each with the values that the joined
-  files give for its allele and its transcript and with what VEP's two plugins say of the two (vep_plugins);
+  files give for its allele and its transcript and with what the transcript rules say of the two (transcript_rules);
 - `roh.parquet`: one row per run of homozygosity of a sequenced member, on the autosomes;
 - `manifest.json`: the tables, the pedigree with the roles of the named proband and its parents, what annotated the
-  alleles (the Annotator's run, each echtvar archive that the run read, each file that it joined and the run of VEP's
-  plugins), and what found the runs and the regions;
+  alleles (the Annotator's run, each echtvar archive that the run read, each file that it joined and the run of the
+  transcript rules), and what found the runs and the regions;
 - `tables.md`: a copy of the notes on the tables in this package (NOTES), which the manifest names.
 
 A family whose sheet row also names VCFs of its structural variants, its copy-number segments or its members' repeats
@@ -70,8 +70,8 @@ from case_annotation import (
     strchive,
     sv_annotation,
     sv_tables,
+    transcript_rules,
     vcf_values,
-    vep_plugins,
 )
 
 # The version of these tables' layout: it names the output folder, and changes whenever a column is renamed, retyped
@@ -121,7 +121,7 @@ CALL = pa.struct(
 _RECORD = (pa.field('qual', pa.float64()), pa.field('filters', pa.list_(_STRING)))
 # The kinds of effect that UTRannotator reports for the allele on any of its transcripts: the column that a search
 # filters on before it reads the transcripts' own.
-_UTR5 = vep_plugins.COLUMNS.field('utr5_consequences')
+_UTR5 = transcript_rules.COLUMNS.field('utr5_consequences')
 # The columns of the variants table that describe the allele, in the table's order: the union's annotation of it,
 # its values from each echtvar archive and from each joined file, UTRannotator's kinds of effect and the family's
 # record. The members' columns follow them.
@@ -147,13 +147,14 @@ VARIANT_SOURCES: Mapping[str, tuple[str, ...]] = {
     **{source.name: source.columns for source in joined_values.SOURCES.values()},
 }
 # The columns of the transcripts table, in the table's order: the union's annotation of an allele's transcript, the
-# values that each joined file gives for the two, and the columns of VEP's plugins as their table declares them. The
-# file declares the union's columns nullable as DuckDB returns them, also the ones that hold a value in every row.
+# values that each joined file gives for the two, and the columns of the transcript rules as their table declares
+# them. The file declares the union's columns nullable as DuckDB returns them, also the ones that hold a value in every
+# row.
 TRANSCRIPT = pa.schema(
     [
         *(field.with_nullable(True) for field in annotation_tables.TRANSCRIPTS),
         *(field for source in joined_values.SOURCES.values() for field in source.transcript_fields),
-        *vep_plugins.COLUMNS,
+        *transcript_rules.COLUMNS,
     ]
 )
 # The columns of the transcripts table that a run can leave out, by the joined file that it then was not given.
@@ -391,9 +392,9 @@ class FamilyMember(pydantic.BaseModel, frozen=True, extra='forbid'):
 
 
 class PluginMatching(pydantic.BaseModel, frozen=True, extra='forbid'):
-    """How the rows of VEP's plugins met the family's `transcripts` rows of one source of transcripts.
+    """How the rows of the transcript rules met the family's `transcripts` rows of one source of transcripts.
 
-    The rules read the prepared gene model files, as VEP did, and not the Annotator's own, so a transcript, or a
+    The rules read the prepared gene model files, as VEP reads them, and not the Annotator's own, so a transcript, or a
     version of one, can be in a gene model file and not among the Annotator's, or the other way round, and the two can
     place a variant differently at the edge of a 5' UTR. Neither stops a run.
     """
@@ -402,20 +403,20 @@ class PluginMatching(pydantic.BaseModel, frozen=True, extra='forbid'):
     # The plugins' rows of the family's alleles on a transcript that the allele has no row of in `transcripts`.
     rows_without_transcript: int
     # The plugins' rows of the family's alleles on a feature whose id is no transcript id of `transcripts`
-    # (vep_plugins.TRANSCRIPT_ID), which no row can match.
+    # (transcript_rules.TRANSCRIPT_ID), which no row can match.
     rows_of_other_ids: int
     # The `transcripts` rows with the consequence 5_prime_UTR_variant that have no value of UTRannotator's.
     utr5_transcripts_without_values: int
 
 
-class VepPlugins(pydantic.BaseModel, frozen=True, extra='forbid'):
+class TranscriptRules(pydantic.BaseModel, frozen=True, extra='forbid'):
     """What the columns of the rules of VEP's two plugins come from, and how its rows met the family's.
 
     `run` is the record of the rules and of the files that they read, which holds nothing of the union's alleles, and
     `matching` is of this family's tables.
     """
 
-    run: vep_plugins.VepPluginsInfo
+    run: transcript_rules.TranscriptRulesInfo
     matching: tuple[PluginMatching, ...]
 
 
@@ -444,7 +445,7 @@ class FamilyManifest(pydantic.BaseModel, frozen=True, extra='forbid'):
     # The public files that the run joined to the alleles, each with the name of its source, in the order of their
     # columns in variants; none in a run that was given none.
     joined_files: tuple[joined_values.JoinedFile, ...]
-    vep_plugins: VepPlugins  # what the utr5_ and nmd_ columns come from
+    transcript_rules: TranscriptRules  # what the utr5_ and nmd_ columns come from
     # The variants columns of the sources the run did not name: its dated sources, then the archives it need not read,
     # then the files it need not join.
     omitted_columns: tuple[str, ...]
@@ -887,7 +888,9 @@ def _plugin_matching(con: duckdb.DuckDBPyConnection, source: gene_models.Source)
         'FROM (SELECT * FROM union_plugins SEMI JOIN records USING (variant_id)) p '
         'ANTI JOIN written_transcripts USING (variant_id, transcript_id) WHERE p.source = ?'
     )
-    without_transcript, without_row = con.execute(unmatched, [vep_plugins.TRANSCRIPT_ID.pattern, source]).fetchall()[0]
+    without_transcript, without_row = con.execute(
+        unmatched, [transcript_rules.TRANSCRIPT_ID.pattern, source]
+    ).fetchall()[0]
     (without_values,) = con.execute(
         "SELECT count(*) FROM written_transcripts WHERE list_contains(consequences, '5_prime_UTR_variant') "
         'AND utr5_existing_uorfs IS NULL AND source = ?',
@@ -923,15 +926,15 @@ def assemble(
 
     The inputs are its normalised VCF, its PED file, the union's tables (annotation_tables.convert's output folder),
     the union's values from the echtvar archives (echtvar_values.convert's output folder), its values from the joined
-    files (joined_values.convert's output folder), its table of VEP's plugins (vep_plugins.annotate's output folder),
-    the sample id of the proband that the run's sheet names, or None for a family in which it designates none
-    (member_roles), and the VCFs of its larger variants that the sheet names, with the normalised sequences of its
-    structural variants where it names their VCF (read_sv_alleles) and the annotation of the group's structural
-    variants where it names a caller's VCF (SvAnnotation). That annotation must be of the same catalog and sources as
-    the union's, since one run makes both. `ranges` is the release of STRchive that the run gives, whose file is read
-    and checked for every family, and matched with the repeats of a family that has them. `segments` is the folder of
-    the family's runs of homozygosity and regions of uniparental disomy (roh_upd.convert's output folder), which must
-    be of this family's samples and pedigree.
+    files (joined_values.convert's output folder), its table of the transcript rules (transcript_rules.annotate's
+    output folder), the sample id of the proband that the run's sheet names, or None for a family in which it
+    designates none (member_roles), and the VCFs of its larger variants that the sheet names, with the normalised
+    sequences of its structural variants where it names their VCF (read_sv_alleles) and the annotation of the group's
+    structural variants where it names a caller's VCF (SvAnnotation). That annotation must be of the same catalog and
+    sources as the union's, since one run makes both. `ranges` is the release of STRchive that the run gives, whose
+    file is read and checked for every family, and matched with the repeats of a family that has them. `segments` is
+    the folder of the family's runs of homozygosity and regions of uniparental disomy (roh_upd.convert's output
+    folder), which must be of this family's samples and pedigree.
 
     A row of `transcripts` gets the plugins' values of its allele and transcript, matched by the transcript's id with
     its version. A row of the plugins without such a row is left out and counted, and so is a row of `transcripts` in
@@ -953,7 +956,7 @@ def assemble(
         )
     archives = echtvar_values.read_info(archive_values)
     joined_files = joined_values.read_info(joined)
-    plugins_info = vep_plugins.read_info(plugins)
+    plugins_info = transcript_rules.read_info(plugins)
     segment_info = roh_upd.read_info(segments)
     loci = None if ranges is None else strchive.read(ranges.file)
     output.mkdir(parents=True)
@@ -970,7 +973,7 @@ def assemble(
         con.read_parquet(str(archive_values / echtvar_values.TABLE_NAME)).create_view('union_archives')
         con.read_parquet(str(joined / joined_values.TABLE_NAME)).create_view('union_joined')
         con.read_parquet(str(joined / joined_values.TRANSCRIPTS_NAME)).create_view('union_joined_transcripts')
-        con.read_parquet(str(plugins / vep_plugins.TABLE_NAME)).create_view('union_plugins')
+        con.read_parquet(str(plugins / transcript_rules.TABLE_NAME)).create_view('union_plugins')
         for problem, query in {
             'the VCF repeats alleles': 'SELECT variant_id FROM records GROUP BY 1 HAVING count(*) > 1',
             "alleles the union's annotation lacks": (
@@ -982,9 +985,9 @@ def assemble(
             "alleles the union's values from the joined files lack": (
                 'SELECT variant_id FROM records ANTI JOIN union_joined USING (variant_id)'
             ),
-            "alleles of the union's table of VEP's plugins that its annotation lacks, so the table is of another "
-            'union': 'SELECT variant_id FROM union_plugins ANTI JOIN union_variants USING (variant_id)',
-            "alleles with a transcript twice in the union's table of VEP's plugins": (
+            "alleles of the union's table of the transcript rules that its annotation lacks, so the table is of "
+            'another union': 'SELECT variant_id FROM union_plugins ANTI JOIN union_variants USING (variant_id)',
+            "alleles with a transcript twice in the union's table of the transcript rules": (
                 'SELECT variant_id FROM union_plugins GROUP BY variant_id, transcript_id HAVING count(*) > 1'
             ),
         }.items():
@@ -1034,12 +1037,12 @@ def assemble(
             'annotation': info.model_dump_json(),
             **records,
             'joined_files': joined_record,
-            'vep_plugins': plugins_info.model_dump_json(),
+            'transcript_rules': plugins_info.model_dump_json(),
         }
         # The family's transcripts rows, each with the values that the joined files and the plugins give for its
         # allele and transcript.
         con.sql(
-            f'SELECT {", ".join(["t.*", *by_transcript, *(f"p.{c}" for c in vep_plugins.COLUMNS.names)])} '  # noqa: S608 (column names of this package's own)
+            f'SELECT {", ".join(["t.*", *by_transcript, *(f"p.{c}" for c in transcript_rules.COLUMNS.names)])} '  # noqa: S608 (column names of this package's own)
             'FROM (SELECT * FROM union_transcripts SEMI JOIN records USING (variant_id)) t '
             f'LEFT JOIN union_plugins p USING (variant_id, transcript_id) {joined_transcripts}'
         ).create_view('family_transcripts')
@@ -1146,7 +1149,7 @@ def assemble(
         alphagenome_avi_breakdown=archives.alphagenome_avi_breakdown,
         alphagenome_splicing=archives.alphagenome_splicing,
         joined_files=joined_files.files,
-        vep_plugins=VepPlugins(run=plugins_info, matching=matching),
+        transcript_rules=TranscriptRules(run=plugins_info, matching=matching),
         omitted_columns=omitted,
         transcripts_omitted_columns=transcripts_omitted,
         sv_annotation=sv_info,

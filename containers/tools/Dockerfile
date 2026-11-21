@@ -51,10 +51,10 @@ ADD --checksum=sha256:2c425bad9a4e6aeeade5eeec229e7f887d7385642a0aada3a03909b630
     /usr/local/bin/echtvar
 RUN chmod 0755 /usr/local/bin/echtvar
 # UTRannotator's list of the upstream reading frames that ribosome profiling has seen translated, which
-# `case-annotation vep-plugins` reads, with the plugin's MIT licence beside it (README.md). Both come from the commit of
-# the plugin's repository that the command's rules are restated from (utr5.SOURCE_COMMIT), each checked against its
-# SHA-256. The folder is made before the files: a folder that ADD makes for a file gets the file's mode, which no user
-# but root can enter. A file from a URL is readable by root alone unless its mode is given.
+# `case-annotation transcript-rules` reads, with the plugin's MIT licence beside it (README.md). Both come from the
+# commit of the plugin's repository that the command's rules are restated from (utr5.SOURCE_COMMIT), each checked
+# against its SHA-256. The folder is made before the files: a folder that ADD makes for a file gets the file's mode,
+# which no user but root can enter. A file from a URL is readable by root alone unless its mode is given.
 ARG UTRANNOTATOR_COMMIT=3d9d466e356752aa69d61b62da493edddf374363
 RUN mkdir -p /opt/utrannotator
 ADD --chmod=0644 --checksum=sha256:e220023a747465dcdf6725ce809511bccc20b7a9990288da91032a1a7f51ebce \

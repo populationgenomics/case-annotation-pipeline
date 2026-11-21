@@ -20,7 +20,7 @@ import pydantic
 import pysam
 import pytest
 
-from case_annotation import cli, gene_models, nmd, plugin_gates, utr5, vep_plugins
+from case_annotation import cli, gene_models, nmd, plugin_gates, transcript_rules, utr5
 
 FIXTURE = pathlib.Path(__file__).parent / 'workflows' / 'family_tables'
 REFERENCE = FIXTURE / 'reference.fa'
@@ -30,15 +30,15 @@ COUNTS = {'utr5_existing_uorfs': 1, 'utr5_existing_oorfs_out_of_frame': 0, 'utr5
 OWN_START = {'utr5_cds_kozak_context': 'GCCATGG', 'utr5_cds_kozak_strength': 'Strong'}
 
 
-def _annotated(tmp_path: pathlib.Path, invented: invented_transcripts.Invented) -> vep_plugins.Annotated:
+def _annotated(tmp_path: pathlib.Path, invented: invented_transcripts.Invented) -> transcript_rules.Annotated:
     with pysam.FastaFile(str(invented_transcripts.reference(tmp_path, invented.genome))) as reference:
-        return vep_plugins.Annotated(invented.transcript, reference)
+        return transcript_rules.Annotated(invented.transcript, reference)
 
 
 def _columns(
     tmp_path: pathlib.Path, invented: invented_transcripts.Invented, allele: plugin_gates.Allele
 ) -> dict[str, Any] | None:
-    return vep_plugins.transcript_columns(_annotated(tmp_path, invented), allele, frozenset())
+    return transcript_rules.transcript_columns(_annotated(tmp_path, invented), allele, frozenset())
 
 
 @STRANDS
@@ -57,7 +57,7 @@ def test_an_allele_with_an_effect_has_its_records_and_their_kinds(tmp_path: path
     assert columns['utr5_consequences'] == ['uAUG_lost']
     (record,) = columns['utr5_uorfs']
     assert (record['consequence'], record['cap_distance_to_start'], record['distance_to_cds']) == ('uAUG_lost', 6, 19)
-    assert set(record) == {'consequence'} | vep_plugins.KINDS['uAUG_lost']
+    assert set(record) == {'consequence'} | transcript_rules.KINDS['uAUG_lost']
     assert 'nmd_escaping' not in columns
 
 
@@ -67,7 +67,7 @@ def test_a_record_has_the_evidence_of_its_start_codon_s_place_on_the_genome(
 ) -> None:
     gene = invented_transcripts.gene(strand)
     seen = frozenset({gene.transcript.genomic(7)})
-    columns = vep_plugins.transcript_columns(_annotated(tmp_path, gene), gene.allele(8, 1, 'C'), seen)
+    columns = transcript_rules.transcript_columns(_annotated(tmp_path, gene), gene.allele(8, 1, 'C'), seen)
     assert columns is not None
     assert columns['utr5_uorfs'][0]['evidence'] is True
 
@@ -136,25 +136,27 @@ def test_a_deletion_from_one_exon_of_the_utr_into_the_next_has_no_record(tmp_pat
     gene = invented_transcripts.gene(strand)
     start, end = gene.transcript.introns[0]
     across = plugin_gates.Allele(start - 3, end + 2, gene.genome[start - 4 : end + 2], '')
-    assert vep_plugins.utr_change(gene.transcript, across, gene.sequences.utr5) is None
+    assert transcript_rules.utr_change(gene.transcript, across, gene.sequences.utr5) is None
     assert _columns(tmp_path, gene, across) == COUNTS | OWN_START
 
 
 @STRANDS
 def test_an_allele_as_a_change_of_the_utr_is_on_the_transcript_s_strand(strand: int) -> None:
     gene = invented_transcripts.gene(strand)
-    assert vep_plugins.utr_change(gene.transcript, gene.allele(8, 1, 'C'), gene.sequences.utr5) == utr5.Change(
+    assert transcript_rules.utr_change(gene.transcript, gene.allele(8, 1, 'C'), gene.sequences.utr5) == utr5.Change(
         7, 1, 'C'
     )
-    assert vep_plugins.utr_change(gene.transcript, gene.allele(8, 0, 'CA'), gene.sequences.utr5) == utr5.Change(
+    assert transcript_rules.utr_change(gene.transcript, gene.allele(8, 0, 'CA'), gene.sequences.utr5) == utr5.Change(
         7, 0, 'CA'
     )
-    assert vep_plugins.utr_change(gene.transcript, gene.allele(8, 3, ''), gene.sequences.utr5) == utr5.Change(7, 3, '')
+    assert transcript_rules.utr_change(gene.transcript, gene.allele(8, 3, ''), gene.sequences.utr5) == utr5.Change(
+        7, 3, ''
+    )
     # The UTR's last five bases are in the second exon.
-    assert vep_plugins.utr_change(gene.transcript, gene.allele(22, 2, 'TT'), gene.sequences.utr5) == utr5.Change(
+    assert transcript_rules.utr_change(gene.transcript, gene.allele(22, 2, 'TT'), gene.sequences.utr5) == utr5.Change(
         21, 2, 'TT'
     )
-    assert vep_plugins.utr_change(gene.transcript, gene.coding_allele(5, 1, 'A'), gene.sequences.utr5) is None
+    assert transcript_rules.utr_change(gene.transcript, gene.coding_allele(5, 1, 'A'), gene.sequences.utr5) is None
 
 
 @STRANDS
@@ -168,15 +170,15 @@ def test_an_insertion_before_the_first_coding_base_is_read_where_it_can_be_writt
     frame = invented_transcripts.laid_out(('GGCACCATGGCC' + 'ATGGCTGAGCTGTAAGTAGC',), (13, 32), strand=strand)
     utr = frame.sequences.utr5
     at_the_end, inside = frame.allele(13, 0, 'C'), frame.allele(12, 0, 'C')
-    assert vep_plugins.utr_change(frame.transcript, at_the_end, utr) == utr5.Change(12, 0, 'C')
-    assert vep_plugins.utr_change(frame.transcript, inside, utr) == utr5.Change(11, 0, 'C')
+    assert transcript_rules.utr_change(frame.transcript, at_the_end, utr) == utr5.Change(12, 0, 'C')
+    assert transcript_rules.utr_change(frame.transcript, inside, utr) == utr5.Change(11, 0, 'C')
     written = [_columns(tmp_path, frame, allele) for allele in (at_the_end, inside)]
     assert written[0] is not None
     assert written[0] == written[1]
     assert written[0]['utr5_consequences'] == ['uFrameShift']
     # An insertion there that ends with another base can only be written before the coding base.
-    assert vep_plugins.utr_change(frame.transcript, frame.allele(13, 0, 'CT'), utr) is None
-    assert vep_plugins.utr_change(frame.transcript, frame.allele(14, 0, 'C'), utr) is None
+    assert transcript_rules.utr_change(frame.transcript, frame.allele(13, 0, 'CT'), utr) is None
+    assert transcript_rules.utr_change(frame.transcript, frame.allele(14, 0, 'C'), utr) is None
 
 
 @STRANDS
@@ -268,9 +270,11 @@ def test_a_run_writes_a_row_for_each_allele_and_transcript_that_a_rule_evaluated
 ) -> None:
     prepared = _prepared(tmp_path)
     output = tmp_path / 'out'
-    info = vep_plugins.annotate(_given(tmp_path, prepared), prepared, REFERENCE, _evidence(tmp_path), output, workers)
-    table = pq.read_table(output / vep_plugins.TABLE_NAME)
-    assert table.schema.equals(vep_plugins.TABLE)
+    info = transcript_rules.annotate(
+        _given(tmp_path, prepared), prepared, REFERENCE, _evidence(tmp_path), output, workers
+    )
+    table = pq.read_table(output / transcript_rules.TABLE_NAME)
+    assert table.schema.equals(transcript_rules.TABLE)
     rows = table.to_pylist()
     evaluated = ['chr1-100-G-A', 'chr1-100-G-C', 'chr1-200-G-A', 'chr1-400-TCA-T']
     keys = [(row['variant_id'], row['transcript_id'], row['source']) for row in rows]
@@ -299,15 +303,15 @@ def test_a_run_writes_a_row_for_each_allele_and_transcript_that_a_rule_evaluated
             'new_stop_distance_to_cds': 12,
             'evidence': True,
         }
-    assert info == vep_plugins.read_info(output)
+    assert info == transcript_rules.read_info(output)
     assert (info.utrannotator_commit, info.nmd_plugin_commit) == (utr5.SOURCE_COMMIT, nmd.SOURCE_COMMIT)
-    assert info.vep_release == vep_plugins.VEP_RELEASE
+    assert info.vep_release == transcript_rules.VEP_RELEASE
     assert info.uorf_evidence.name == 'invented-uorfs.txt'
     assert [(m.source, m.file.name, m.prepared_from.name) for m in info.gene_models] == [
         ('Ensembl', 'ensembl.gff3.gz', 'invented.gff3.gz'),
         ('RefSeq', 'refseq.gff.gz', 'invented.gff.gz'),
     ]
-    written = json.loads((output / vep_plugins.INFO_NAME).read_text())
+    written = json.loads((output / transcript_rules.INFO_NAME).read_text())
     assert sorted(written) == [
         'gene_models',
         'nmd_plugin_commit',
@@ -320,26 +324,26 @@ def test_a_run_writes_a_row_for_each_allele_and_transcript_that_a_rule_evaluated
 def test_two_runs_of_the_same_inputs_write_the_same_table(tmp_path: pathlib.Path) -> None:
     prepared = _prepared(tmp_path)
     given, evidence = _given(tmp_path, prepared), _evidence(tmp_path)
-    vep_plugins.annotate(given, prepared, REFERENCE, evidence, tmp_path / 'one')
-    vep_plugins.annotate(given, prepared, REFERENCE, evidence, tmp_path / 'two', workers=2)
-    one, two = (tmp_path / name / vep_plugins.TABLE_NAME for name in ('one', 'two'))
+    transcript_rules.annotate(given, prepared, REFERENCE, evidence, tmp_path / 'one')
+    transcript_rules.annotate(given, prepared, REFERENCE, evidence, tmp_path / 'two', workers=2)
+    one, two = (tmp_path / name / transcript_rules.TABLE_NAME for name in ('one', 'two'))
     assert pq.read_table(one).equals(pq.read_table(two))
 
 
 def test_a_union_without_an_allele_in_an_exon_writes_an_empty_table(tmp_path: pathlib.Path) -> None:
     prepared = _prepared(tmp_path)
-    vep_plugins.annotate(
+    transcript_rules.annotate(
         _given(tmp_path, prepared, alleles=()), prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out'
     )
-    table = pq.read_table(tmp_path / 'out' / vep_plugins.TABLE_NAME)
-    assert (table.num_rows, table.schema.equals(vep_plugins.TABLE)) == (0, True)
+    table = pq.read_table(tmp_path / 'out' / transcript_rules.TABLE_NAME)
+    assert (table.num_rows, table.schema.equals(transcript_rules.TABLE)) == (0, True)
 
 
 def test_sites_without_the_controls_are_refused(tmp_path: pathlib.Path) -> None:
     prepared = _prepared(tmp_path)
     given = _given(tmp_path, prepared, controls=False)
     with pytest.raises(ValueError, match=r'positive controls .* are not among its records'):
-        vep_plugins.annotate(given, prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
+        transcript_rules.annotate(given, prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
 
 
 def test_a_record_under_another_id_than_its_allele_s_is_refused(tmp_path: pathlib.Path) -> None:
@@ -350,14 +354,14 @@ def test_a_record_under_another_id_than_its_allele_s_is_refused(tmp_path: pathli
     (tmp_path / 'given.vcf').write_text(text)
     pysam.tabix_index(str(tmp_path / 'given.vcf'), preset='vcf', force=True)
     with pytest.raises(ValueError, match='not the variant id of its allele'):
-        vep_plugins.annotate(given, prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
+        transcript_rules.annotate(given, prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
 
 
 def test_a_repeated_id_is_refused(tmp_path: pathlib.Path) -> None:
     prepared = _prepared(tmp_path)
     given = _given(tmp_path, prepared, alleles=(*ALLELES, ALLELES[0]))
     with pytest.raises(ValueError, match='the ID of another record'):
-        vep_plugins.annotate(given, prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
+        transcript_rules.annotate(given, prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
 
 
 def test_controls_on_a_transcript_that_the_gene_models_lack_are_refused(tmp_path: pathlib.Path) -> None:
@@ -365,7 +369,9 @@ def test_controls_on_a_transcript_that_the_gene_models_lack_are_refused(tmp_path
     record = prepared / gene_models.RECORD_NAME
     record.write_text(record.read_text().replace('"ENST01.1"', '"ENST02.1"'))
     with pytest.raises(ValueError, match=r'control-UTRannotator-Ensembl has 0 rows on the transcript ENST02\.1'):
-        vep_plugins.annotate(_given(tmp_path, prepared), prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
+        transcript_rules.annotate(
+            _given(tmp_path, prepared), prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out'
+        )
 
 
 def test_a_control_without_its_value_is_refused() -> None:
@@ -374,12 +380,12 @@ def test_a_control_without_its_value_is_refused() -> None:
     )
     row = {'transcript_id': 'ENST01.1', 'nmd_escaping': False}
     with pytest.raises(ValueError, match='lacks what the rules of NMD give it'):
-        vep_plugins.check_control(control, [row], 'invented')
-    vep_plugins.check_control(control, [row | {'nmd_escaping': True}], 'invented')
+        transcript_rules.check_control(control, [row], 'invented')
+    transcript_rules.check_control(control, [row | {'nmd_escaping': True}], 'invented')
     gained = control.model_copy(update={'plugin': 'UTRannotator'})
     with pytest.raises(ValueError, match='lacks what the rules of UTRannotator give it'):
-        vep_plugins.check_control(gained, [row | {'utr5_consequences': ['uAUG_lost']}], 'invented')
-    vep_plugins.check_control(gained, [row | {'utr5_consequences': ['uAUG_gained']}], 'invented')
+        transcript_rules.check_control(gained, [row | {'utr5_consequences': ['uAUG_lost']}], 'invented')
+    transcript_rules.check_control(gained, [row | {'utr5_consequences': ['uAUG_gained']}], 'invented')
 
 
 def test_a_gene_model_file_that_is_not_the_recorded_one_is_refused(tmp_path: pathlib.Path) -> None:
@@ -388,14 +394,14 @@ def test_a_gene_model_file_that_is_not_the_recorded_one_is_refused(tmp_path: pat
     with (prepared / gene_models.FILES['RefSeq']).open('ab') as f:
         f.write(b'\0')
     with pytest.raises(ValueError, match=r'not the\s+file that gene-models\.json describes'):
-        vep_plugins.annotate(given, prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
+        transcript_rules.annotate(given, prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
 
 
 def test_a_file_that_is_not_the_plugin_s_list_of_upstream_orfs_is_refused(tmp_path: pathlib.Path) -> None:
     prepared = _prepared(tmp_path)
     evidence = _evidence(tmp_path, 'chr1\t82\n')
     with pytest.raises(ValueError, match='not with its header'):
-        vep_plugins.annotate(_given(tmp_path, prepared), prepared, REFERENCE, evidence, tmp_path / 'out')
+        transcript_rules.annotate(_given(tmp_path, prepared), prepared, REFERENCE, evidence, tmp_path / 'out')
 
 
 def test_a_record_of_two_alleles_is_refused(tmp_path: pathlib.Path) -> None:
@@ -407,7 +413,7 @@ def test_a_record_of_two_alleles_is_refused(tmp_path: pathlib.Path) -> None:
     (tmp_path / 'given.vcf').write_text(text)
     pysam.tabix_index(str(tmp_path / 'given.vcf'), preset='vcf', force=True)
     with pytest.raises(ValueError, match='is no record of one allele under its id'):
-        vep_plugins.annotate(given, prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
+        transcript_rules.annotate(given, prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
 
 
 def test_a_transcript_that_both_gene_model_files_give_a_row_is_refused(tmp_path: pathlib.Path) -> None:
@@ -420,14 +426,16 @@ def test_a_transcript_that_both_gene_model_files_give_a_row_is_refused(tmp_path:
     prepared = tmp_path / 'gene-models'
     gene_models.prepare(public, models / 'assembly-report.txt', REFERENCE, prepared)
     with pytest.raises(ValueError, match=r'two rows for chr1-100-G-A and ENST01\.1'):
-        vep_plugins.annotate(_given(tmp_path, prepared), prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
+        transcript_rules.annotate(
+            _given(tmp_path, prepared), prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out'
+        )
 
 
 def test_an_allele_with_a_base_that_is_not_one_of_four_has_no_row(tmp_path: pathlib.Path) -> None:
     prepared = _prepared(tmp_path)
     given = _given(tmp_path, prepared, alleles=(('chr1', 100, 'G', 'N'), ('chr1', 200, 'G', '*')))
-    vep_plugins.annotate(given, prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
-    assert pq.read_table(tmp_path / 'out' / vep_plugins.TABLE_NAME).num_rows == 0
+    transcript_rules.annotate(given, prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
+    assert pq.read_table(tmp_path / 'out' / transcript_rules.TABLE_NAME).num_rows == 0
 
 
 def test_a_transcript_without_a_coding_sequence_is_not_annotated(tmp_path: pathlib.Path) -> None:
@@ -437,10 +445,10 @@ def test_a_transcript_without_a_coding_sequence_is_not_annotated(tmp_path: pathl
         pysam.FastaFile(str(invented_transcripts.reference(tmp_path, gene.genome))) as reference,
         pytest.raises(ValueError, match='has no coding sequence'),
     ):
-        vep_plugins.Annotated(non_coding, reference)
+        transcript_rules.Annotated(non_coding, reference)
     with pytest.raises(ValueError, match='has no coding sequence'):
         plugin_gates.Placed(non_coding, gene.allele(3, 1, 'T'), gene.sequences)
-    assert vep_plugins.utr_change(non_coding, gene.allele(3, 1, 'T'), gene.sequences.utr5) is None
+    assert transcript_rules.utr_change(non_coding, gene.allele(3, 1, 'T'), gene.sequences.utr5) is None
 
 
 def test_the_command_needs_at_least_one_process(tmp_path: pathlib.Path) -> None:
@@ -455,9 +463,9 @@ def test_the_command_needs_at_least_one_process(tmp_path: pathlib.Path) -> None:
     ]
     arguments += ['--uorf-evidence', str(_evidence(tmp_path)), '--output', str(tmp_path / 'out')]
     with pytest.raises(ValueError, match='at least one process'):
-        cli.main(['vep-plugins', *arguments, '--workers', '0'])
-    cli.main(['vep-plugins', *arguments])
-    assert pq.read_table(tmp_path / 'out' / vep_plugins.TABLE_NAME).num_rows == 8
+        cli.main(['transcript-rules', *arguments, '--workers', '0'])
+    cli.main(['transcript-rules', *arguments])
+    assert pq.read_table(tmp_path / 'out' / transcript_rules.TABLE_NAME).num_rows == 8
 
 
 @pytest.mark.parametrize(
@@ -478,17 +486,17 @@ def test_a_record_with_a_malformed_value_or_another_key_is_refused(field: dict[s
         'uorf_evidence': {'name': 'invented-uorfs.txt', 'bytes': 1, 'sha256': '2' * 64},
         'gene_models': [],
     }
-    vep_plugins.VepPluginsInfo.model_validate(record)
+    transcript_rules.TranscriptRulesInfo.model_validate(record)
     with pytest.raises(pydantic.ValidationError):
-        vep_plugins.VepPluginsInfo.model_validate(record | field)
+        transcript_rules.TranscriptRulesInfo.model_validate(record | field)
 
 
 def test_a_run_writes_its_progress_to_the_log(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(vep_plugins, 'PROGRESS_EVERY', 2)
+    monkeypatch.setattr(transcript_rules, 'PROGRESS_EVERY', 2)
     prepared = _prepared(tmp_path)
-    vep_plugins.annotate(_given(tmp_path, prepared), prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
+    transcript_rules.annotate(_given(tmp_path, prepared), prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
     lines = capsys.readouterr().out.splitlines()
     # Nine alleles on chr1, the five of the union and the four controls, read with each gene model file.
     of_chr1 = [line for line in lines if line.startswith('chr1, ')]

@@ -21,7 +21,7 @@ from case_annotation import (
     strchive,
     sv_annotation,
     sv_sites,
-    vep_plugins,
+    transcript_rules,
 )
 
 
@@ -376,7 +376,7 @@ def _branch_points(args: argparse.Namespace) -> None:
     branch_points.prepare(args.dataset_s1, args.dataset_s2, args.chain, args.output)
 
 
-def _vep_plugins_arguments(parser: argparse.ArgumentParser) -> None:
+def _transcript_rules_arguments(parser: argparse.ArgumentParser) -> None:
     path = pathlib.Path
     parser.add_argument(
         '--given',
@@ -418,14 +418,17 @@ def _vep_plugins_arguments(parser: argparse.ArgumentParser) -> None:
         '--output',
         type=path,
         required=True,
-        help=f'the folder to write {vep_plugins.TABLE_NAME} and {vep_plugins.INFO_NAME} into; it must not exist',
+        help=(
+            f'the folder to write {transcript_rules.TABLE_NAME} and {transcript_rules.INFO_NAME} into; '
+            'it must not exist'
+        ),
     )
 
 
-def _vep_plugins(args: argparse.Namespace) -> None:
+def _transcript_rules(args: argparse.Namespace) -> None:
     if args.workers < 1:
         raise ValueError(f'--workers is {args.workers}, and at least one process is needed')
-    vep_plugins.annotate(
+    transcript_rules.annotate(
         args.given, args.gene_models, args.reference, args.uorf_evidence, args.output, workers=args.workers
     )
 
@@ -459,7 +462,9 @@ def _family_tables_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--annotation', type=path, required=True, help="annotation-tables' output folder of the union")
     parser.add_argument('--echtvar-values', type=path, required=True, help="echtvar-values' output folder of the union")
     parser.add_argument('--joined-values', type=path, required=True, help="joined-values' output folder of the union")
-    parser.add_argument('--vep-plugins', type=path, required=True, help="vep-plugins' output folder of the union")
+    parser.add_argument(
+        '--transcript-rules', type=path, required=True, help="transcript-rules' output folder of the union"
+    )
     parser.add_argument(
         '--roh-upd',
         type=path,
@@ -514,7 +519,7 @@ def _family_tables(args: argparse.Namespace) -> None:
         args.annotation,
         args.echtvar_values,
         args.joined_values,
-        args.vep_plugins,
+        args.transcript_rules,
         args.output,
         proband=args.proband,
         structural=_structural(args),
@@ -807,8 +812,8 @@ _SUBCOMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Ca
     ),
     'gene-models': (
         (
-            "prepares the gene models that VEP reads from Ensembl's and NCBI's public files: each file sorted, "
-            "bgzipped and indexed, the chromosome synonyms, the exons' regions and the positive controls"
+            "prepares the gene models that the transcript rules read from Ensembl's and NCBI's public files: each file "
+            "sorted, bgzipped and indexed, the chromosome synonyms, the exons' regions and the positive controls"
         ),
         _gene_models_arguments,
         _gene_models,
@@ -823,20 +828,21 @@ _SUBCOMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Ca
         _branch_points_arguments,
         _branch_points,
     ),
-    'vep-plugins': (
+    'transcript-rules': (
         (
             "writes what the rules of VEP's UTRannotator and NMD plugins say of a sites union as a table by allele "
             'and transcript, from the prepared gene models and the reference and without running VEP, after checking '
             'the positive controls, with the record of what the values come from'
         ),
-        _vep_plugins_arguments,
-        _vep_plugins,
+        _transcript_rules_arguments,
+        _transcript_rules,
     ),
     'family-tables': (
         (
             "writes a family's variants table, with a column of each member's calls, and its transcripts table from "
-            "its VCF and the union's tables, with what VEP's plugins say of each transcript, its sv, sv_transcripts "
-            'and repeats tables from the VCFs of its structural variants, copy numbers and repeats where it has '
+            "its VCF and the union's tables, with what the transcript rules say of each transcript, its sv, "
+            'sv_transcripts and repeats tables from the VCFs of its structural variants, copy numbers and repeats '
+            'where it has '
             "them, with the annotation of the group's "
             "structural variants and, where the run gives a release of STRchive, STRchive's size ranges of the "
             'repeats, its roh table and, for a family with a child whose parents are both sequenced, its upd table '

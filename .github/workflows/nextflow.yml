@@ -172,15 +172,15 @@ jobs:
           sources=(-params-file /src/stub/family-sources.params.yaml)
           family_run "${sources[@]}" "${annotator[@]}" --families /src/stub/families.csv
           # Published files are symlinks into the container's work directory, so their names are checked. The union,
-          # its tables, its values from the echtvar archives and from the joined files and its table of VEP's plugins
-          # go under annotation-unions/ into a folder that names the tables' version, the Annotator's output into one
-          # beside it that names the catalog alone, and each family's tables under annotations/<family>/, with the
+          # its tables, its values from the echtvar archives and from the joined files and its table of the transcript
+          # rules go under annotation-unions/ into a folder that names the tables' version, the Annotator's output into
+          # one beside it that names the catalog alone, and each family's tables under annotations/<family>/, with the
           # table of its runs of homozygosity among them. tests/test_contract.py holds the three folders to the
           # contract's.
           results=results
           union=annotation-unions/stub-group/tables-0.5.0-illumina-202610
           annotation=annotation-unions/stub-group/illumina-202610
-          for f in "${union}"/{stub-group.vcf.gz,stub-group.vcf.gz.tbi,tables,echtvar_values,joined_values,vep_plugins} \
+          for f in "${union}"/{stub-group.vcf.gz,stub-group.vcf.gz.tbi,tables,echtvar_values,joined_values,transcript_rules} \
             "${annotation}"/{run.json,stub-group.annotate.log,out/stub-group.json.gz} \
             annotations/fam-{a,b}/tables-0.5.0-illumina-202610/{variants,transcripts,roh}.parquet \
             annotations/fam-{a,b}/tables-0.5.0-illumina-202610/manifest.json; do
@@ -208,19 +208,19 @@ jobs:
             exit 1
           fi
           # A second run into the same folder replaces the union's tables, archive values, joined values and table of
-          # VEP's plugins, which are folders: each link then leads into the second run's work directory. The stubs
-          # give the folders a fixed time, so that Nextflow cannot tell the second run's from the first's, as it
-          # cannot in a bucket.
+          # the transcript rules, which are folders: each link then leads into the second run's work directory. The
+          # stubs give the folders a fixed time, so that Nextflow cannot tell the second run's from the first's, as
+          # it cannot in a bucket.
           first_tables=$(readlink "${results}/${union}/tables")
           first_values=$(readlink "${results}/${union}/echtvar_values")
           first_joined=$(readlink "${results}/${union}/joined_values")
-          first_plugins=$(readlink "${results}/${union}/vep_plugins")
+          first_plugins=$(readlink "${results}/${union}/transcript_rules")
           family_run "${sources[@]}" "${annotator[@]}" --families /src/stub/families.csv
           if [[ $(readlink "${results}/${union}/tables") == "${first_tables}" ||
             $(readlink "${results}/${union}/echtvar_values") == "${first_values}" ||
             $(readlink "${results}/${union}/joined_values") == "${first_joined}" ||
-            $(readlink "${results}/${union}/vep_plugins") == "${first_plugins}" ]]; then
-            echo "a second run left the first run's tables, archive values, joined values or table of VEP's plugins published" >&2
+            $(readlink "${results}/${union}/transcript_rules") == "${first_plugins}" ]]; then
+            echo "a second run left the first run's tables, archive values, joined values or table of the transcript rules published" >&2
             exit 1
           fi
           # Reusing an earlier run's annotation, from the folder that the run published it in, runs no Annotator, and
@@ -229,7 +229,7 @@ jobs:
           family_run --families /src/stub/families.csv --annotated "/src/${results}/${annotation}" \
             --output_dir /src/stub/reuse > reuse.log
           if grep -q ILLUMINA_ANNOTATE reuse.log || ! grep -q ECHTVAR_VALUES reuse.log ||
-            ! grep -qF 'ANNOTATE_FAMILIES:VEP_PLUGIN_TABLE (stub-group)' reuse.log; then
+            ! grep -qF 'ANNOTATE_FAMILIES:TRANSCRIPT_RULES (stub-group)' reuse.log; then
             cat reuse.log
             exit 1
           fi
@@ -245,7 +245,7 @@ jobs:
           fi
           test -L stub/reuse/annotations/fam-a/tables-0.5.0-illumina-202610/manifest.json
           test -L "stub/reuse/${union}/echtvar_values"
-          test -L "stub/reuse/${union}/vep_plugins"
+          test -L "stub/reuse/${union}/transcript_rules"
           test ! -e "stub/reuse/${annotation}"
           # A run names any of the three archives of AlphaGenome's scores: here all of them, and then the scores alone.
           # The step that reads the archives runs once in each.
@@ -422,7 +422,7 @@ jobs:
           # Each of the workflow's processes runs under the workflow's name, and the including pipeline's under its own.
           for task in 'Submitted process > MADE_FAMILY' 'ANNOTATE_FAMILIES:FAMILY_CHECK (fam-c)' \
             'ANNOTATE_FAMILIES:SV_UNION (stub-group)' 'ANNOTATE_FAMILIES:ECHTVAR_VALUES (stub-group)' \
-            'ANNOTATE_FAMILIES:JOINED_VALUES (stub-group)' 'ANNOTATE_FAMILIES:VEP_PLUGIN_TABLE (stub-group)' \
+            'ANNOTATE_FAMILIES:JOINED_VALUES (stub-group)' 'ANNOTATE_FAMILIES:TRANSCRIPT_RULES (stub-group)' \
             'ANNOTATE_FAMILIES:ROH_UPD (fam-c)' \
             'ANNOTATE_FAMILIES:FAMILY_TABLES (fam-c)'; do
             grep -qF "${task}" included.log || { echo "did not run: ${task}" >&2; cat included.log; exit 1; }
@@ -433,7 +433,7 @@ jobs:
           fi
           # What it publishes lies where a run of family_tables.nf publishes it.
           union=annotation-unions/stub-group/tables-0.5.0-illumina-202610
-          for f in "${union}"/{stub-group.vcf.gz,stub-group.vcf.gz.tbi,tables,echtvar_values,joined_values,vep_plugins} \
+          for f in "${union}"/{stub-group.vcf.gz,stub-group.vcf.gz.tbi,tables,echtvar_values,joined_values,transcript_rules} \
             "${union}"/{stub-group.sv.vcf.gz,stub-group.sv.map.parquet,sv_annotation} \
             annotations/fam-c/tables-0.5.0-illumina-202610/{variants,transcripts,roh,sv,sv_transcripts}.parquet \
             annotations/fam-c/tables-0.5.0-illumina-202610/{manifest.json,tables.md}; do

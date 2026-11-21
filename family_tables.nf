@@ -19,7 +19,7 @@
 // Including the workflow in another pipeline). The entry workflow reads the families from a sheet and the settings
 // from params, and publishes what ANNOTATE_FAMILIES emits.
 
-include { FAMILY_CHECK ; NORMALISE_FAMILY ; NORMALISE_SV ; UNION_SITES ; SV_SITES ; SV_UNION ; ECHTVAR_VALUES ; JOINED_VALUES ; VEP_PLUGIN_TABLE ; ANNOTATION_TABLES ; SV_ANNOTATION_TABLES ; ROH_UPD ; FAMILY_TABLES ; groupAnnotation ; svName ; svGroup } from './modules/family_tables'
+include { FAMILY_CHECK ; NORMALISE_FAMILY ; NORMALISE_SV ; UNION_SITES ; SV_SITES ; SV_UNION ; ECHTVAR_VALUES ; JOINED_VALUES ; TRANSCRIPT_RULES ; ANNOTATION_TABLES ; SV_ANNOTATION_TABLES ; ROH_UPD ; FAMILY_TABLES ; groupAnnotation ; svName ; svGroup } from './modules/family_tables'
 include { ILLUMINA_ANNOTATE } from './modules/annotator'
 include { ILLUMINA_ANNOTATE as ILLUMINA_ANNOTATE_SV } from './modules/annotator'
 
@@ -274,7 +274,7 @@ workflow ANNOTATE_FAMILIES {
         settings.branch_points ?: [],
     )
     // The rules of VEP's two plugins, applied to the union's alleles in the exons of the prepared gene models.
-    vep_plugins = VEP_PLUGIN_TABLE(union, reference, settings.gene_models)
+    transcript_rules = TRANSCRIPT_RULES(union, reference, settings.gene_models)
 
     if (settings.annotated != null) {
         def reused = settings.annotated.resolve("out/${settings.group}.json.gz")
@@ -347,7 +347,7 @@ workflow ANNOTATE_FAMILIES {
         tables,
         archive_values,
         joined_values,
-        vep_plugins,
+        transcript_rules,
         sv_tables,
         sv_map,
         settings.strchive ?: [],
@@ -359,7 +359,7 @@ workflow ANNOTATE_FAMILIES {
     sv_published = annotates_sv ? sv_union.union.map { _group, vcf, index -> [vcf, index] }.flatten().mix(sv_tables, sv_map) : channel.empty()
 
     emit:
-    union = union.map { _group, vcf, index -> [vcf, index] }.flatten().mix(tables, archive_values, joined_values, vep_plugins, sv_published)
+    union = union.map { _group, vcf, index -> [vcf, index] }.flatten().mix(tables, archive_values, joined_values, transcript_rules, sv_published)
     annotator = annotator
     family_tables = written.map { family, variants, transcripts, roh, manifest, notes, larger ->
         [family: family, files: [variants, transcripts, roh, manifest, notes] + larger]
@@ -367,8 +367,8 @@ workflow ANNOTATE_FAMILIES {
 }
 
 // A family's tables go under the family's id; the folder names the tables' version and the catalog.
-// The union's tables, its values from the echtvar archives and from the joined files and its table of VEP's plugins are
-// folders. Nextflow's default replaces a published file whose
+// The union's tables, its values from the echtvar archives and from the joined files and its table of the transcript
+// rules are folders. Nextflow's default replaces a published file whose
 // size or time differs, and compares a folder by its own, which an object store gives every folder alike: a run
 // into a folder that an earlier run wrote would keep that run's tables beside the families' new ones. The union is
 // therefore always replaced, which removes an earlier folder whole and leaves none of its parts among the new ones.

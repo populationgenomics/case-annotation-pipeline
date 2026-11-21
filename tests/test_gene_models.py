@@ -1,4 +1,4 @@
-"""The preparation of the gene models that VEP reads, on the invented gene models of the workflow's test.
+"""The preparation of the gene models that the transcript rules read, on the workflow test's invented gene models.
 
 tests/workflows/family_tables/gene-models/ holds one invented gene in the layout of Ensembl's GFF3 and in that of NCBI's
 RefSeq GFF, over the invented reference beside it, and an invented assembly report.

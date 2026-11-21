@@ -37,7 +37,7 @@ from case_annotation import (
     sv_annotation,
     sv_sites,
     sv_tables,
-    vep_plugins,
+    transcript_rules,
 )
 
 _PED = 'fam-1\tS1\t0\t0\t1\t1\nfam-1\tS2\t0\t0\t2\t1\nfam-1\tS3\tS1\tS2\t2\t2\n'
@@ -498,15 +498,15 @@ def _write_joined(path: pathlib.Path, alleles: Sequence[str], sources: Sequence[
     (path / joined_values.INFO_NAME).write_text(info.model_dump_json())
 
 
-_PLUGINS_INFO = vep_plugins.VepPluginsInfo(
+_PLUGINS_INFO = transcript_rules.TranscriptRulesInfo(
     utrannotator_commit='0' * 40,
     nmd_plugin_commit='2' * 40,
     vep_release='0.0',
-    uorf_evidence=vep_plugins.FileRecord(name='invented-uorfs.txt', bytes=1, sha256='1' * 64),
+    uorf_evidence=transcript_rules.FileRecord(name='invented-uorfs.txt', bytes=1, sha256='1' * 64),
     gene_models=tuple(
-        vep_plugins.GeneModelAnnotated(
+        transcript_rules.GeneModelAnnotated(
             source=source,
-            file=vep_plugins.FileRecord(name=gene_models.FILES[source], bytes=1, sha256='3' * 64),
+            file=transcript_rules.FileRecord(name=gene_models.FILES[source], bytes=1, sha256='3' * 64),
             prepared_from=gene_models.PublicFile(name=f'invented.{source}.gz', bytes=1, sha256='4' * 64, stated=()),
         )
         for source in gene_models.FILES
@@ -516,11 +516,11 @@ _PLUGINS_INFO = vep_plugins.VepPluginsInfo(
 
 def _uorf(consequence: str, **fields: object) -> dict[str, Any]:
     """One record of UTRannotator as the plugins' table holds it: the fields given, and null in every other."""
-    return {field.name: None for field in vep_plugins.UORF} | {'consequence': consequence} | fields
+    return {field.name: None for field in transcript_rules.UORF} | {'consequence': consequence} | fields
 
 
-# The rows of the union's table of VEP's plugins, each as (variant id, transcript id, source, columns). The second
-# allele has two kinds of effect on its transcript of `transcripts`, with two records of one kind, and a row on a
+# The rows of the union's table of the transcript rules, each as (variant id, transcript id, source, columns). The
+# second allele has two kinds of effect on its transcript of `transcripts`, with two records of one kind, and a row on a
 # RefSeq transcript that `transcripts` lacks, and one on a feature of RefSeq's file whose id is no transcript id. The
 # third allele ends a reading frame, and the NMD plugin evaluated it without a flag. The other family's allele has a
 # row too.
@@ -550,8 +550,8 @@ def _write_plugins(path: pathlib.Path, rows: Sequence[tuple[str, str, str, Mappi
         {'variant_id': vid, 'transcript_id': transcript, 'source': source} | dict(columns)
         for vid, transcript, source, columns in rows
     ]
-    pq.write_table(pa.Table.from_pylist(table, schema=vep_plugins.TABLE), path / vep_plugins.TABLE_NAME)
-    (path / vep_plugins.INFO_NAME).write_text(_PLUGINS_INFO.model_dump_json())
+    pq.write_table(pa.Table.from_pylist(table, schema=transcript_rules.TABLE), path / transcript_rules.TABLE_NAME)
+    (path / transcript_rules.INFO_NAME).write_text(_PLUGINS_INFO.model_dump_json())
 
 
 # The tables of a family's alleles, which every family has.
@@ -871,7 +871,7 @@ def test_each_allele_has_gnomads_joint_values_and_one_gnomad_lacks_has_none(tmp_
 def test_a_transcript_row_has_what_the_plugins_say_of_its_allele_and_transcript(tmp_path: pathlib.Path) -> None:
     family_tables.assemble(**_inputs(tmp_path))
     path = tmp_path / 'out' / 'transcripts.parquet'
-    assert pq.read_schema(path).names[-len(vep_plugins.COLUMNS) :] == vep_plugins.COLUMNS.names
+    assert pq.read_schema(path).names[-len(transcript_rules.COLUMNS) :] == transcript_rules.COLUMNS.names
     rows = {row['variant_id']: row for row in pq.read_table(path).to_pylist()}
     assert list(rows) == _ALLELES
     both = rows[_ALLELES[1]]
@@ -885,7 +885,9 @@ def test_a_transcript_row_has_what_the_plugins_say_of_its_allele_and_transcript(
     assert [ended[column] for column in ('utr5_consequences', 'utr5_uorfs', *_COUNTED)] == [None] * 5
     # A transcript that neither plugin evaluated has no value in any of the columns.
     for allele in (_ALLELES[0], _ALLELES[3], _ALLELES[4]):
-        assert [rows[allele][column] for column in vep_plugins.COLUMNS.names] == [None] * len(vep_plugins.COLUMNS)
+        assert [rows[allele][column] for column in transcript_rules.COLUMNS.names] == [None] * len(
+            transcript_rules.COLUMNS
+        )
 
 
 def test_an_alleles_row_has_the_kinds_of_effect_over_its_transcripts(tmp_path: pathlib.Path) -> None:
@@ -942,9 +944,9 @@ def test_a_search_for_one_kind_of_record_reads_the_entries_of_its_list(tmp_path:
 def test_the_manifest_counts_the_rows_that_did_not_meet(tmp_path: pathlib.Path) -> None:
     # The fourth and fifth alleles lie in a 5' UTR by the Annotator, and the plugins' table has no row of either.
     manifest = family_tables.assemble(**_inputs(tmp_path, utr5=(_ALLELES[1], _ALLELES[3], _ALLELES[4])))
-    assert manifest.vep_plugins.run == _PLUGINS_INFO
-    assert [m.source for m in manifest.vep_plugins.matching] == list(gene_models.FILES)
-    ensembl, refseq = manifest.vep_plugins.matching
+    assert manifest.transcript_rules.run == _PLUGINS_INFO
+    assert [m.source for m in manifest.transcript_rules.matching] == list(gene_models.FILES)
+    ensembl, refseq = manifest.transcript_rules.matching
     # The second allele's transcript has UTRannotator's counts, and the row of the other family's allele is not
     # this family's to count.
     assert ensembl == family_tables.PluginMatching(
@@ -955,7 +957,7 @@ def test_the_manifest_counts_the_rows_that_did_not_meet(tmp_path: pathlib.Path) 
         source='RefSeq', rows_without_transcript=1, rows_of_other_ids=1, utr5_transcripts_without_values=0
     )
     written = json.loads((tmp_path / 'out' / 'manifest.json').read_text())
-    assert written['vep_plugins']['matching'][1] == {
+    assert written['transcript_rules']['matching'][1] == {
         'source': 'RefSeq',
         'rows_without_transcript': 1,
         'rows_of_other_ids': 1,
@@ -964,7 +966,7 @@ def test_the_manifest_counts_the_rows_that_did_not_meet(tmp_path: pathlib.Path) 
     # Both tables of the alleles carry the run's record.
     for table in _ALLELE_TABLES:
         kv = pq.read_schema(tmp_path / 'out' / f'{table}.parquet').metadata
-        assert vep_plugins.VepPluginsInfo.model_validate_json(kv[b'vep_plugins']) == _PLUGINS_INFO
+        assert transcript_rules.TranscriptRulesInfo.model_validate_json(kv[b'transcript_rules']) == _PLUGINS_INFO
 
 
 def test_a_plugins_table_of_another_union_is_refused(tmp_path: pathlib.Path) -> None:
@@ -976,7 +978,8 @@ def test_a_plugins_table_of_another_union_is_refused(tmp_path: pathlib.Path) -> 
 def test_a_plugins_table_with_a_transcript_twice_for_an_allele_is_refused(tmp_path: pathlib.Path) -> None:
     # Each would give the allele's row of `transcripts` a second row.
     with pytest.raises(
-        ValueError, match=rf"a transcript twice in the union's table of VEP's plugins, such as \['{_ALLELES[2]}'\]"
+        ValueError,
+        match=rf"a transcript twice in the union's table of the transcript rules, such as \['{_ALLELES[2]}'\]",
     ):
         family_tables.assemble(**_inputs(tmp_path, plugins=(*_PLUGINS, _PLUGINS[3])))
 
@@ -1173,7 +1176,7 @@ def _tables_command(
     args = ['family-tables', '--family', 'fam-1', '--ped', str(inputs['ped_path']), '--vcf', str(inputs['vcf_path'])]
     args += ['--annotation', str(inputs['annotation']), '--echtvar-values', str(inputs['archive_values'])]
     args += ['--joined-values', str(inputs['joined']), '--roh-upd', str(inputs['segments'])]
-    args += ['--vep-plugins', str(inputs['plugins'])]
+    args += ['--transcript-rules', str(inputs['plugins'])]
     args += ['--output', str(output or inputs['output'])]
     return [*args, '--schema-version', version, '--pipeline-version', pipeline]
 
@@ -2507,11 +2510,11 @@ def test_a_family_has_the_columns_of_the_files_its_run_joined(tmp_path: pathlib.
     assert manifest.joined_files == tuple(_joined_file(source) for source in given)
     assert [file['source'] for file in written['joined_files']] == [source.name for source in given]
     assert json.loads(schema.metadata[b'joined_files']) == written['joined_files']
-    # transcripts has the columns that the files give by transcript, after the annotation's and before those of VEP's
-    # plugins, and the manifest lists those of a file that the run did not join.
+    # transcripts has the columns that the files give by transcript, after the annotation's and before those of the
+    # transcript rules, and the manifest lists those of a file that the run did not join.
     by_transcript = pq.read_schema(tmp_path / 'out' / 'transcripts.parquet')
     held = [column for source in given for column in source.transcript_columns]
-    assert by_transcript.names == [*annotation_tables.TRANSCRIPTS.names, *held, *vep_plugins.COLUMNS.names]
+    assert by_transcript.names == [*annotation_tables.TRANSCRIPTS.names, *held, *transcript_rules.COLUMNS.names]
     assert [by_transcript.field(column) for column in held] == [family_tables.TRANSCRIPT.field(c) for c in held]
     assert manifest.transcripts_omitted_columns == tuple(c for c in _JOINED_TRANSCRIPT_COLUMNS if c not in held)
     assert json.loads(by_transcript.metadata[b'joined_files']) == written['joined_files']

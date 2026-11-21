@@ -8,7 +8,8 @@ to the transcripts of the prepared gene model files (gene_models, transcript_mod
 that VEP would give to each plugin (plugin_gates), and writes one row per allele and transcript that a rule
 evaluated, keyed as `transcripts` is, with a record of what the values come from beside it. The record holds nothing
 of the union's own, such as a count of its alleles, so that it is the same for every union that the same image and
-gene models annotate.
+gene models annotate. The module, its table and its record have their name from what both sets of rules read: a
+transcript's structure and its sequence.
 
 A row has the plugins' values under names in snake case, each with the type that the value has. Beside them it has
 three things that no plugin gives: the Kozak context and strength of the transcript's own start codon, the same two
@@ -42,8 +43,8 @@ import pysam
 
 from case_annotation import annotation_tables, gene_models, nmd, plugin_gates, transcript_models, utr5
 
-TABLE_NAME = 'vep_plugins.parquet'
-INFO_NAME = 'vep_plugins.json'
+TABLE_NAME = 'transcript_rules.parquet'
+INFO_NAME = 'transcript_rules.json'
 # A process writes a line to the log for every so many alleles of a chromosome that it has read with a gene model file.
 PROGRESS_EVERY = 20_000
 
@@ -173,7 +174,7 @@ class GeneModelAnnotated(pydantic.BaseModel, frozen=True, extra='forbid'):
     prepared_from: gene_models.PublicFile
 
 
-class VepPluginsInfo(pydantic.BaseModel, frozen=True, extra='forbid'):
+class TranscriptRulesInfo(pydantic.BaseModel, frozen=True, extra='forbid'):
     """What the columns of the two plugins' rules come from (INFO_NAME)."""
 
     # The commit of https://github.com/ImperialCardioGenetics/UTRannotator that the rules of the utr5_ columns were
@@ -427,7 +428,7 @@ def annotate(
     uorf_evidence: pathlib.Path,
     output: pathlib.Path,
     workers: int = 1,
-) -> VepPluginsInfo:
+) -> TranscriptRulesInfo:
     """Writes the table of a union's alleles and the record of what its values come from into the output folder.
 
     `given` is the union's alleles that overlap an exon, each under its variant id, with the positive controls: a
@@ -508,7 +509,7 @@ def annotate(
             raise ValueError(f'two rows for {row[0]} and {row[1]}: the gene model files give the transcript twice')
     output.mkdir(parents=True)
     pq.write_table(table, output / TABLE_NAME, compression='zstd')
-    info = VepPluginsInfo(
+    info = TranscriptRulesInfo(
         utrannotator_commit=utr5.SOURCE_COMMIT,
         nmd_plugin_commit=nmd.SOURCE_COMMIT,
         vep_release=VEP_RELEASE,
@@ -523,6 +524,6 @@ def annotate(
     return info
 
 
-def read_info(folder: pathlib.Path) -> VepPluginsInfo:
+def read_info(folder: pathlib.Path) -> TranscriptRulesInfo:
     """The record in a folder that `annotate` wrote."""
-    return VepPluginsInfo.model_validate_json((folder / INFO_NAME).read_text())
+    return TranscriptRulesInfo.model_validate_json((folder / INFO_NAME).read_text())
