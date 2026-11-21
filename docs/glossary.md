@@ -78,6 +78,8 @@ shortened protein is then made.
 The base inside an intron, most often an adenine 18 to 44 bases before the intron's end, that the cell joins the start
 of the intron to when it splices the intron out. A variant that changes it, or the short motif around it, can leave the
 intron in the transcript or drop the next exon ([Catalogued branch points](family-tables.md#catalogued-branch-points)).
+The cell takes the first `AG` behind the branch point as the intron's end, so a variant that creates an `AG` between the
+two can move that end ([AG gained before an acceptor](family-tables.md#ag-gained-before-an-acceptor)).
 
 ### Structural variant
 
