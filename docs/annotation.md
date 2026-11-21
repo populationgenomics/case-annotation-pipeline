@@ -1657,8 +1657,8 @@ that it puts there, and each UTR is followed by a coding sequence that begins `A
 | a deletion from one exon of the UTR into the next                                 | a deletion of the intron between them with a few bases of both exons | takes as many bases from the spliced UTR as the deletion has on the genome, the intron's included                  | the counts and no record                                  |
 
 A substitution of one base has the plugin's records in every row but one, the allele at the first two bases of the UTR.
-A record that writes an allele with bases that do not change, before or behind those that do, has the records of the
-change alone, where the plugin goes by the alleles as they are written.
+A record that writes an allele with bases of the UTR that do not change, before or behind those that do, has the records
+of the change alone, where the plugin goes by the alleles as they are written.
 
 Three things are as in the plugin although the changed sequence could be read further. An insertion directly before the
 transcript's own start codon has the counts and no record, because the plugin reads an allele only when its following

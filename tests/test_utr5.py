@@ -180,6 +180,44 @@ def test_a_change_far_behind_a_start_codon_meets_its_frame_and_no_frame_that_end
     assert (stopped['consequence'], stopped['new_stop_distance_to_cds']) == ('uSTOP_gained', 6)
 
 
+def test_a_deletion_shifts_the_frame_up_to_the_base_before_its_stop_codon() -> None:
+    (shifted,) = records(UTR, 13, 2, '')
+    assert shifted == FIRST_FRAME_SHIFTED | {'alt_type_length': 24}
+    (lost,) = records(UTR, 14, 2, '')
+    assert (lost['consequence'], lost['alt_stop'], lost['alt_stop_distance_to_cds']) == ('uSTOP_lost', True, 12)
+
+
+def test_whole_codons_put_into_a_stop_codon_or_taken_out_of_it_are_its_loss() -> None:
+    """Three bases that can only be written inside the stop codon part it, although they shift no frame."""
+    (inserted,) = records(UTR, 16, 0, 'CCC')
+    assert (inserted['consequence'], inserted['alt_stop'], inserted['frame_with_cds']) == (
+        'uSTOP_lost',
+        False,
+        'outOfFrame',
+    )
+    (deleted,) = records('GGCACCATGGCTCCGTAAGCGCC', 16, 3, '')
+    assert (deleted['consequence'], deleted['alt_stop']) == ('uSTOP_lost', False)
+
+
+def test_an_insertion_or_a_deletion_that_makes_a_start_codon_is_a_gain() -> None:
+    """The distances of a gained start codon are those of the changed UTR."""
+    expected = {'consequence': 'uAUG_gained', 'cap_distance_to_start': 6, 'distance_to_cds': 8, 'distance_to_stop': 24}
+    for utr, removed, inserted in (('GGCACCAGGCTCC', 0, 'T'), ('GGCACCACTGGCTCC', 1, '')):
+        (gained,) = records(utr, 7, removed, inserted)
+        assert {key: gained[key] for key in expected} == expected
+        assert (gained['type'], gained['kozak_context']) == ('OutOfFrame_oORF', 'ACCATGG')
+
+
+def test_a_lost_start_codon_whose_frame_runs_into_the_coding_sequence_has_its_stop_there() -> None:
+    (lost,) = records('CCATGGCC', 3, 1, 'C')
+    assert (lost['consequence'], lost['type'], lost['distance_to_cds'], lost['distance_to_stop']) == (
+        'uAUG_lost',
+        'InFrame_oORF',
+        6,
+        18,
+    )
+
+
 def test_a_shifted_frame_that_loses_its_stop_runs_into_the_coding_sequence() -> None:
     (shifted,) = records('CCATGGCTTAACC', 6, 0, 'G')
     assert (shifted['ref_type'], shifted['ref_type_length']) == ('uORF', 9)
@@ -338,7 +376,7 @@ def test_a_deletion_that_can_be_written_into_a_stop_codon_is_its_loss_however_it
     assert [record['consequence'] for record in written[0]] == ['uSTOP_lost']
 
 
-def test_a_deletion_of_whole_codons_before_a_stop_codon_keeps_the_stop() -> None:
+def test_whole_codons_that_can_be_written_before_a_stop_codon_keep_the_stop() -> None:
     assert kinds(STOP_RUN, 7, 3, '') == []
     # Three `T` put in behind the stop codon's own `T` can be written before the stop codon as well.
     assert kinds('GGCATGCTTTAAGC', 10, 0, 'TTT') == kinds('GGCATGCTTTAAGC', 7, 0, 'TTT') == []
@@ -445,8 +483,8 @@ def test_the_context_with_an_allele_is_the_same_however_the_allele_is_written() 
     spliced = 'GGCGCC' + 'ATGATGATGGCTTAA'
     written = {utr5.own_start_change(spliced, 6, first, 0, 'ATG') for first in (6, 9, 12, 15)}
     assert written == {('ATGATGA', 'Moderate')}
-    removed = {utr5.own_start_change(spliced, 6, first, 3, '') for first in (6, 9, 12)}
-    assert len(removed) == 1
+    # One `ATG` fewer leaves the same three bases before the first of them, and the same base behind it.
+    assert {utr5.own_start_change(spliced, 6, first, 3, '') for first in (6, 9, 12)} == {None}
 
 
 def test_a_change_that_leaves_no_three_bases_before_the_own_start_codon_gives_none() -> None:
