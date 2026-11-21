@@ -1793,12 +1793,12 @@ The article's tool also reports an `AG` gained between an intron's second branch
 the score 1. The tables leave that zone out, because the published results that the rule was held against have no row of
 it.
 
-The article does not fit a number of the rule to disease variants. It takes the high-risk region from the reference
-genome, where 95% of the `AG`s that the zones hold lie within seven bases behind the branch point, and it then finds 330
-of 350 published disease variants of HGMD 2023.1 in that region. Its advice to prefer the high-risk region with a score
-of 3 or more rests on those variants and on their scores, and it adds nothing to the region, since every score there is
-at least 3. The rule reads no [dated source](#dated-sources): the catalogue, the gene models and the reference are
-current sources.
+The article gives no sign that a number of the rule was fitted to disease variants. It takes the high-risk region from
+the reference genome, where 95% of the `AG`s that the zones hold lie within seven bases behind the branch point, and it
+then finds 330 of 350 published disease variants of HGMD 2023.1 in that region. Its advice to prefer the high-risk
+region with a score of 3 or more rests on those variants and on their scores, and it adds nothing to the region, since
+every score there is at least 3. The rule reads no [dated source](#dated-sources): the catalogue, the gene models and
+the reference are current sources.
 
 The article leaves some details open. The table says how each was decided, and the published results are those of
 [the comparison below](#the-rule-against-the-published-results).

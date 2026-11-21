@@ -32,11 +32,13 @@ def _gains(
     removed: int,
     inserted: str,
     stretch: str = STRETCH,
-    behind: int = 0,
     branch_point: int = BRANCH_POINT,
 ) -> list[ag_gain.Gain]:
-    """The gains of the allele that replaces `removed` bases from a distance behind the branch point."""
-    return ag_gain.gains(stretch, branch_point, behind, branch_point + position, removed, inserted)
+    """The gains of the allele that replaces `removed` bases from a distance behind the branch point.
+
+    `stretch` ends at the intron's last base, and the exon stands behind it.
+    """
+    return ag_gain.gains(stretch + EXON, branch_point, len(EXON), branch_point + position, removed, inserted)
 
 
 def _gain(distance: int, to_acceptor: int, *, yag: bool, existing_ag: bool = False) -> ag_gain.Gain:
@@ -76,9 +78,7 @@ def test_a_gain_is_a_yag_behind_a_pyrimidine_alone() -> None:
 
 def test_a_zone_that_holds_an_ag_in_the_reference_lowers_the_score_by_one() -> None:
     with_ag = STRETCH[: BRANCH_POINT + 2] + 'AG' + STRETCH[BRANCH_POINT + 4 :]
-    assert ag_gain.gains(with_ag, BRANCH_POINT, 0, BRANCH_POINT + 14, 1, 'A') == [
-        _gain(15, -9, yag=True, existing_ag=True)
-    ]
+    assert _gains(14, 1, 'A', stretch=with_ag) == [_gain(15, -9, yag=True, existing_ag=True)]
     (without,) = _gains(14, 1, 'A')
     assert without.score == 5
 
@@ -105,7 +105,7 @@ def test_a_substitution_gains_exactly_the_ags_of_the_zone_that_the_reference_lac
         for other in set('ACGT') - {base}:
             changed = STRETCH[:index] + other + STRETCH[index + 1 :]
             expected = in_zone(changed) - in_zone(STRETCH) if index > BRANCH_POINT else set()
-            found = ag_gain.gains(STRETCH, BRANCH_POINT, 0, index, 1, other)
+            found = ag_gain.gains(STRETCH + EXON, BRANCH_POINT, len(EXON), index, 1, other)
             assert {BRANCH_POINT + gain.branch_point_distance - 1 for gain in found} == expected, (index, other)
 
 
@@ -214,8 +214,32 @@ def test_an_allele_that_changes_the_branch_point_or_lies_before_it_gains_nothing
 def test_an_allele_that_changes_the_exon_gains_nothing() -> None:
     whole = STRETCH + EXON
     # A deletion from the zone into the exon, and a substitution of the exon's first base.
-    assert _gains(20, 6, 'AG', stretch=whole, behind=len(EXON)) == []
+    assert _gains(20, 6, 'AG') == []
     assert ag_gain.gains(whole, BRANCH_POINT, len(EXON), len(STRETCH), 1, 'A') == []
+
+
+def test_the_stretch_holds_a_base_of_the_exon() -> None:
+    with pytest.raises(ValueError, match='the stretch holds 0 bases of the exon'):
+        ag_gain.gains(STRETCH, BRANCH_POINT, 0, BRANCH_POINT + 6, 1, 'G')
+
+
+@pytest.mark.parametrize('behind', [1, 2, 5, len(EXON)])
+def test_an_ag_across_the_intron_s_end_is_the_reference_s_however_much_of_the_exon_is_read(behind: int) -> None:
+    """An intron that ends in `A` before an exon that begins with `G`, and alleles that put bases between the two."""
+    across = STRETCH[:-3] + 'CCA'
+    whole = across + EXON[:behind]
+    # A replacement of the intron's last two bases that keeps the `A` and puts `GTTT` behind it.
+    assert ag_gain.gains(whole, BRANCH_POINT, behind, len(across) - 2, 2, 'TAGTTT') == []
+    # The same bases as an insertion, and the substitution of the base before the `A` alone.
+    assert ag_gain.gains(whole, BRANCH_POINT, behind, len(across), 0, 'GTTT') == []
+    assert ag_gain.gains(whole, BRANCH_POINT, behind, len(across) - 2, 1, 'T') == []
+
+
+@pytest.mark.parametrize('behind', [1, 2, 5, len(EXON)])
+def test_a_deletion_that_leaves_fewer_than_three_bases_behind_the_branch_point_gains_nothing(behind: int) -> None:
+    """The acceptor's `CAG` is removed behind a branch point five bases before the exon: no zone is left."""
+    assert ag_gain.gains('AACAG' + EXON[:behind], 0, behind, 2, 3, '') == []
+    assert ag_gain._places('AAGTCC', 1, -2) == []
 
 
 def test_an_insertion_at_the_acceptor_that_leaves_one_ag_gains_nothing() -> None:
@@ -461,6 +485,8 @@ def test_an_insertion_at_an_ag_across_the_boundary_gains_nothing(tmp_path: pathl
     )
     for offset, bases in ((0, 'GTTT'), (1, 'TTTG'), (2, 'TTGT')):
         assert _found(tmp_path, invented, _allele(invented, offset, 0, bases)) == []
+    # A record that replaces the intron's last two bases and puts the same four bases behind its `A`.
+    assert _found(tmp_path, invented, _allele(invented, -2, 2, 'TAGTTT')) == []
 
 
 @STRANDS

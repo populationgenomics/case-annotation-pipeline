@@ -91,6 +91,9 @@ def _shared(reference: str, changed: str, first: int, removed: int) -> tuple[int
 
 def _places(sequence: str, first: int, last: int) -> list[int]:
     """Where an `AG` begins in a sequence, with its `A` at `first` or later and its `G` at `last` or earlier."""
+    # A stretch that ends before it begins holds none: `find` would count a negative end from the sequence's end.
+    if last < first:
+        return []
     found, at = [], sequence.find(_GAINED, first, last + 1)
     while at >= 0:
         found.append(at)
@@ -102,16 +105,23 @@ def gains(sequence: str, branch_point: int, behind: int, position: int, removed:
     """The `AG`s that an allele gains in zone 1 of an intron, from the branch point on.
 
     `sequence` is a stretch of the reference on the intron's strand that holds the branch point at the index
-    `branch_point`, every base from there to the intron's last, and `behind` bases of the exon after it. The allele
-    replaces `removed` bases from the index `position` with `inserted`, and an insertion removes none and stands
-    before the base at `position`. Bases before the branch point and bases of the exon are there for an allele that a
-    record writes outside the zone and that can be written inside it.
+    `branch_point`, every base from there to the intron's last, and `behind` bases of the exon after it, at least
+    one. The allele replaces `removed` bases from the index `position` with `inserted`, and an insertion removes none
+    and stands before the base at `position`. Bases before the branch point and further bases of the exon are there
+    for an allele that a record writes outside the zone and that can be written inside it. The exon's first base is
+    always there, because an `AG` of the reference can lie across the intron's end, and an allele that moves it into
+    the intron gains none.
 
     The stretch is read back from the exon, which keeps its place in the changed sequence. An allele is read when it
     can be written with the exon after it, and when no way of writing it changes the branch point or lies before it:
     an allele that can be written before the branch point leaves everything from the branch point to the exon as it
     was. Any other allele gains nothing here.
+
+    Raises:
+        ValueError: if the stretch holds no base of the exon.
     """
+    if behind < 1:
+        raise ValueError(f'the stretch holds {behind} bases of the exon, and the rule reads at least its first')
     changed = sequence[:position] + inserted + sequence[position + removed :]
     if changed == sequence:
         return []
@@ -267,11 +277,11 @@ def of_transcript(
         branch_point = catalogued.first(transcript.strand, exon_start, end - start + 1)
         if branch_point is None or span[1] < min(branch_point, exon_start) or span[0] > max(branch_point, exon_start):
             continue
-        # The stretch from the branch point to the intron's last base, on the genome, with every base that a way of
+        # The stretch from the branch point to the exon's first base, on the genome, with every base that a way of
         # writing the allele reaches. Cut short of the exon's bases among them, the comparison could not tell an
         # insertion at the intron's end that can be written in the exon from one that cannot.
-        low = min(branch_point if forward else start, max(span[0], 1))
-        high = max(end if forward else branch_point, min(span[1], length))
+        low = min(branch_point if forward else exon_start, max(span[0], 1))
+        high = max(exon_start if forward else branch_point, min(span[1], length))
         bases = reference.fetch(transcript.chrom, low - 1, high).upper()
         if len(bases) != high - low + 1:
             raise ValueError(f'the reference holds {len(bases)} bases of {transcript.chrom}:{low}-{high}')
