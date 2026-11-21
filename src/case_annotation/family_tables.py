@@ -412,9 +412,10 @@ class PluginMatching(pydantic.BaseModel, frozen=True, extra='forbid'):
     """
 
     source: gene_models.Source
-    # The plugins' rows of the family's alleles on a transcript that the allele has no row of in `transcripts`.
+    # The rules' rows of the family's alleles on a transcript that the allele has no row of in `transcripts`, those
+    # of a gained `AG` among them.
     rows_without_transcript: int
-    # The plugins' rows of the family's alleles on a feature whose id is no transcript id of `transcripts`
+    # The rules' rows of the family's alleles on a feature whose id is no transcript id of `transcripts`
     # (transcript_rules.TRANSCRIPT_ID), which no row can match.
     rows_of_other_ids: int
     # The `transcripts` rows with the consequence 5_prime_UTR_variant that have no value of UTRannotator's.

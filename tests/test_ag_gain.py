@@ -416,6 +416,68 @@ def test_an_insertion_written_in_the_exon_has_the_answer_of_its_writing_in_the_i
     assert (entry['branch_point_distance'], entry['acceptor_distance'], entry['yag']) == (24, -3, True)
 
 
+# The ends of two invented introns, each with the exon behind it: one ends in an acceptor's `CAG`, and the other in
+# an `A` before an exon that begins with `G`, so that an `AG` lies across the two.
+BOUNDARIES = {'an acceptor': (STRETCH, EXON), 'an AG across the boundary': (STRETCH[:-3] + 'CCA', EXON)}
+
+
+@STRANDS
+@pytest.mark.parametrize('boundary', BOUNDARIES)
+@pytest.mark.parametrize('unit', ['GTTT', 'G', 'GT', 'AG', 'CAG', 'AGTC', 'TTCA', 'CA', 'A'])
+def test_an_insertion_beside_the_exon_has_one_answer_on_a_transcript_however_it_is_written(
+    tmp_path: pathlib.Path, strand: int, boundary: str, unit: str
+) -> None:
+    """Every insertion of a unit from 12 bases before the exon to 8 bases into it, on both strands.
+
+    The stretch that is read for a record ends where the allele's reach ends, so a record written in the intron is
+    read with the bases of the exon that it can also be written behind.
+    """
+    end, exon = BOUNDARIES[boundary]
+    invented = invented_transcripts.laid_out(
+        ('GGCACC' + 'ATGGCT', exon), (7, 22), strand=strand, introns=('GTAAGT' + 'C' * 30 + end,)
+    )
+    whole = end + exon
+    several = 0
+    for offset in range(-12, 9):
+        at = len(end) + offset
+        changed = whole[:at] + unit + whole[at:]
+        writings = [
+            (other - len(end), changed[other : other + len(unit)])
+            for other in range(len(whole) + 1)
+            if whole[:other] + changed[other : other + len(unit)] + whole[other:] == changed
+        ]
+        answers = [_found(tmp_path, invented, _allele(invented, place, 0, bases)) for place, bases in writings]
+        assert all(answer == answers[0] for answer in answers), (offset, writings, answers)
+        several += len(writings) > 1
+    assert several or unit in ('CA', 'AGTC')
+
+
+@STRANDS
+def test_an_insertion_at_an_ag_across_the_boundary_gains_nothing(tmp_path: pathlib.Path, strand: int) -> None:
+    """`GTTT` behind the intron's last `A` is `TTTG` behind the exon's first `G`: the `AG` is the reference's."""
+    end, exon = BOUNDARIES['an AG across the boundary']
+    invented = invented_transcripts.laid_out(
+        ('GGCACC' + 'ATGGCT', exon), (7, 22), strand=strand, introns=('GTAAGT' + 'C' * 30 + end,)
+    )
+    for offset, bases in ((0, 'GTTT'), (1, 'TTTG'), (2, 'TTGT')):
+        assert _found(tmp_path, invented, _allele(invented, offset, 0, bases)) == []
+
+
+@STRANDS
+def test_a_reference_without_the_whole_end_of_an_intron_is_refused(tmp_path: pathlib.Path, strand: int) -> None:
+    invented = _invented(strand)
+    allele = _allele(invented, BRANCH_POINT + 6 - len(STRETCH), 1, 'G')
+    # A reference that ends a few bases behind the allele, inside the stretch that is read for it on either strand.
+    cut = invented.genome[: allele.start + (10 if strand == 1 else 3)]
+    path = tmp_path / 'short.fa'
+    path.write_text(f'>{invented_transcripts.CHROM}\n{cut}\n')
+    pysam.faidx(str(path))
+    with pysam.FastaFile(str(path)) as reference:
+        span = ag_gain.written_span(allele, reference, invented_transcripts.CHROM)
+        with pytest.raises(ValueError, match='the reference holds'):
+            ag_gain.of_transcript(invented.transcript, allele, span, reference, _catalogued(invented))
+
+
 @STRANDS
 def test_the_span_of_an_insertion_or_deletion_reaches_over_the_bases_that_it_repeats(
     tmp_path: pathlib.Path, strand: int

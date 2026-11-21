@@ -255,17 +255,23 @@ def of_transcript(
     `span` is the allele's reach over every way of writing it (written_span), by which the introns are found that it
     can be written in. Each of them is read with its first branch point (BranchPoints.first), and an intron without
     one gives nothing. The entries are in the transcript's order.
+
+    Raises:
+        ValueError: if the reference does not hold the end of an intron in full.
     """
     forward = transcript.strand == 1
+    length = reference.get_reference_length(transcript.chrom)
     found: list[dict[str, Any]] = []
     for start, end in transcript.introns_near(*span, reach=1):
         exon_start = end + 1 if forward else start - 1
         branch_point = catalogued.first(transcript.strand, exon_start, end - start + 1)
         if branch_point is None or span[1] < min(branch_point, exon_start) or span[0] > max(branch_point, exon_start):
             continue
-        # The stretch from the branch point to the intron's last base, on the genome, with the allele as written.
-        low = min(branch_point if forward else start, allele.start)
-        high = max(end if forward else branch_point, allele.end)
+        # The stretch from the branch point to the intron's last base, on the genome, with every base that a way of
+        # writing the allele reaches. Cut short of the exon's bases among them, the comparison could not tell an
+        # insertion at the intron's end that can be written in the exon from one that cannot.
+        low = min(branch_point if forward else start, max(span[0], 1))
+        high = max(end if forward else branch_point, min(span[1], length))
         bases = reference.fetch(transcript.chrom, low - 1, high).upper()
         if len(bases) != high - low + 1:
             raise ValueError(f'the reference holds {len(bases)} bases of {transcript.chrom}:{low}-{high}')
