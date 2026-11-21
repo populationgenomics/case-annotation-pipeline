@@ -1763,6 +1763,16 @@ allele whose every consequence has the impact `modifier`, such as one in an exon
 threshold on the impact, in this column or in an entry of `genes`. A query for such alleles names their consequence
 instead, such as `non_coding_transcript_exon_variant`.
 
+The impact and the consequence terms are the Annotator's, and they reflect none of the columns that other steps add. A
+threshold on the impact therefore drops alleles of impact `modifier` or `low` that these columns say more of:
+`utr5_consequences`
+([Upstream reading frames and nonsense-mediated decay](#upstream-reading-frames-and-nonsense-mediated-decay)),
+`branch_points` ([Catalogued branch points](#catalogued-branch-points)), `ag_gain_high_risk`
+([AG gained before an acceptor](#ag-gained-before-an-acceptor)), `gencode_polya_signal` and the `aparent2_` columns
+([Mitochondrial frequencies and polyadenylation](#mitochondrial-frequencies-and-polyadenylation)) and `avi_phred`
+([AlphaGenome's scores](#alphagenomes-scores)). The impact of a variant that ends a reading frame is the same whether or
+not `nmd_escaping`, in `transcripts`, predicts that it escapes decay.
+
 ```python
 rare_damaging = con.sql(
     """
