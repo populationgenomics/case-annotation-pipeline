@@ -74,7 +74,8 @@
 // reading frame, chr1-300-T-A is a missense variant, which neither plugin evaluates, and chr1-400-TCA-T is a
 // frameshift in the third exon, which the NMD plugin evaluates and does not flag. A record of the gene models whose
 // controls are on another transcript is refused, which is what a run meets whose VEP did not read the gene models.
-// Sites that hold an allele of the exons twice are refused before VEP reads them.
+// Sites that hold an allele of the exons twice are refused before VEP reads them. A run in which VEP does not say that
+// it runs offline is refused too: vep-without-offline-mode stands in for such a VEP (nextflow.config).
 // Refused inputs must fail, and so must Annotator outputs without the group's annotation. The case-annotation and
 // echtvar steps run in the tools image, built first. Run with Docker from the repository's root, with this folder's
 // config alone (-C), because a run from the root would otherwise read the pipeline's nextflow.config over it:
@@ -92,6 +93,7 @@ include { ECHTVAR_VALUES as ECHTVAR_VALUES_GNOMAD_ALONE } from '../../modules/fa
 include { JOINED_VALUES as JOINED_VALUES_MITO } from '../../modules/family_tables'
 include { VEP_PLUGIN_TABLE as VEP_PLUGIN_TABLE_CONTROL_REFUSED } from '../../modules/family_tables'
 include { VEP_SITES as VEP_SITES_REPEATED_REFUSED } from '../../modules/family_tables'
+include { VEP_PLUGINS as VEP_PLUGINS_NOT_OFFLINE_REFUSED } from '../../modules/family_tables'
 include { SV_SITES as SV_SITES_NO_END } from '../../modules/family_tables'
 include { SV_UNION as SV_UNION_NO_END_REFUSED } from '../../modules/family_tables'
 include { NORMALISE_SV as NORMALISE_SV_REF_MISMATCH_REFUSED } from '../../modules/family_tables'
@@ -315,7 +317,8 @@ workflow {
     // has no INFO END, which the Annotator would annotate as a single base; for ROH_UPD, a trio whose VCF has no GQ,
     // and an upd that fails after it has written a region, which failing-upd stands in for (nextflow.config); a record
     // of the gene models whose positive controls are of a transcript that VEP does not list; sites with an allele of
-    // the exons twice.
+    // the exons twice; a VEP that ends well without the warning that it runs offline, which vep-without-offline-mode
+    // stands in for (nextflow.config).
     unprefixed = NORMALISE_UNPREFIXED_REFUSED(channel.of(tuple('unprefixed', file("${fixture}/unprefixed.vcf"))), reference)
     mismatch = NORMALISE_REF_MISMATCH_REFUSED(channel.of(tuple('mismatch', file("${fixture}/ref-mismatch.vcf"))), reference)
     repeated = NORMALISE_REPEATED_REFUSED(channel.of(tuple('repeated', file("${fixture}/repeated.vcf"))), reference)
@@ -370,6 +373,7 @@ workflow {
         gene_models.map { g -> g.resolve('exons.bed') },
         gene_models.map { g -> g.resolve('controls.vcf') },
     )
+    not_offline = VEP_PLUGINS_NOT_OFFLINE_REFUSED(vep_sites, reference, gene_models)
     unprefixed.sites
         .map { _s -> 'unprefixed contigs' }
         .mix(
@@ -378,6 +382,7 @@ workflow {
             no_end_union.map.map { _m -> 'a deletion without END' },
             other_control.map { _t -> "controls on a transcript that VEP does not list" },
             repeated_sites.map { _s -> 'an allele twice among the sites that VEP reads' },
+            not_offline.map { _v -> 'a VEP that does not say that it runs offline' },
             two_repeats.map { _f -> "repeat VCFs of two of three members" },
             other_samples.map { _f -> "a structural-variant VCF of another family's samples" },
             sv_mismatch.map { _a -> "a structural variant whose REF is not the reference's" },

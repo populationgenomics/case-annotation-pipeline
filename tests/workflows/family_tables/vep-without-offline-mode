@@ -1,0 +1,11 @@
+#!/bin/sh
+# Stands in for a VEP that does not say that it runs offline, in the test of VEP_PLUGINS
+# (tests/workflows/family_tables.nf). It writes an empty output and one invented warning to the files after
+# --output_file and --warning_file, and ends well.
+while [ "$#" -gt 1 ]; do
+    case $1 in
+        --output_file) : > "$2" ;;
+        --warning_file) echo 'WARNING: an invented warning' > "$2" ;;
+    esac
+    shift
+done
