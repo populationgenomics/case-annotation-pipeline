@@ -295,6 +295,14 @@ def test_an_insertion_in_a_stop_codon_is_its_loss() -> None:
     assert (lost['consequence'], lost['alt_stop'], lost['alt_stop_distance_to_cds']) == ('uSTOP_lost', True, 12)
 
 
+def test_a_change_that_leaves_the_frame_to_end_at_the_stop_codon_s_place_is_no_loss() -> None:
+    """The plugin reports every deletion at a stop codon as its loss, and names the stop codon at the same place."""
+    # ATG CCG TAA TAA without `GTA` reads ATG CCA TAA, and ATG CTG TAA GTA G without `CTGT` reads ATG AAG TAG.
+    assert records('GGCATGCCGTAATAAGC', 8, 3, '') == []
+    assert records('GGCATGCTGTAAGTAGC', 6, 4, '') == []
+    assert records('GGCATGCAGTGATAGTC', 7, 6, 'GATA') == []
+
+
 def test_a_deletion_that_leaves_a_stop_codon_at_the_place_is_no_loss() -> None:
     """`TAGAA` without `AG` reads `TAA` where `TAG` stood. The plugin reports every deletion at a stop codon lost."""
     assert records('GGCACCATGGCTCCGTAGAAGCGCC', 16, 2, '') == []
@@ -318,6 +326,8 @@ def test_a_deletion_that_can_be_written_into_a_stop_codon_is_its_loss_however_it
 
 def test_a_deletion_of_whole_codons_before_a_stop_codon_keeps_the_stop() -> None:
     assert kinds(STOP_RUN, 7, 3, '') == []
+    # Three `T` put in behind the stop codon's own `T` can be written before the stop codon as well.
+    assert kinds('GGCATGCTTTAAGC', 10, 0, 'TTT') == kinds('GGCATGCTTTAAGC', 7, 0, 'TTT') == []
 
 
 def test_the_strength_of_a_start_codon_without_a_context_is_empty() -> None:
@@ -414,6 +424,15 @@ def test_the_own_start_codon_is_the_copy_with_the_coding_sequence_behind_it() ->
     assert utr5.own_start_change(spliced, 6, 3, 3, '') == ('GCCATGA', 'Moderate')
     (lost,) = records(spliced[:6], 3, 3, '', coding=spliced[6:])
     assert (lost['consequence'], lost['cap_distance_to_start']) == ('uAUG_lost', 3)
+
+
+def test_the_context_with_an_allele_is_the_same_however_the_allele_is_written() -> None:
+    """One more `ATG` among three can be written before, between or behind them."""
+    spliced = 'GGCGCC' + 'ATGATGATGGCTTAA'
+    written = {utr5.own_start_change(spliced, 6, first, 0, 'ATG') for first in (6, 9, 12, 15)}
+    assert written == {('ATGATGA', 'Moderate')}
+    removed = {utr5.own_start_change(spliced, 6, first, 3, '') for first in (6, 9, 12)}
+    assert len(removed) == 1
 
 
 def test_a_change_that_leaves_no_three_bases_before_the_own_start_codon_gives_none() -> None:
@@ -515,6 +534,6 @@ def test_the_rows_that_the_plugin_ships_as_its_test_are_reproduced(row: dict[str
     assert _in_order(found) == _in_order(shipped)
 
 
-def test_the_plugin_s_test_rows_cover_its_kinds_of_effect() -> None:
+def test_the_plugin_s_test_rows_cover_four_of_its_kinds_of_effect() -> None:
     kinds = {kind for row in PUBLIC_ROWS for kind in row['five_prime_UTR_variant_consequence'].split('&')}
     assert kinds == {'-', 'uAUG_gained', 'uAUG_lost', 'uSTOP_lost', 'uFrameShift'}

@@ -1530,7 +1530,7 @@ both. The controls are left out of the table.
   so two runs of the same inputs write the same table.
 
 On a laptop the command read 800,000 invented alleles in exons, 85 in 100 of them substitutions of one base, with the
-two gene model files above in 53 seconds with eight processes, which is 15,000 alleles a second. The largest process
+two gene model files above in 54 seconds with eight processes, which is 15,000 alleles a second. The largest process
 held 1.2 GB. VEP 116.3 with the two plugins read 10,399 invented alleles in exons in 21 seconds with one gene model file
 on a local disk, which is a little over an hour for a million alleles and both files.
 
@@ -1566,11 +1566,11 @@ says. In the second part the step ran as it is, and these rows differ from the p
 | ----------------------------------------------------- | ------ | ------------------------ | ---------------- | ----------------------- | ---------------- |
 | substitutions of one base in and beside 5′ UTRs       | 26,000 | 412,804                  | 121              | 266,767                 | 60               |
 | insertions there                                      | 13,000 | 243,739                  | 13,897           | 162,328                 | 8,872            |
-| deletions there                                       | 13,000 | 247,520                  | 3,822            | 163,940                 | 3,219            |
+| deletions there                                       | 13,000 | 247,520                  | 3,997            | 163,940                 | 3,370            |
 | substitutions of several bases and replacements there | 6,600  | 114,809                  | 68               | 81,487                  | 94               |
 | alleles in coding sequences                           | 25,000 | 517,764                  | 246              | 333,144                 | 651              |
 | deletions of a whole short intron                     | 6,847  | 118,844                  | 484              | 64,583                  | 813              |
-| all                                                   | 90,447 | 1,655,480                | 18,638           | 1,072,249               | 13,709           |
+| all                                                   | 90,447 | 1,655,480                | 18,813           | 1,072,249               | 13,860           |
 
 Every one of these rows has one of the differences of the next section, and none is unexplained. The alleles were made
 to meet the rules, so a union is expected to have far fewer such rows in a hundred: one insertion in five here repeats
@@ -1578,11 +1578,11 @@ the bases that follow it, and one in six holds a start codon.
 
 | The difference                                                             | Rows with Ensembl's file | Rows with RefSeq's file |
 | -------------------------------------------------------------------------- | ------------------------ | ----------------------- |
-| an insertion or a deletion that can be written in several ways             | 11,837                   | 8,599                   |
+| an insertion or a deletion that can be written in several ways             | 11,877                   | 8,620                   |
 | every start codon that an allele makes                                     | 4,003                    | 2,428                   |
 | an insertion directly before a start codon                                 | 1,294                    | 1,125                   |
 | an insertion directly before a stop codon                                  | 553                      | 336                     |
-| a deletion that leaves a stop codon at its place                           | 168                      | 108                     |
+| a deletion that leaves a stop codon at its place                           | 303                      | 238                     |
 | an allele at the first two bases of the UTR                                | 230                      | 228                     |
 | a deletion from one exon of the UTR into the next                          | 483                      | 813                     |
 | the 3′ UTR of a reverse-strand transcript, for the alleles of the NMD rule | 40                       | 34                      |
@@ -1639,6 +1639,8 @@ that it puts there, and each UTR is followed by a coding sequence that begins `A
 | a deletion from one exon of the UTR into the next                                 | a deletion of the intron between them with a few bases of both exons | takes as many bases from the spliced UTR as the deletion has on the genome, the intron's included                  | the counts and no record                                  |
 
 A substitution of one base has the plugin's records in every row but one, the allele at the first two bases of the UTR.
+A record that writes an allele with bases that do not change, before or behind those that do, has the records of the
+change alone, where the plugin goes by the alleles as they are written.
 
 Three things are as in the plugin although the changed sequence could be read further. An insertion directly before the
 transcript's own start codon has the counts and no record, because the plugin reads an allele only when its following

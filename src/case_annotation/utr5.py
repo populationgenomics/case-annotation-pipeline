@@ -245,7 +245,7 @@ def effects(frames: ReadingFrames, change: Change, evidence: Callable[[int], boo
     if changed == utr:
         return []
     compared = _Compared(utr, changed, *_shared(utr, changed, change.position, change.removed))
-    prefix, same_length, reference_end = compared.prefix, compared.same_length, compared.reference_end
+    same_length, reference_end = compared.same_length, compared.reference_end
     after = ReadingFrames(changed, frames.coding, frames.coding_stops)
     shift = (len(changed) - len(utr)) % 3 != 0
 
@@ -288,8 +288,8 @@ def effects(frames: ReadingFrames, change: Change, evidence: Callable[[int], boo
             )
         stop = frames.stop_in_utr(start)
         if stop is not None and compared.stop_touched(stop):
-            # The stop codon stays where a stop codon still stands at its place and the frame up to it is the same.
-            if changed[stop : stop + 3] in _STOPS and (same_length or prefix >= stop):
+            # The frame still ends at the stop codon's place where a stop codon stands there in the changed UTR.
+            if changed[stop : stop + 3] in _STOPS:
                 continue
             # It also stays behind an insertion or deletion of whole codons that can be written before it.
             if same_length or shift or stop < reference_end:
@@ -343,10 +343,8 @@ def own_start_change(spliced: str, start: int, first: int, removed: int, inserte
     `spliced` is the transcript's sequence and `start` the place of its start codon in it, counted from 0. The
     allele replaces `removed` bases from `first` with `inserted`. None for an allele that leaves the context as it
     is, for one that cannot be written without touching the start codon, and where the changed transcript has no
-    three bases before the codon.
+    three bases before the codon. The two sequences decide, and where a record writes the allele does not.
     """
-    if first >= start + 4 or first + removed <= start - 3:
-        return None
     changed = spliced[:first] + inserted + spliced[first + removed :]
     prefix, suffix = _shared(spliced, changed, first, removed)
     # The own start codon is the one with the coding sequence behind it, so the shared end is looked at first: among
