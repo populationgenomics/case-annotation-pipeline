@@ -23,10 +23,10 @@ The plugin decides an insertion or deletion by the place where the record writes
 different records. Here the reference UTR and the changed UTR are compared, so that one changed sequence gets one set
 of records. A start codon is lost only when no way of writing the allele leaves its three bases alone, and gained
 only when no way of writing the allele makes it one of the reference's. A stop codon is lost when a way of writing
-the allele changes it and the frame does not end at its place afterwards. A whole codon that is repeated, or removed
-with its repeat, is counted at the first copy. The records also differ from the plugin's in a few places where the
-plugin's own rule fails. For a substitution of one base the only such place is an allele at the first two bases of
-the UTR. docs/annotation.md lists every difference with an example, and tests/test_utr5.py pins each.
+the allele changes it and the frame does not end at its place afterwards. A start codon that the allele repeats, or
+removes with its repeat, is counted at the first copy. The records also differ from the plugin's in a few places
+where the plugin's own rule fails. For a substitution of one base the only such place is an allele at the first two
+bases of the UTR. docs/annotation.md lists every difference with an example, and tests/test_utr5.py pins each.
 
 One thing here is not the plugin's: the Kozak context and strength of the transcript's own start codon, with the
 reference allele and with an allele that changes the context (kozak, own_start_change), by the rule that the plugin
@@ -181,8 +181,10 @@ def effects(frames: ReadingFrames, change: Change, evidence: Callable[[int], boo
     # Among repeated bases an insertion or deletion can be written at several places, and the two shared stretches
     # overlap. `first_place` and `prefix` are the first and the last place in the reference UTR where it can begin.
     only_deletes, only_inserts = len(utr) - len(changed), len(changed) - len(utr)
-    movable = prefix + suffix >= min(len(utr), len(changed)) and not same_length
-    first_place = len(utr) - suffix - max(only_deletes, 0) if movable else prefix
+    # Whether the changed UTR is the reference with bases put in at one place, or taken out at one place, and no more.
+    # The alleles of the record do not say: a record can write a deletion as a longer allele replaced by a shorter one.
+    pure = prefix + suffix >= min(len(utr), len(changed)) and not same_length
+    first_place = len(utr) - suffix - max(only_deletes, 0) if pure else prefix
     # Where the shared end begins in each sequence. A codon of the reference from there on stands whole in the
     # changed UTR with everything behind it, so its reading frame is as it was.
     reference_end, changed_end = len(utr) - suffix, len(changed) - suffix
@@ -193,7 +195,7 @@ def effects(frames: ReadingFrames, change: Change, evidence: Callable[[int], boo
 
     def stop_touched(codon: int) -> bool:
         """Whether a way of writing the allele changes a base of a stop codon of the reference or parts it."""
-        if not movable:
+        if not pure:
             return codon + 3 > prefix and codon < reference_end
         if only_inserts > 0:
             return first_place <= codon + 2 and prefix >= codon + 1
@@ -209,10 +211,10 @@ def effects(frames: ReadingFrames, change: Change, evidence: Callable[[int], boo
     records: list[dict[str, Any]] = []
     for start in after.starts:
         # A start codon is made by the allele unless it is one of the shared end, or one of the shared beginning
-        # whose codon in the reference is not also found in the shared end. A substitution does not make a start
-        # codon where the reference has one.
+        # whose codon in the reference is not also found in the shared end. A replacement of bases by others does not
+        # make a start codon where the reference has one, as it does not remove one there.
         inherited = start >= changed_end or (start + 3 <= prefix and start < reference_end)
-        if inherited or (same_length and utr[start : start + 3] == _START):
+        if inherited or (not pure and utr[start : start + 3] == _START):
             continue
         context, strength = kozak(changed, start)
         records.append(
@@ -229,7 +231,7 @@ def effects(frames: ReadingFrames, change: Change, evidence: Callable[[int], boo
     for start in frames.starts:
         if start >= reference_end:
             break
-        if not stays(start) and (not change.inserted or changed[start : start + 3] != _START):
+        if not stays(start) and (pure or changed[start : start + 3] != _START):
             records.append(
                 {
                     'consequence': 'uAUG_lost',
@@ -303,10 +305,12 @@ def own_start_change(spliced: str, start: int, first: int, removed: int, inserte
         return None
     changed = spliced[:first] + inserted + spliced[first + removed :]
     prefix, suffix = _shared(spliced, changed, first, removed)
-    if prefix >= start + 3:
-        moved = start
-    elif start >= len(spliced) - suffix:
+    # The own start codon is the one with the coding sequence behind it, so the shared end is looked at first: among
+    # repeated bases the codon at its old place can be one that `effects` counts as gained.
+    if start >= len(spliced) - suffix:
         moved = start + len(changed) - len(spliced)
+    elif prefix >= start + 3:
+        moved = start
     else:
         return None
     context, strength = kozak(changed, moved)

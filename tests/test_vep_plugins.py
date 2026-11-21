@@ -136,19 +136,47 @@ def test_a_deletion_from_one_exon_of_the_utr_into_the_next_has_no_record(tmp_pat
     gene = invented_transcripts.gene(strand)
     start, end = gene.transcript.introns[0]
     across = plugin_gates.Allele(start - 3, end + 2, gene.genome[start - 4 : end + 2], '')
-    assert vep_plugins.utr_change(gene.transcript, across) is None
+    assert vep_plugins.utr_change(gene.transcript, across, gene.sequences.utr5) is None
     assert _columns(tmp_path, gene, across) == COUNTS | OWN_START
 
 
 @STRANDS
 def test_an_allele_as_a_change_of_the_utr_is_on_the_transcript_s_strand(strand: int) -> None:
     gene = invented_transcripts.gene(strand)
-    assert vep_plugins.utr_change(gene.transcript, gene.allele(8, 1, 'C')) == utr5.Change(7, 1, 'C')
-    assert vep_plugins.utr_change(gene.transcript, gene.allele(8, 0, 'CA')) == utr5.Change(7, 0, 'CA')
-    assert vep_plugins.utr_change(gene.transcript, gene.allele(8, 3, '')) == utr5.Change(7, 3, '')
+    assert vep_plugins.utr_change(gene.transcript, gene.allele(8, 1, 'C'), gene.sequences.utr5) == utr5.Change(
+        7, 1, 'C'
+    )
+    assert vep_plugins.utr_change(gene.transcript, gene.allele(8, 0, 'CA'), gene.sequences.utr5) == utr5.Change(
+        7, 0, 'CA'
+    )
+    assert vep_plugins.utr_change(gene.transcript, gene.allele(8, 3, ''), gene.sequences.utr5) == utr5.Change(7, 3, '')
     # The UTR's last five bases are in the second exon.
-    assert vep_plugins.utr_change(gene.transcript, gene.allele(22, 2, 'TT')) == utr5.Change(21, 2, 'TT')
-    assert vep_plugins.utr_change(gene.transcript, gene.coding_allele(5, 1, 'A')) is None
+    assert vep_plugins.utr_change(gene.transcript, gene.allele(22, 2, 'TT'), gene.sequences.utr5) == utr5.Change(
+        21, 2, 'TT'
+    )
+    assert vep_plugins.utr_change(gene.transcript, gene.coding_allele(5, 1, 'A'), gene.sequences.utr5) is None
+
+
+@STRANDS
+def test_an_insertion_before_the_first_coding_base_is_read_where_it_can_be_written_in_the_utr(
+    tmp_path: pathlib.Path, strand: int
+) -> None:
+    """The plugin reads an insertion by its following base, which is a coding one here, and gives no record.
+
+    `C` after the UTR's last base, a `C`, gives the sequence that `C` before that base gives, which the plugin reads.
+    """
+    frame = invented_transcripts.laid_out(('GGCACCATGGCC' + 'ATGGCTGAGCTGTAAGTAGC',), (13, 32), strand=strand)
+    utr = frame.sequences.utr5
+    at_the_end, inside = frame.allele(13, 0, 'C'), frame.allele(12, 0, 'C')
+    assert vep_plugins.utr_change(frame.transcript, at_the_end, utr) == utr5.Change(12, 0, 'C')
+    assert vep_plugins.utr_change(frame.transcript, inside, utr) == utr5.Change(11, 0, 'C')
+    written = [_columns(tmp_path, frame, allele) for allele in (at_the_end, inside)]
+    assert written[0] is not None
+    assert written[0] == written[1]
+    assert written[0]['utr5_consequences'] == ['uFrameShift']
+    # An insertion there that ends with another base can only be written before the coding base.
+    assert vep_plugins.utr_change(frame.transcript, frame.allele(13, 0, 'CT'), utr) is None
+    assert vep_plugins.utr_change(frame.transcript, frame.allele(14, 0, 'C'), utr) is None
 
 
 @STRANDS
@@ -391,7 +419,7 @@ def test_a_transcript_that_both_gene_model_files_give_a_row_is_refused(tmp_path:
     }
     prepared = tmp_path / 'gene-models'
     gene_models.prepare(public, models / 'assembly-report.txt', REFERENCE, prepared)
-    with pytest.raises(ValueError, match=r'two gene model files give a row for chr1-100-G-A and ENST01\.1'):
+    with pytest.raises(ValueError, match=r'two rows for chr1-100-G-A and ENST01\.1'):
         vep_plugins.annotate(_given(tmp_path, prepared), prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
 
 
@@ -412,7 +440,7 @@ def test_a_transcript_without_a_coding_sequence_is_not_annotated(tmp_path: pathl
         vep_plugins.Annotated(non_coding, reference)
     with pytest.raises(ValueError, match='has no coding sequence'):
         plugin_gates.Placed(non_coding, gene.allele(3, 1, 'T'), gene.sequences)
-    assert vep_plugins.utr_change(non_coding, gene.allele(3, 1, 'T')) is None
+    assert vep_plugins.utr_change(non_coding, gene.allele(3, 1, 'T'), gene.sequences.utr5) is None
 
 
 def test_the_command_needs_at_least_one_process(tmp_path: pathlib.Path) -> None:

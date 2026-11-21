@@ -379,7 +379,7 @@ process VEP_PLUGIN_TABLE {
         exit 1
     fi
     case-annotation vep-plugins --given ${group}.exons.vcf.gz --gene-models "\${copies}/gene-models" \\
-        --reference "\${copies}/${reference}" --uorf-evidence "\${UORF_EVIDENCE}" --workers ${task.cpus} \\
+        --reference "\${copies}/${reference.name}" --uorf-evidence "\${UORF_EVIDENCE}" --workers ${task.cpus} \\
         --output vep_plugins
     """
 

@@ -200,12 +200,17 @@ def _record_order(record: Mapping[str, Any]) -> tuple[str, int, str]:
     return (record['consequence'], 0 if start is None else -start, json.dumps(record, sort_keys=True))
 
 
-def utr_change(transcript: transcript_models.Transcript, allele: plugin_gates.Allele) -> utr5.Change | None:
-    """An allele as a change of a transcript's 5' UTR, or None for one that the plugin's rules do not read.
+def utr_change(transcript: transcript_models.Transcript, allele: plugin_gates.Allele, utr: str) -> utr5.Change | None:
+    """An allele as a change of a transcript's 5' UTR, or None for one that the rules do not read.
 
-    The plugin reads an allele whose bases all lie in the 5' UTR, and an insertion whose following base on the
-    transcript does. It also reads a deletion that begins in one exon of the UTR and ends in another, as if the
-    intron between them were not there. That is not read here.
+    `utr` is the UTR's sequence. The plugin reads an allele whose bases all lie in the 5' UTR, and an insertion whose
+    following base on the transcript does. Two things are not the plugin's.
+
+    - The plugin reads a deletion that begins in one exon of the UTR and ends in another as if the intron between them
+      were not there. That is not read here.
+    - An insertion directly before the first coding base has no following base in the UTR, and the plugin does not
+      read it. Here it is read where it repeats the UTR's last base at its end, because the same change can then be
+      written inside the UTR, where the plugin reads it.
     """
     coding = transcript.coding
     if coding is None:
@@ -217,11 +222,17 @@ def utr_change(transcript: transcript_models.Transcript, allele: plugin_gates.Al
 
     removed = len(allele.ref)
     low, high = allele.start, allele.start + removed - 1
+    inserted = allele.alt if transcript.strand == 1 else transcript_models.reverse_complement(allele.alt)
     first = place(low if transcript.strand == 1 else high)
     last = first if not removed else place(high if transcript.strand == 1 else low)
+    if first is None and not removed:
+        # The two bases beside the insertion, on the transcript: the UTR's last base and the first coding base.
+        before, behind = (allele.end, allele.start) if transcript.strand == 1 else (allele.start, allele.end)
+        at_the_end = place(before) == len(utr) - 1 and transcript.cdna(behind) == coding.cdna_start
+        if at_the_end and utr and inserted[-1:] == utr[-1]:
+            return utr5.Change(position=len(utr), removed=0, inserted=inserted)
     if first is None or last is None or (removed and last - first != removed - 1):
         return None
-    inserted = allele.alt if transcript.strand == 1 else transcript_models.reverse_complement(allele.alt)
     return utr5.Change(position=first, removed=removed, inserted=inserted)
 
 
@@ -281,7 +292,7 @@ def transcript_columns(
     columns: dict[str, Any] = {}
     if placed.five_prime_utr_variant:
         columns |= annotated.of_utr
-        change = utr_change(transcript, allele)
+        change = utr_change(transcript, allele, annotated.sequences.utr5)
         if change is not None:
             records = utr5.effects(annotated.frames, change, lambda start: transcript.genomic(start + 1) in evidence)
             if records:
@@ -415,7 +426,7 @@ def annotate(
     Raises:
         ValueError: if an input is not what its role needs (read_given, transcript_models.read, utr5.uorf_evidence),
             a prepared gene model file is not the one that the folder's record describes, a control fails
-            (check_control), or two gene model files give a row for the same allele and transcript.
+            (check_control), or the gene model files give a transcript twice, in one file or in both.
     """
     record = gene_models.read_record(prepared)
     files: dict[gene_models.Source, FileRecord] = {}
@@ -460,7 +471,7 @@ def annotate(
     keys = zip(table['variant_id'].to_pylist(), table['transcript_id'].to_pylist(), strict=True)
     for row, following in itertools.pairwise(keys):
         if row == following:
-            raise ValueError(f'two gene model files give a row for {row[0]} and {row[1]}')
+            raise ValueError(f'two rows for {row[0]} and {row[1]}: the gene model files give the transcript twice')
     output.mkdir(parents=True)
     pq.write_table(table, output / TABLE_NAME, compression='zstd')
     info = VepPluginsInfo(

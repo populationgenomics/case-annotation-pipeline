@@ -210,6 +210,20 @@ def test_a_substitution_that_leaves_a_start_codon_where_it_stood_does_not_make_i
     assert records(UTR, 5, 5, 'TATGA') == []
 
 
+def test_a_replacement_of_unequal_length_that_leaves_a_start_codon_where_it_stood_does_not_make_it() -> None:
+    assert records('CCATGCC', 1, 5, 'TATGCA') == []
+
+
+def test_a_deletion_that_a_record_writes_as_a_replacement_has_the_deletion_s_records() -> None:
+    """`ATGG` replaced by `G` takes out `ATG`, as the deletion of the first `ATG` does."""
+    repeated = 'GATGATGGG'
+    assert repeated[:4] + 'G' + repeated[8:] == repeated[:0] + repeated[3:]
+    lost = records(repeated, 0, 3, '')
+    assert [(record['consequence'], record['cap_distance_to_start']) for record in lost] == [('uAUG_lost', 1)]
+    assert records(repeated, 4, 4, 'G') == lost
+    assert records(repeated, 1, 4, 'A') == lost
+
+
 def test_every_start_codon_that_an_allele_makes_is_a_gain() -> None:
     """The plugin reports the first one alone."""
     gained = records(UTR, 3, 0, 'ATGCATGC')
@@ -357,6 +371,27 @@ def test_an_allele_that_leaves_the_context_or_touches_the_start_codon_gives_none
     assert utr5.own_start_change(SPLICED, OWN_START, first, removed, inserted) is None
 
 
+def test_the_own_start_codon_is_the_copy_with_the_coding_sequence_behind_it() -> None:
+    """Among repeated bases a start codon can stand at the own start codon's old place and be another one.
+
+    A copy of `CATG` before the UTR's last base puts a start codon where the own one stood. The own one is the later
+    copy, and the earlier one is an upstream start codon that the allele makes.
+    """
+    spliced = 'GGCGCGCC' + 'ATGGCTGCT'
+    assert utr5.own_start_change(spliced, 8, 7, 0, 'CATG') == ('TGCATGG', 'Moderate')
+    (gained,) = records(spliced[:8], 7, 0, 'CATG', coding=spliced[8:])
+    assert (gained['consequence'], gained['cap_distance_to_start'], gained['kozak_context']) == (
+        'uAUG_gained',
+        8,
+        'GCCATGC',
+    )
+    # Without the UTR's own `ATG`, the two that follow it are still the first codons of the coding sequence.
+    spliced = 'GCCATG' + 'ATGATGGGG'
+    assert utr5.own_start_change(spliced, 6, 3, 3, '') == ('GCCATGA', 'Moderate')
+    (lost,) = records(spliced[:6], 3, 3, '', coding=spliced[6:])
+    assert (lost['consequence'], lost['cap_distance_to_start']) == ('uAUG_lost', 3)
+
+
 def test_a_change_that_leaves_no_three_bases_before_the_own_start_codon_gives_none() -> None:
     assert utr5.own_start_change('GCCATGGCT', 3, 0, 2, '') is None
 
@@ -439,7 +474,9 @@ def _in_order(found: list[dict[str, Any]]) -> list[str]:
     return sorted(json.dumps(record, sort_keys=True) for record in found)
 
 
-@pytest.mark.parametrize('row', PUBLIC_ROWS, ids=[f'{row["variant"]} on {row["transcript"]}' for row in PUBLIC_ROWS])
+@pytest.mark.parametrize(
+    'row', PUBLIC_ROWS, ids=[f'allele {row["allele"]}, row {number}' for number, row in enumerate(PUBLIC_ROWS)]
+)
 def test_the_rows_that_the_plugin_ships_as_its_test_are_reproduced(row: dict[str, Any]) -> None:
     """The alleles and rows of the plugin's own test (tests/utrannotator_public_rows.json says where they are from)."""
     frames = utr5.ReadingFrames(row['utr5'], row['coding'])

@@ -532,7 +532,7 @@ The plugin leaves these things out, and the tables add one of them, the start co
 - Its authors tested it on alleles of one to five bases.
 - It evaluates a variant inside the exons of the 5′ UTR. A variant upstream of the transcript or in an intron of the UTR
   has no value. A variant that reaches from the UTR into an intron or into the coding sequence, and an insertion
-  directly before the protein's start codon, have the counts and no entry.
+  directly before the protein's start codon that cannot be written inside the UTR, have the counts and no entry.
 
 The rules read gene model files of the releases that the Annotator's catalog was built with, as VEP reads them. A row of
 `transcripts` in a 5′ UTR can still be without values, where the gene model file lacks the transcript at that version or

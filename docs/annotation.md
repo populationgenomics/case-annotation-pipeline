@@ -1565,12 +1565,12 @@ says. In the second part the step ran as it is, and these rows differ from the p
 | Alleles                                               | Number | Rows with Ensembl's file | Not the plugins' | Rows with RefSeq's file | Not the plugins' |
 | ----------------------------------------------------- | ------ | ------------------------ | ---------------- | ----------------------- | ---------------- |
 | substitutions of one base in and beside 5′ UTRs       | 26,000 | 412,804                  | 121              | 266,767                 | 60               |
-| insertions there                                      | 13,000 | 243,739                  | 13,639           | 162,328                 | 8,542            |
+| insertions there                                      | 13,000 | 243,739                  | 13,897           | 162,328                 | 8,872            |
 | deletions there                                       | 13,000 | 247,520                  | 3,822            | 163,940                 | 3,219            |
 | substitutions of several bases and replacements there | 6,600  | 114,809                  | 68               | 81,487                  | 94               |
-| alleles in coding sequences                           | 25,000 | 517,764                  | 245              | 333,144                 | 651              |
+| alleles in coding sequences                           | 25,000 | 517,764                  | 246              | 333,144                 | 651              |
 | deletions of a whole short intron                     | 6,847  | 118,844                  | 484              | 64,583                  | 813              |
-| all                                                   | 90,447 | 1,655,480                | 18,379           | 1,072,249               | 13,379           |
+| all                                                   | 90,447 | 1,655,480                | 18,638           | 1,072,249               | 13,709           |
 
 Every one of these rows has one of the differences of the next section, and none is unexplained. The alleles were made
 to meet the rules, so a union is expected to have far fewer such rows in a hundred: one insertion in five here repeats
@@ -1578,8 +1578,8 @@ the bases that follow it, and one in six holds a start codon.
 
 | The difference                                                             | Rows with Ensembl's file | Rows with RefSeq's file |
 | -------------------------------------------------------------------------- | ------------------------ | ----------------------- |
-| an insertion or a deletion that can be written in several ways             | 11,639                   | 8,295                   |
-| every start codon that an allele makes                                     | 3,942                    | 2,402                   |
+| an insertion or a deletion that can be written in several ways             | 11,837                   | 8,599                   |
+| every start codon that an allele makes                                     | 4,003                    | 2,428                   |
 | an insertion directly before a start codon                                 | 1,294                    | 1,125                   |
 | an insertion directly before a stop codon                                  | 553                      | 336                     |
 | a deletion that leaves a stop codon at its place                           | 168                      | 108                     |
@@ -1628,7 +1628,7 @@ that it puts there, and each UTR is followed by a coding sequence that begins `A
 | an insertion directly before a start codon                                        | `GGCACC[>CC]ATGGCT`                                                  | `uAUG_lost`: it reads the codon at its old place, where the inserted bases stand                                   | no record: the codon stands whole, two bases on           |
 | an insertion in a start codon that can be written before it                       | `GGCACCA[>CA]TGGCT`, which is `GGCACC[>AC]ATGGCT`                    | `uAUG_lost`, and for the first way of writing it `uAUG_gained` as well                                             | no record                                                 |
 | an insertion in a start codon that leaves the codon where it stood                | `GGCACCAT[>G]GGCT`, which is `GGCACCATG[>G]GCT`                      | `uAUG_gained` for the first way of writing it, although the reference has the codon there                          | `uFrameShift` of the codon's own frame, as for the second |
-| a substitution of several bases that leaves a start codon where it stood          | `GGCAC[CATGG>TATGA]CTCC`                                             | `uAUG_gained`                                                                                                      | no record                                                 |
+| a replacement of several bases that leaves a start codon where it stood           | `GGCAC[CATGG>TATGA]CTCC`                                             | `uAUG_gained`                                                                                                      | no record                                                 |
 | an allele that makes several start codons                                         | `GGC[>ATGCATGC]ACC`                                                  | `uAUG_gained` for the first of them                                                                                | `uAUG_gained` for each                                    |
 | one more copy, or one fewer, of repeated bases that hold a start codon            | `GGCACCATGC[>ATGC]ATGCCG`                                            | `uAUG_gained` for the second copy and `uFrameShift` of the first copy's frame                                      | `uAUG_gained` for the first copy, and no frame is shifted |
 | an allele at the first two bases of the UTR                                       | `[C>T]GCCGG` in a UTR that ends with `A`                             | `uAUG_gained` one base before the UTR, from the UTR's last base and the new `TG`: its search reaches round the end | no record                                                 |
@@ -1642,10 +1642,12 @@ A substitution of one base has the plugin's records in every row but one, the al
 
 Three things are as in the plugin although the changed sequence could be read further. An insertion directly before the
 transcript's own start codon has the counts and no record, because the plugin reads an allele only when its following
-base lies in the UTR. An insertion or a deletion that puts a stop codon into a reading frame without shifting it has no
-record, because the plugin looks for a gained stop codon in a substitution alone. And a row has UTRannotator's values
-where VEP gives the allele the term `5_prime_UTR_variant` as the record writes it, so an insertion or a deletion that a
-record writes at the first coding bases has no such row, even where it could be written in the UTR.
+base lies in the UTR. The step reads such an insertion only where it repeats the UTR's last base at its end, since the
+same change can then be written inside the UTR, and gives it the records of that way of writing it. An insertion or a
+deletion that puts a stop codon into a reading frame without shifting it has no record, because the plugin looks for a
+gained stop codon in a substitution alone. And a row has UTRannotator's values where VEP gives the allele the term
+`5_prime_UTR_variant` as the record writes it, so an insertion or a deletion that a record writes at the first coding
+bases has no such row, even where it could be written in the UTR.
 
 The conditions under which VEP gives an allele to a plugin are VEP's, with two exceptions, both in which alleles the NMD
 rule evaluates.
