@@ -1619,8 +1619,7 @@ Ensembl's file and 189,363 with RefSeq's.
 
 The plugin's repository ships five alleles with its output as its test. That output has 41 rows on transcripts of
 Ensembl's release 115. The rules give 39 of them, and the other two are of transcripts whose 5′ UTR is another in
-release 115 than in the release of the output, where VEP with the plugin gives the rules' values as well. The package's
-tests hold four of the alleles with five of the rows.
+release 115 than in the release of the output, where VEP with the plugin gives the rules' values as well.
 
 #### Where the values are not the plugin's
 

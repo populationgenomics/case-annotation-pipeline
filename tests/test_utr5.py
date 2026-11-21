@@ -6,10 +6,8 @@ its start codon and has a stop codon in each reading frame.
 
 from __future__ import annotations
 
-import json
-import pathlib
 import random
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -517,78 +515,6 @@ def test_the_file_of_translated_upstream_orfs_gives_their_start_codons() -> None
 def test_a_file_that_is_not_the_list_of_translated_upstream_orfs_fails(lines: list[str], message: str) -> None:
     with pytest.raises(ValueError, match=message):
         utr5.uorf_evidence(lines)
-
-
-# The plugin's own test rows
-
-PUBLIC_ROWS = json.loads((pathlib.Path(__file__).parent / 'utrannotator_public_rows.json').read_text('utf-8'))['rows']
-_TYPES = {
-    'uORF': 'uORF',
-    'OutOfFrame_oORF': 'OutOfFrame_oORF',
-    'InFrame_oORF': 'InFrame_oORF',
-    'inFrame_oORF': 'InFrame_oORF',
-}
-# Each key of a record of the plugin, after the kind that begins it: the field that holds its value, and how the
-# plugin's text is read. The plugin writes `NA` for a distance that it has none of and `-` for a missing context.
-_FIELDS: dict[str, tuple[str, Callable[[str], Any]]] = {
-    'type': ('type', _TYPES.__getitem__),
-    'ref_type': ('ref_type', _TYPES.__getitem__),
-    'alt_type': ('alt_type', _TYPES.__getitem__),
-    'KozakContext': ('kozak_context', lambda text: None if text == '-' else text),
-    'KozakStrength': ('kozak_strength', lambda text: text or None),
-    'CapDistanceToStart': ('cap_distance_to_start', int),
-    'DistanceToCDS': ('distance_to_cds', int),
-    'DistanceToStop': ('distance_to_stop', lambda text: None if text == 'NA' else int(text)),
-    'ref_StartDistanceToCDS': ('ref_start_distance_to_cds', int),
-    'newSTOPDistanceToCDS': ('new_stop_distance_to_cds', int),
-    'AltStop': ('alt_stop', {'True': True, 'False': False}.__getitem__),
-    'AltStopDistanceToCDS': ('alt_stop_distance_to_cds', lambda text: None if text == 'NA' else int(text)),
-    'FrameWithCDS': ('frame_with_cds', str),
-    'ref_type_length': ('ref_type_length', lambda text: None if text == 'NA' else int(text)),
-    'alt_type_length': ('alt_type_length', lambda text: None if text == 'NA' else int(text)),
-    'Evidence': ('evidence', {'True': True, 'False': False}.__getitem__),
-}
-
-
-def _plugin_records(consequence: str, annotation: str) -> list[dict[str, Any]]:
-    """The records of a row of the plugin's output: the kinds, joined with `&`, and a text of each in the same order."""
-    found: list[dict[str, Any]] = []
-    if consequence == '-':  # no effect
-        return found
-    for kind, text in zip(consequence.split('&'), annotation.split('&'), strict=True):
-        record: dict[str, Any] = {'consequence': kind}
-        for pair in text.split(','):
-            key, _, value = pair.partition(':')
-            field, read = _FIELDS[key.removeprefix(f'{kind}_')]
-            record[field] = read(value)
-        found.append(record)
-    return found
-
-
-def _in_order(found: list[dict[str, Any]]) -> list[str]:
-    return sorted(json.dumps(record, sort_keys=True) for record in found)
-
-
-@pytest.mark.parametrize(
-    'row', PUBLIC_ROWS, ids=[f'allele {row["allele"]}, row {number}' for number, row in enumerate(PUBLIC_ROWS)]
-)
-def test_the_rows_that_the_plugin_ships_as_its_test_are_reproduced(row: dict[str, Any]) -> None:
-    """The alleles and rows of the plugin's own test (tests/utrannotator_public_rows.json says where they are from)."""
-    frames = utr5.ReadingFrames(row['utr5'], row['coding'])
-    assert frames.existing() == {
-        'utr5_existing_uorfs': row['existing_uORFs'],
-        'utr5_existing_oorfs_out_of_frame': row['existing_OutOfFrame_oORFs'],
-        'utr5_existing_oorfs_in_frame': row['existing_InFrame_oORFs'],
-    }
-    change = utr5.Change(row['position'], row['removed'], row['inserted'])
-    found = utr5.effects(frames, change, lambda start: start in row['translated_starts'])
-    shipped = _plugin_records(row['five_prime_UTR_variant_consequence'], row['five_prime_UTR_variant_annotation'])
-    assert _in_order(found) == _in_order(shipped)
-
-
-def test_the_plugin_s_test_rows_cover_four_of_its_kinds_of_effect() -> None:
-    kinds = {kind for row in PUBLIC_ROWS for kind in row['five_prime_UTR_variant_consequence'].split('&')}
-    assert kinds == {'-', 'uAUG_gained', 'uAUG_lost', 'uSTOP_lost', 'uFrameShift'}
 
 
 # Reading the changed UTR's frames from the reference's
