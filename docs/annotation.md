@@ -1518,8 +1518,8 @@ both. The controls are left out of the table.
 
 - The step first copies the reference, its index and the folder of the gene models into a folder of its own under
   `/tmp`, on the VM's disk, and gives the command these copies and no other path to the two. A staged input can be a
-  link into a bucket mount, and the rules read the reference in many small pieces, one for each exon, which is slow
-  through such a mount. Each file is copied once, from its first byte to its last.
+  link into a bucket mount, as on Google Batch, and the rules read the reference in many small pieces, one for each
+  exon, which is slow through such a mount. Each file is copied once, from its first byte to its last.
 - The cut to the exons keeps the run short and loses nothing: a variant in a 5′ UTR lies in an exon, and so does one
   that ends a reading frame, so every allele that a rule would evaluate is still read. The regions cover 239 Mb, about
   8% of the genome, so the step reads roughly one allele of a whole genome in twelve. That share is an estimate, and the
@@ -1531,8 +1531,8 @@ both. The controls are left out of the table.
 
 On a laptop the command read 800,000 invented alleles in exons, 85 in 100 of them substitutions of one base, with the
 two gene model files above in 53 seconds with eight processes, which is 15,000 alleles a second. The largest process
-held 1.2 GB. VEP 116.3 with the two plugins read 50,000 invented alleles in exons with four processes in 212 seconds
-with Ensembl's file and in 180 with RefSeq's.
+held 1.2 GB. VEP 116.3 with the two plugins read 10,399 invented alleles in exons in 21 seconds with one gene model file
+on a local disk, which is a little over an hour for a million alleles and both files.
 
 #### Where the values are the plugins'
 
@@ -2080,10 +2080,12 @@ Illumina licence, and the open route matters for one without. One part of it is 
 joint values through echtvar, from the archive the open pipeline reads ([gnomAD's joint values](#gnomads-joint-values)).
 
 Running Ensembl VEP itself with the two plugins was the first implementation of their columns
-([Upstream reading frames and nonsense-mediated decay](#upstream-reading-frames-and-nonsense-mediated-decay)). It was
-replaced because VEP without its cache builds every transcript from the GFF file and the reference again for each
-region, and took far longer than the rest of the workflow. The plugins' rules, restated in Python, read each transcript
-once.
+([Upstream reading frames and nonsense-mediated decay](#upstream-reading-frames-and-nonsense-mediated-decay)). VEP
+without its cache builds its transcripts from the GFF file and the reference again in every process that it starts, and
+needed a little over an hour for a million alleles in exons with both gene model files on a local disk, and an image of
+its own. The plugins' rules, restated in Python, read each transcript once and take about a minute for as many alleles,
+in the tools image. They also decide an insertion or a deletion by the changed sequence, where the plugin goes by the
+place at which a record writes it.
 
 ## Reference
 

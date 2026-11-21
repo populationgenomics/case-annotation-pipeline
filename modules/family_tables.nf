@@ -339,9 +339,9 @@ process JOINED_VALUES {
 // still writes twice stops the step, since an allele's id is the key of its rows in the table.
 // The command fails unless each positive control holds what its rule gives it: gene models and a reference that do
 // not fit one another would otherwise leave every row empty, like a union without a variant in a 5' UTR.
-// A staged input can be a link into a bucket mount, and reading the reference and the gene models through such a
-// mount, in many small reads, is slow. The step copies both into a folder of the task's own on the VM's disk, once,
-// in one sequential read each, and the commands are given the copies and read nothing else of the two.
+// A staged input can be a link into a bucket mount, as on Google Batch, and reading the reference and the gene models
+// through such a mount, in many small reads, is slow. The step copies both into a folder of the task's own on the
+// VM's disk, once, in one sequential read each, and the commands are given the copies and read nothing else of the two.
 // The stub gives its folder a fixed time, as the stub of ECHTVAR_VALUES does.
 process VEP_PLUGIN_TABLE {
     tag "${group}"
@@ -363,6 +363,7 @@ process VEP_PLUGIN_TABLE {
     """
     set -o pipefail
     copies=\$(mktemp -d /tmp/plugin-rules.XXXXXX)
+    trap 'rm -rf "\${copies}"' EXIT
     mkdir "\${copies}/gene-models"
     cp -L ${reference} ${reference_index} "\${copies}/"
     cp -L gene-models/* "\${copies}/gene-models/"
@@ -380,7 +381,6 @@ process VEP_PLUGIN_TABLE {
     case-annotation vep-plugins --given ${group}.exons.vcf.gz --gene-models "\${copies}/gene-models" \\
         --reference "\${copies}/${reference}" --uorf-evidence "\${UORF_EVIDENCE}" --workers ${task.cpus} \\
         --output vep_plugins
-    rm -rf "\${copies}"
     """
 
     stub:
