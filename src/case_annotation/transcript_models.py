@@ -119,6 +119,29 @@ class Segment:
     mapped: bool
 
 
+class _Stretches:
+    """Stretches of the genome, each a start and an end, found by the bases that they are near.
+
+    A transcript can have hundreds of exons, and every allele asks which of them it meets.
+    """
+
+    def __init__(self, stretches: Sequence[tuple[int, int]]) -> None:
+        self._sorted = sorted(stretches)
+        self._starts = [start for start, _end in self._sorted]
+        # The highest end among each stretch and those before it, which never falls from one stretch to the next.
+        self.highest_ends = list(itertools.accumulate((end for _start, end in self._sorted), max))
+
+    def near(self, low: int, high: int, reach: int = 0) -> list[tuple[int, int]]:
+        """The stretches with a base from `low` to `high`, or within `reach` bases of one."""
+        found = []
+        index = bisect.bisect_right(self._starts, high + reach) - 1
+        while index >= 0 and self.highest_ends[index] + reach >= low:
+            if self._sorted[index][1] + reach >= low:
+                found.append(self._sorted[index])
+            index -= 1
+        return found
+
+
 @dataclasses.dataclass(frozen=True)
 class Transcript:
     """One transcript of a gene model file."""
@@ -153,6 +176,22 @@ class Transcript:
             if intron[0] <= intron[1]:
                 found.append(intron)
         return tuple(found)
+
+    @functools.cached_property
+    def _exon_stretches(self) -> _Stretches:
+        return _Stretches(self.exons)
+
+    @functools.cached_property
+    def _intron_stretches(self) -> _Stretches:
+        return _Stretches(self.introns)
+
+    def exons_near(self, low: int, high: int, reach: int = 0) -> list[tuple[int, int]]:
+        """The exons with a base from `low` to `high`, or within `reach` bases of one."""
+        return self._exon_stretches.near(low, high, reach)
+
+    def introns_near(self, low: int, high: int, reach: int = 0) -> list[tuple[int, int]]:
+        """The introns with a base from `low` to `high`, or within `reach` bases of one."""
+        return self._intron_stretches.near(low, high, reach)
 
     @functools.cached_property
     def has_frameshift_intron(self) -> bool:
@@ -201,7 +240,10 @@ class Transcript:
             return self._insertion(end, start)
         pieces: list[Segment] = []
         position = start
-        for exon_start, exon_end, _index in self._ascending:
+        ascending = self._ascending
+        # The exons before the first one that can reach the span all end before it.
+        for at in range(bisect.bisect_left(self._exon_stretches.highest_ends, start), len(ascending)):
+            exon_start, exon_end, _index = ascending[at]
             if exon_end < position:
                 continue
             if exon_start > end:

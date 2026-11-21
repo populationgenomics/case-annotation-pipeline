@@ -31,6 +31,7 @@ import json
 import multiprocessing
 import pathlib
 import re
+import time
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -43,6 +44,8 @@ from case_annotation import annotation_tables, gene_models, nmd, plugin_gates, t
 
 TABLE_NAME = 'vep_plugins.parquet'
 INFO_NAME = 'vep_plugins.json'
+# A process writes a line to the log for every so many alleles of a chromosome that it has read with a gene model file.
+PROGRESS_EVERY = 20_000
 
 # The release of Ensembl VEP whose reading of a gene model file and whose consequence terms the step follows
 # (transcript_models, plugin_gates): the one that computed these columns before the rules were restated.
@@ -333,12 +336,17 @@ class _Task:
     evidence: frozenset[int]
 
 
-def _chromosome(task: _Task) -> pa.Table:
-    """The rows of one chromosome's alleles, for the transcripts of every gene model file."""
+def _chromosome(task: _Task) -> tuple[pa.Table, int]:
+    """The rows of one chromosome's alleles, for the transcripts of every gene model file, and the count of the alleles.
+
+    It writes a line to the log for every PROGRESS_EVERY alleles that it has read with a gene model file, and one when
+    it has read them all, so that a run shows in its log where it is and how fast it goes.
+    """
     rows: list[dict[str, Any]] = []
+    started = time.monotonic()
     with pysam.FastaFile(str(task.reference)) as reference, pysam.VariantFile(str(task.sites)) as sites:
         if task.chrom not in sites.header.contigs:
-            return TABLE.empty_table()
+            return TABLE.empty_table(), 0
         alleles = []
         for record in sites.fetch(task.chrom):
             if record.ref is None or record.alts is None or len(record.alts) != 1 or record.id is None:
@@ -346,12 +354,12 @@ def _chromosome(task: _Task) -> pa.Table:
             if _ALLELE.fullmatch(record.ref) and _ALLELE.fullmatch(record.alts[0]):
                 alleles.append((record.id, plugin_gates.Allele.of_record(record.pos, record.ref, record.alts[0])))
         if not alleles:
-            return TABLE.empty_table()
+            return TABLE.empty_table(), 0
         for source, path in task.models.items():
             transcripts = transcript_models.read(path, task.chrom, task.names)
             overlapping = transcript_models.Overlapping(transcripts)
             annotated: dict[int, Annotated] = {}
-            for variant_id, allele in alleles:
+            for done, (variant_id, allele) in enumerate(alleles, start=1):
                 for transcript in overlapping.of(allele.low, allele.high):
                     held = annotated.get(id(transcript))
                     if held is None:
@@ -360,7 +368,10 @@ def _chromosome(task: _Task) -> pa.Table:
                     if columns is not None:
                         key = {'variant_id': variant_id, 'transcript_id': transcript.transcript_id, 'source': source}
                         rows.append(key | columns)
-    return pa.Table.from_pylist(rows, schema=TABLE)
+                if done % PROGRESS_EVERY == 0 or done == len(alleles):
+                    seconds = time.monotonic() - started
+                    print(f'{task.chrom}, {source}: {done} of {len(alleles)} alleles after {seconds:.0f} s', flush=True)
+    return pa.Table.from_pylist(rows, schema=TABLE), len(alleles)
 
 
 def read_given(path: pathlib.Path, controls: Sequence[gene_models.Control]) -> list[str]:
@@ -424,7 +435,8 @@ def annotate(
     `reference` the FASTA that the alleles are called against, with its `.fai`, and `uorf_evidence` the plugin's
     file of the upstream reading frames that were seen translated. The chromosomes are shared among `workers`
     processes. The table's rows are sorted by variant id and transcript id, so that two runs of the same inputs write
-    the same table.
+    the same table. The log gets a line for each chromosome that is done, with the alleles read and the seconds since
+    the start, beside the lines of each process (_chromosome).
 
     Raises:
         ValueError: if an input is not what its role needs (read_given, transcript_models.read, utr5.uorf_evidence),
@@ -456,12 +468,25 @@ def annotate(
         )
         for chrom in gene_models.CHROMOSOMES
     ]
+    started = time.monotonic()
+    parts: list[pa.Table] = []
+    counted = 0
+
+    def finished(part: tuple[pa.Table, int]) -> None:
+        nonlocal counted
+        parts.append(part[0])
+        counted += part[1]
+        seconds = time.monotonic() - started
+        print(f'{len(parts)} of {len(tasks)} chromosomes done, {counted} alleles, after {seconds:.0f} s', flush=True)
+
     if workers > 1:
         context = multiprocessing.get_context('spawn')
         with concurrent.futures.ProcessPoolExecutor(max_workers=workers, mp_context=context) as pool:
-            parts = list(pool.map(_chromosome, tasks))
+            for done in concurrent.futures.as_completed([pool.submit(_chromosome, task) for task in tasks]):
+                finished(done.result())
     else:
-        parts = [_chromosome(task) for task in tasks]
+        for task in tasks:
+            finished(_chromosome(task))
     table = pa.concat_tables(parts).sort_by([('variant_id', 'ascending'), ('transcript_id', 'ascending')])
     control_ids = {control.id for control in controls}
     of_controls = [variant_id in control_ids for variant_id in table['variant_id'].to_pylist()]

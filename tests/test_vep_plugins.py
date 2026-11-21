@@ -481,3 +481,20 @@ def test_a_record_with_a_malformed_value_or_another_key_is_refused(field: dict[s
     vep_plugins.VepPluginsInfo.model_validate(record)
     with pytest.raises(pydantic.ValidationError):
         vep_plugins.VepPluginsInfo.model_validate(record | field)
+
+
+def test_a_run_writes_its_progress_to_the_log(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(vep_plugins, 'PROGRESS_EVERY', 2)
+    prepared = _prepared(tmp_path)
+    vep_plugins.annotate(_given(tmp_path, prepared), prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
+    lines = capsys.readouterr().out.splitlines()
+    # Nine alleles on chr1, the five of the union and the four controls, read with each gene model file.
+    of_chr1 = [line for line in lines if line.startswith('chr1, ')]
+    assert [line.split(' after ')[0] for line in of_chr1] == [
+        f'chr1, {source}: {done} of 9 alleles' for source in ('Ensembl', 'RefSeq') for done in (2, 4, 6, 8, 9)
+    ]
+    done = [line for line in lines if ' chromosomes done, ' in line]
+    assert len(done) == len(gene_models.CHROMOSOMES)
+    assert done[-1].startswith('25 of 25 chromosomes done, 9 alleles, after ')

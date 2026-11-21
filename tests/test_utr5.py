@@ -166,6 +166,20 @@ def test_an_insertion_or_deletion_in_a_frame_shifts_it_unless_it_is_of_whole_cod
     assert records(UTR, 9, 3, '') == []
 
 
+def test_a_change_far_behind_a_start_codon_meets_its_frame_and_no_frame_that_ended_before() -> None:
+    """A frame that is open over thousands of bases is shifted, and one that a stop codon ended is left alone."""
+    filler = 'GCC' * 2000
+    utr = 'GGCATGGCTTAAGC' + 'ATGG' + filler + 'CC'
+    (shifted,) = records(utr, len(utr) - 2, 0, 'C')
+    assert (shifted['consequence'], shifted['ref_start_distance_to_cds']) == ('uFrameShift', len(utr) - 14)
+    assert (shifted['ref_type'], shifted['alt_type']) == ('InFrame_oORF', 'OutOfFrame_oORF')
+    assert records(utr, 20, 1, 'T') == []
+    made = records(utr, len(utr) - 4, 1, 'A')  # GCC CC to GCA CC makes no codon of note
+    assert made == []
+    (stopped,) = records(utr, len(utr) - 6, 3, 'TGA')
+    assert (stopped['consequence'], stopped['new_stop_distance_to_cds']) == ('uSTOP_gained', 6)
+
+
 def test_a_shifted_frame_that_loses_its_stop_runs_into_the_coding_sequence() -> None:
     (shifted,) = records('CCATGGCTTAACC', 6, 0, 'G')
     assert (shifted['ref_type'], shifted['ref_type_length']) == ('uORF', 9)

@@ -93,9 +93,14 @@ class ReadingFrames:
         self.utr = utr
         self.coding = coding
         self.starts = _starts(utr)
-        self._stops: tuple[list[int], list[int], list[int]] = ([], [], [])
+        # The start codons and the stop codons by the remainder of their place on division by three: a stop codon
+        # ends the frame of a start codon with the same remainder.
+        self.starts_by_frame: tuple[list[int], list[int], list[int]] = ([], [], [])
+        for start in self.starts:
+            self.starts_by_frame[start % 3].append(start)
+        self.stops_by_frame: tuple[list[int], list[int], list[int]] = ([], [], [])
         for match in _STOP_CODON.finditer(utr):
-            self._stops[match.start() % 3].append(match.start())
+            self.stops_by_frame[match.start() % 3].append(match.start())
         self._coding_stops = coding_stops
 
     @property
@@ -113,22 +118,14 @@ class ReadingFrames:
 
     def stop_in_utr(self, start: int) -> int | None:
         """The first stop codon in the frame of `start` that lies behind it and wholly in the UTR."""
-        stops = self._stops[start % 3]
+        stops = self.stops_by_frame[start % 3]
         at = bisect.bisect_right(stops, start)
         return stops[at] if at < len(stops) else None
 
     def stop(self, start: int) -> int | None:
         """The first stop codon in the frame of `start` behind it, in the UTR or in the coding sequence."""
         in_utr = self.stop_in_utr(start)
-        if in_utr is not None:
-            return in_utr
-        length = len(self.utr)
-        # A codon that begins in the UTR's last two bases ends in the coding sequence.
-        for at in (length - 2, length - 1):
-            if at > start and (at - start) % 3 == 0 and self.utr[at:] + self.coding[: 3 - (length - at)] in _STOPS:
-                return at
-        in_coding = self.coding_stops[(start - length) % 3]
-        return None if in_coding is None else length + in_coding
+        return in_utr if in_utr is not None else _stop_beyond(self.utr, self, start)
 
     def type(self, start: int) -> str:
         """The type of the reading frame of the start codon at `start`."""
@@ -201,6 +198,11 @@ class _Compared:
     def changed_end(self) -> int:
         return len(self.changed) - self.suffix
 
+    @property
+    def first_place(self) -> int:
+        """The first place in the reference where a way of writing the change begins."""
+        return self.reference_end - max(len(self.utr) - len(self.changed), 0) if self.pure else self.prefix
+
     def stays(self, start: int) -> bool:
         """Whether a start codon of the reference stands at its own place, where no codon of the shared end does."""
         return start + 3 <= self.prefix and start < self.changed_end
@@ -234,6 +236,88 @@ class _Compared:
         return self.reference_end - deleted <= codon + 2 and self.prefix + deleted > codon
 
 
+class _ChangedFrames:
+    """The reading frames of a changed UTR, read from the reference's without reading the changed UTR through.
+
+    A 5' UTR can have tens of thousands of bases, and an allele changes a few. A stop codon of the changed UTR is one
+    of the reference's shared beginning, one of its shared end, moved by the change in length, or one of the few
+    bases between.
+    """
+
+    def __init__(self, frames: ReadingFrames, compared: _Compared) -> None:
+        self._frames = frames
+        self._compared = compared
+        self._moved = len(compared.changed) - len(compared.utr)
+        changed = compared.changed
+        first = max(compared.prefix - 2, 0)
+        self._between = [
+            first + match.start()
+            for match in _STOP_CODON.finditer(changed[first : compared.changed_end + 2])
+            if first + match.start() < compared.changed_end
+        ]
+
+    def stop_in_utr(self, start: int) -> int | None:
+        """The first stop codon in the frame of `start` that lies behind it and wholly in the changed UTR."""
+        compared, found = self._compared, []
+        stops = self._frames.stops_by_frame[start % 3]
+        at = bisect.bisect_right(stops, start)
+        if at < len(stops) and stops[at] + 3 <= compared.prefix:
+            found.append(stops[at])
+        found.extend(stop for stop in self._between if stop > start and (stop - start) % 3 == 0)
+        stops = self._frames.stops_by_frame[(start - self._moved) % 3]
+        at = bisect.bisect_left(stops, max(compared.reference_end, start - self._moved + 1))
+        if at < len(stops):
+            found.append(stops[at] + self._moved)
+        return min(found, default=None)
+
+    def stop(self, start: int) -> int | None:
+        """The first stop codon in the frame of `start` behind it, in the changed UTR or in the coding sequence."""
+        in_utr = self.stop_in_utr(start)
+        return in_utr if in_utr is not None else _stop_beyond(self._compared.changed, self._frames, start)
+
+    def type(self, start: int) -> str:
+        if self.stop_in_utr(start) is not None:
+            return 'uORF'
+        return 'OutOfFrame_oORF' if (len(self._compared.changed) - start) % 3 else 'InFrame_oORF'
+
+    def starts_made(self) -> list[int]:
+        """The start codons of the changed UTR that are not the reference's."""
+        compared, changed = self._compared, self._compared.changed
+        first = max(min(compared.prefix - 2, compared.reference_end), 0)
+        found, at = [], changed.find(_START, first, compared.changed_end + 2)
+        while 0 <= at < compared.changed_end:
+            if not compared.inherited(at):
+                found.append(at)
+            at = changed.find(_START, at + 1, compared.changed_end + 2)
+        return found
+
+
+def _stop_beyond(utr: str, frames: ReadingFrames, start: int) -> int | None:
+    """The first stop codon in the frame of `start` that ends in the coding sequence behind a UTR, or lies in it."""
+    length = len(utr)
+    # A codon that begins in the UTR's last two bases ends in the coding sequence.
+    for at in (length - 2, length - 1):
+        if at > start and (at - start) % 3 == 0 and utr[at:] + frames.coding[: 3 - (length - at)] in _STOPS:
+            return at
+    in_coding = frames.coding_stops[(start - length) % 3]
+    return None if in_coding is None else length + in_coding
+
+
+def _starts_met(frames: ReadingFrames, compared: _Compared) -> list[int]:
+    """The start codons of the reference whose codon or frame the change can meet, from the 5' end.
+
+    A start codon whose frame ends before the first place where the change can be written keeps its codon and its
+    frame. In each of the three frames those are the start codons before the last stop codon that lies wholly before
+    that place.
+    """
+    met = []
+    for starts, stops in zip(frames.starts_by_frame, frames.stops_by_frame, strict=True):
+        last = bisect.bisect_right(stops, compared.first_place - 3) - 1
+        behind = stops[last] if last >= 0 else -1
+        met.extend(starts[bisect.bisect_right(starts, behind) : bisect.bisect_left(starts, compared.reference_end)])
+    return sorted(met)
+
+
 def effects(frames: ReadingFrames, change: Change, evidence: Callable[[int], bool]) -> list[dict[str, Any]]:
     """The records of an allele in a 5' UTR: one for each start codon and analysis that applies.
 
@@ -246,7 +330,7 @@ def effects(frames: ReadingFrames, change: Change, evidence: Callable[[int], boo
         return []
     compared = _Compared(utr, changed, *_shared(utr, changed, change.position, change.removed))
     same_length, reference_end = compared.same_length, compared.reference_end
-    after = ReadingFrames(changed, frames.coding, frames.coding_stops)
+    after = _ChangedFrames(frames, compared)
     shift = (len(changed) - len(utr)) % 3 != 0
 
     def of_start(start: int) -> dict[str, Any]:
@@ -257,9 +341,7 @@ def effects(frames: ReadingFrames, change: Change, evidence: Callable[[int], boo
         return None if stop is None else stop - start
 
     records: list[dict[str, Any]] = []
-    for start in after.starts:
-        if compared.inherited(start):
-            continue
+    for start in after.starts_made():
         context, strength = kozak(changed, start)
         records.append(
             {
@@ -272,9 +354,7 @@ def effects(frames: ReadingFrames, change: Change, evidence: Callable[[int], boo
                 'distance_to_stop': distance(after.stop(start), start),
             }
         )
-    for start in frames.starts:
-        if start >= reference_end:
-            break
+    for start in _starts_met(frames, compared):
         if not compared.stays(start) and not compared.in_place(start):
             records.append(
                 {
@@ -345,17 +425,34 @@ def own_start_change(spliced: str, start: int, first: int, removed: int, inserte
     is, for one that cannot be written without touching the start codon, and where the changed transcript has no
     three bases before the codon. The two sequences decide, and where a record writes the allele does not.
     """
-    changed = spliced[:first] + inserted + spliced[first + removed :]
-    prefix, suffix = _shared(spliced, changed, first, removed)
+    length = len(spliced) - removed + len(inserted)
+
+    def base(index: int) -> str:
+        """A base of the changed transcript, which is not built: a transcript can have a hundred thousand bases."""
+        if index < first:
+            return spliced[index]
+        if index < first + len(inserted):
+            return inserted[index - first]
+        return spliced[index - len(inserted) + removed]
+
+    shortest = min(len(spliced), length)
+    prefix = first
+    while prefix < shortest and spliced[prefix] == base(prefix):
+        prefix += 1
+    suffix = len(spliced) - first - removed
+    while suffix < shortest and spliced[-1 - suffix] == base(length - 1 - suffix):
+        suffix += 1
     # The own start codon is the one with the coding sequence behind it, so the shared end is looked at first: among
     # repeated bases the codon at its old place can be one that `effects` counts as gained.
     if start >= len(spliced) - suffix:
-        moved = start + len(changed) - len(spliced)
+        moved = start + length - len(spliced)
     elif prefix >= start + 3:
         moved = start
     else:
         return None
-    context, strength = kozak(changed, moved)
+    if moved < 3 or moved + 3 >= length:
+        return None
+    context, strength = kozak(''.join(base(index) for index in range(moved - 3, moved + 4)), 3)
     if context is None or strength is None or context == kozak(spliced, start)[0]:
         return None
     return context, strength

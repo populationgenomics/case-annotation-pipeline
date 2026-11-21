@@ -342,6 +342,10 @@ process JOINED_VALUES {
 // A staged input can be a link into a bucket mount, as on Google Batch, and reading the reference and the gene models
 // through such a mount, in many small reads, is slow. The step copies both into a folder of the task's own on the
 // VM's disk, once, in one sequential read each, and the commands are given the copies and read nothing else of the two.
+// The command writes a line to the log for every 20,000 alleles of a chromosome that it has read with a gene model
+// file and for every chromosome that is done, with the seconds since its start, so a running task shows where it is.
+// The time limit ends a task that has stalled: on eight CPUs the command reads 800,000 alleles in about a minute, and
+// the copy is of 3.5 GB for GRCh38 with both gene model files.
 // The stub gives its folder a fixed time, as the stub of ECHTVAR_VALUES does.
 process VEP_PLUGIN_TABLE {
     tag "${group}"
@@ -350,6 +354,7 @@ process VEP_PLUGIN_TABLE {
     cpus 8
     memory 16.GB
     disk 50.GB
+    time 2.h
 
     input:
     tuple val(group), path(sites), path(sites_index)

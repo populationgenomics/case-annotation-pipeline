@@ -257,3 +257,18 @@ def test_the_transcripts_that_hold_a_base_are_found_once_each() -> None:
     assert overlapping.of(30_000, 39_000) == [wide]
     assert overlapping.of(50_000, 50_001) == []
     assert overlapping.of(90, 100) == []
+
+
+@pytest.mark.parametrize('strand', [1, -1])
+def test_the_exons_and_introns_near_a_span_are_found_with_a_reach(strand: int) -> None:
+    transcript = invented_transcripts.gene(strand).transcript
+    for start, end in transcript.exons:
+        assert transcript.exons_near(end, end) == [(start, end)]
+        assert transcript.exons_near(end + 1, end + 1) == []
+        assert transcript.exons_near(end + 3, end + 5, reach=3) == [(start, end)]
+        assert transcript.exons_near(start - 5, start - 4, reach=3) == []
+    first, second = sorted(transcript.introns)[:2]
+    assert transcript.introns_near(first[0] - 3, first[0] - 3, reach=3) == [first]
+    assert transcript.introns_near(first[0] - 4, first[0] - 4, reach=3) == []
+    assert sorted(transcript.introns_near(first[1], second[0])) == [first, second]
+    assert sorted(transcript.exons_near(transcript.start, transcript.end)) == sorted(transcript.exons)

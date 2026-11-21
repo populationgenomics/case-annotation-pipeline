@@ -820,8 +820,8 @@ launched pipeline says, and the tools image has to be of that release
 ([Checks that stop a run](#checks-that-stop-a-run)).
 
 An included workflow comes without this repository's `nextflow.config`. Its processes keep the directives that are
-written in them, which are the machine type, the CPUs, the memory and the disk of the larger steps. The config of the
-including pipeline provides the rest:
+written in them, which are the machine type, the CPUs, the memory and the disk of the larger steps, and the time limit
+of `VEP_PLUGIN_TABLE`. The config of the including pipeline provides the rest:
 
 - the image of each process: the Annotator's image for `ILLUMINA_ANNOTATE` and `ILLUMINA_ANNOTATE_SV`, and
   `case-annotation-tools` of the workflow's release for every other process
@@ -1528,11 +1528,29 @@ both. The controls are left out of the table.
   model files and that chromosome's alleles, and reads the sequence of a transcript when the first allele meets it.
 - The rows are sorted by variant id and transcript id, and the records of a row by kind and from the 5′ end of the UTR,
   so two runs of the same inputs write the same table.
+- The command writes a line to its log for every 20,000 alleles of a chromosome that it has read with a gene model file,
+  and a line for every chromosome that is done, each with the seconds since its start. A task's log can be read while
+  the task runs, so a run shows where it is. The step has a time limit of two hours, which ends a task that has stalled.
 
-On a laptop the command read 800,000 invented alleles in exons, 85 in 100 of them substitutions of one base, with the
-two gene model files above in 54 seconds with eight processes, which is 15,000 alleles a second. The largest process
-held 1.2 GB. VEP 116.3 with the two plugins read 10,399 invented alleles in exons in 21 seconds with one gene model file
-on a local disk, which is a little over an hour for a million alleles and both files.
+On a laptop the command read 849,393 invented alleles with the two gene model files above in 36 seconds with eight
+processes, which is 24,000 alleles a second, and the largest process held 1.2 GB. The alleles lie on every sequence that
+a gene model file gives a feature and the reference holds: 820,226 on `chr1` to `chrM` and 29,167 on 429 other
+sequences, which have no row because the tables hold `chr1` to `chrM`. Of those on the chromosomes, 699,218 are in
+exons, 60,000 anywhere else, and 60,000 in the 150 stretches of 100,000 bases where NCBI's file has the most lines of
+any type, up to 12,502 in one stretch. They are substitutions of one base (87 in 100) and insertions and deletions of 1
+to 12 bases, with 1,000 alleles of up to 6,000 bases and alleles at the first and last bases of every sequence.
+
+| Gene model file | Seconds for the 820,230 alleles on `chr1` to `chrM` | Alleles a second | Largest process | A thousand alleles in a row: median, 99 in 100 under, slowest |
+| --------------- | --------------------------------------------------- | ---------------- | --------------- | ------------------------------------------------------------- |
+| Ensembl's       | 20                                                  | 41,000           | 1.2 GB          | 0.09 s, 0.36 s, 0.65 s on `chr4` from 39.2 to 41.7 Mb         |
+| RefSeq's        | 23                                                  | 36,000           | 1.0 GB          | 0.11 s, 0.53 s, 1.41 s on `chr17` from 42.6 to 43.1 Mb        |
+
+No stretch of the genome is far slower than the rest. The slowest thousand alleles lie where the most transcripts
+overlap one another. The work for an allele does not grow with a transcript's length: the transcripts with the most
+exons, 365, and the 5′ UTRs of up to 94,000 bases that NCBI's file gives some predicted transcripts take no longer than
+any other. The lines of NCBI's file that are no gene, transcript, exon or coding segment are passed over as they are
+read. VEP 116.3 with the two plugins read 10,399 invented alleles in exons in 21 seconds with one gene model file on a
+local disk, which is a little over an hour for a million alleles and both files.
 
 #### Where the values are the plugins'
 

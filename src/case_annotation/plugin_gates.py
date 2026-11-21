@@ -117,7 +117,13 @@ def translate(sequence: str, table: int) -> str:
 
 def protein(sequences: transcript_models.Sequences, table: int = 1) -> str:
     """A transcript's protein as VEP holds it beside the transcript: without its last stop codon."""
-    coding = sequences.coding[: len(sequences.coding) - len(sequences.coding) % 3]
+    return _protein(sequences.coding, table)
+
+
+@functools.lru_cache(maxsize=2048)
+def _protein(coding: str, table: int) -> str:
+    """The protein of a coding sequence, kept for the alleles that follow on the same transcript."""
+    coding = coding[: len(coding) - len(coding) % 3]
     peptide = translate(coding, table)
     if coding and _AMINO_ACIDS[table].get(coding[-3:]) == '*':
         peptide = peptide[:-1]
@@ -163,14 +169,14 @@ class Placed:
     def _in_exon(self) -> bool:
         stretch = 12 if self.transcript.has_frameshift_intron else 0
         low, high = self.allele.low, self.allele.high
-        return any(start <= high + stretch and low - stretch <= end for start, end in self.transcript.exons)
+        return bool(self.transcript.exons_near(low, high, stretch))
 
     @functools.cached_property
     def _at_intron_boundary(self) -> bool:
         low, high = self.allele.low, self.allele.high
         return any(
             (start - 3 <= high and low <= start + 7) or (end - 7 <= high and low <= end + 3)
-            for start, end in self.transcript.introns
+            for start, end in self.transcript.introns_near(low, high, 3)
         )
 
     @functools.cached_property
@@ -236,11 +242,8 @@ class Placed:
         low, high = self.allele.low, self.allele.high
         in_frameshift_intron = lower_site = upper_site = False
         for region_start, region_end in self.allele.differing:
-            for intron in self.transcript.introns:
+            for intron in self.transcript.introns_near(low, high, 3):
                 start, end = intron
-                near = start - 3 <= high and low <= end + 3
-                if not near:
-                    continue
                 if transcript_models.is_frameshift_intron(intron) and _overlap(region_start, region_end, start, end):
                     in_frameshift_intron = True
                     continue
@@ -297,14 +300,14 @@ class Placed:
         if reference:
             codon = self.sequences.coding[first_base - 1 : first_base - 1 + length]
         else:
-            changed = (
-                self.sequences.coding[: self.cds_start - 1]
-                + self._alt
-                + self.sequences.coding[self.cds_end :]
-                + self.sequences.utr3
-            )
-            length += len(self._alt) - (self.cds_end - self.cds_start + 1)
-            codon = changed[first_base - 1 : first_base - 1 + max(length, 0)]
+            # The coding sequence with the allele, and the 3' UTR behind it, from the first of these codons on: the
+            # bases before the allele, the allele, and as many bases behind it as the codons still need.
+            length = max(length + len(self._alt) - (self.cds_end - self.cds_start + 1), 0)
+            coding = self.sequences.coding
+            head = coding[first_base - 1 : self.cds_start - 1] + self._alt
+            behind = coding[self.cds_end : self.cds_end + max(length - len(head), 0)]
+            behind += self.sequences.utr3[: max(length - len(head) - len(behind), 0)]
+            codon = (head + behind)[:length]
         return codon or '-'
 
     def _peptide(self, *, reference: bool) -> str | None:
