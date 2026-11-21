@@ -166,7 +166,7 @@ organisation that runs it, and the pipeline takes its image as a param ([The Ann
 
 Where each gene's transcripts lie on the genome: their exons and their coding sequence. Ensembl and RefSeq each publish
 a set, in releases, and a transcript's id carries a version that changes with its model. The Annotator reads both sets
-from its catalog, and Ensembl VEP reads the same releases from two prepared files
+from its catalog, and the rules of VEP's two plugins read the same releases from two prepared files
 ([The gene models](annotation.md#the-gene-models)).
 
 ### Catalog

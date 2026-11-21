@@ -383,24 +383,36 @@ def _vep_plugins_arguments(parser: argparse.ArgumentParser) -> None:
         type=path,
         required=True,
         help=(
-            "the VCF that VEP read: the union's alleles that overlap an exon, each under its variant id, and the "
-            'positive controls'
-        ),
-    )
-    parser.add_argument(
-        '--vep',
-        type=path,
-        required=True,
-        help=(
-            f"the folder of the step that ran VEP, with {vep_plugins.RUN_NAME} and VEP's JSON for each gene model "
-            f'file ({", ".join(vep_plugins.OUTPUTS.values())})'
+            "the union's alleles that overlap an exon, each under its variant id, and the positive controls: a VCF "
+            'compressed with bgzip, with its index beside it'
         ),
     )
     parser.add_argument(
         '--gene-models',
         type=path,
         required=True,
-        help=f'{gene_models.RECORD_NAME} of the prepared gene models that VEP read',
+        help=f'the folder of the prepared gene models, with {gene_models.RECORD_NAME} (case-annotation gene-models)',
+    )
+    parser.add_argument(
+        '--reference',
+        type=path,
+        required=True,
+        help='the reference FASTA that the alleles are called against, with its .fai beside it',
+    )
+    parser.add_argument(
+        '--uorf-evidence',
+        type=path,
+        required=True,
+        help=(
+            "UTRannotator's file of the upstream reading frames that were seen translated, "
+            'uORF_5UTR_GRCh38_PUBLIC.txt of its repository'
+        ),
+    )
+    parser.add_argument(
+        '--workers',
+        type=int,
+        default=1,
+        help='the number of processes that share the chromosomes (default: 1)',
     )
     parser.add_argument(
         '--output',
@@ -411,8 +423,11 @@ def _vep_plugins_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def _vep_plugins(args: argparse.Namespace) -> None:
-    prepared = gene_models.GeneModels.model_validate_json(args.gene_models.read_text())
-    vep_plugins.convert(args.given, args.vep, prepared, args.output)
+    if args.workers < 1:
+        raise ValueError(f'--workers is {args.workers}, and at least one process is needed')
+    vep_plugins.annotate(
+        args.given, args.gene_models, args.reference, args.uorf_evidence, args.output, workers=args.workers
+    )
 
 
 def _family_tables_arguments(parser: argparse.ArgumentParser) -> None:
@@ -810,8 +825,9 @@ _SUBCOMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Ca
     ),
     'vep-plugins': (
         (
-            "writes what VEP's UTRannotator and NMD plugins say of a sites union as a table by allele and "
-            'transcript, after checking the positive controls, with the record of the run'
+            "writes what the rules of VEP's UTRannotator and NMD plugins say of a sites union as a table by allele "
+            'and transcript, from the prepared gene models and the reference and without running VEP, after checking '
+            'the positive controls, with the record of what the values come from'
         ),
         _vep_plugins_arguments,
         _vep_plugins,

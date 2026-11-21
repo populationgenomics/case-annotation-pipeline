@@ -82,7 +82,7 @@ The family tables unpack the information of an annotated VCF into two tables wit
 | Table         | One row per                       | Holds                                                                                                                                                                                                                                                                                                  |
 | ------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `variants`    | allele                            | its frequencies, scores and ClinVar records, its most severe consequence, its genes, each with what the allele does to it, and then the VCF's sample columns: one column per sequenced member, named as the VCF names the sample, holding that member's call of the allele as a struct of typed fields |
-| `transcripts` | allele and transcript it overlaps | that transcript's consequence and HGVS names, and what two plugins of VEP say of the allele on it                                                                                                                                                                                                      |
+| `transcripts` | allele and transcript it overlaps | that transcript's consequence and HGVS names, and what the rules of two plugins of VEP say of the allele on it                                                                                                                                                                                         |
 
 A multi-allelic site becomes one row per allele before anything else happens, and the
 [variant id](glossary.md#variant-id) `<chrom>-<pos>-<ref>-<alt>` names the allele in both tables, so it is the key that
@@ -431,10 +431,10 @@ The manifest's `members` for this family read:
 ## Upstream reading frames and nonsense-mediated decay
 
 The Annotator says of a variant in a 5′ UTR that it is a `5_prime_UTR_variant`, and of a variant that ends a reading
-frame that it is a `stop_gained` or a `frameshift_variant`. Two plugins of Ensembl VEP say more about both, and the
-workflow runs them unchanged
+frame that it is a `stop_gained` or a `frameshift_variant`. Two plugins of Ensembl VEP say more about both. The workflow
+does not run VEP: it applies the rules of the two plugins, restated in Python
 ([Upstream reading frames and nonsense-mediated decay](annotation.md#upstream-reading-frames-and-nonsense-mediated-decay)).
-Their values are six columns of `transcripts`, on the rows of Ensembl's transcripts and of RefSeq's alike, and one
+Their values are eleven columns of `transcripts`, on the rows of Ensembl's transcripts and of RefSeq's alike, and one
 column of `variants` to search by. Every allele, transcript and value in this section is invented.
 
 ### What a variant does to the reading frames of a 5′ UTR
@@ -459,20 +459,23 @@ It reports five kinds of effect that an allele can have on such frames.
 | `uSTOP_lost`   | removes the stop codon of an existing reading frame            |
 | `uFrameShift`  | shifts an existing reading frame by an insertion or a deletion |
 
-The columns hold what the plugin writes, under names in snake case.
+The columns hold what the plugin writes, under names in snake case. For a substitution they are the plugin's values. For
+an insertion or a deletion among repeated bases the plugin's values depend on where the record writes the allele, and
+the tables hold one set of values for one changed sequence
+([Where the values are not the plugin's](annotation.md#where-the-values-are-not-the-plugins)).
 
-| Column                                         | Type           | Holds                                                                                                          | Null where                                              |
-| ---------------------------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| `variants.utr5_consequences`                   | list of string | the kinds that the allele has on any of its transcripts in `transcripts`, each once, sorted                    | no transcript of the allele has a kind                  |
-| `transcripts.utr5_consequences`                | list of string | the kinds that the allele has on this transcript, each once, sorted                                            | the plugin reports no kind, or did not evaluate the row |
-| `transcripts.utr5_uorfs`                       | list of struct | one entry for each record of the plugin: one for each upstream start codon that is affected, for each kind     | as `utr5_consequences`                                  |
-| `transcripts.utr5_existing_uorfs`              | int32          | "the number of existing uORFs with a stop codon within the 5 prime UTR", for the transcript without the allele | the plugin did not evaluate the row                     |
-| `transcripts.utr5_existing_oorfs_out_of_frame` | int32          | the number of existing reading frames of the UTR that overlap the coding sequence out of frame                 | the plugin did not evaluate the row                     |
-| `transcripts.utr5_existing_oorfs_in_frame`     | int32          | the number of existing reading frames of the UTR that overlap the coding sequence in frame                     | the plugin did not evaluate the row                     |
+| Column                                         | Type           | Holds                                                                                                          | Null where                                          |
+| ---------------------------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `variants.utr5_consequences`                   | list of string | the kinds that the allele has on any of its transcripts in `transcripts`, each once, sorted                    | no transcript of the allele has a kind              |
+| `transcripts.utr5_consequences`                | list of string | the kinds that the allele has on this transcript, each once, sorted                                            | the rules give no kind, or did not evaluate the row |
+| `transcripts.utr5_uorfs`                       | list of struct | one entry for each record of the rules: one for each upstream start codon that is affected, for each kind      | as `utr5_consequences`                              |
+| `transcripts.utr5_existing_uorfs`              | int32          | "the number of existing uORFs with a stop codon within the 5 prime UTR", for the transcript without the allele | the rules did not evaluate the row                  |
+| `transcripts.utr5_existing_oorfs_out_of_frame` | int32          | the number of existing reading frames of the UTR that overlap the coding sequence out of frame                 | the rules did not evaluate the row                  |
+| `transcripts.utr5_existing_oorfs_in_frame`     | int32          | the number of existing reading frames of the UTR that overlap the coding sequence in frame                     | the rules did not evaluate the row                  |
 
-The plugin evaluates a row whose allele lies in the transcript's 5′ UTR, and writes its three counts for every such row.
-A count, also a 0, therefore says that the plugin looked. A row with counts and without `utr5_consequences` is one where
-it found no effect, and a row without counts is one that it did not evaluate.
+The rules evaluate a row whose allele lies in the transcript's 5′ UTR, and give the three counts for every such row. A
+count, also a 0, therefore says that the rules looked. A row with counts and without `utr5_consequences` is one where
+they found no effect, and a row without counts is one that they did not evaluate.
 
 Several kinds can apply to one allele and transcript, and each has its entries in `utr5_uorfs`. An insertion can create
 a start codon and shift the frames of two existing uORFs. `utr5_consequences` is then `uAUG_gained` and `uFrameShift`,
@@ -517,11 +520,10 @@ or `G` and the base after it is `G`, `Moderate` where one of the two holds and `
 The tables write the in-frame type as `InFrame_oORF` in every entry, where the plugin writes it as `inFrame_oORF`, with
 a small `i`, in a `uAUG_gained` record and as `InFrame_oORF` in every other.
 
-The plugin leaves these things out, and the tables add none of them.
+The plugin leaves these things out, and the tables add one of them, the start codon of the protein itself
+([The transcript's own start codon](#the-transcripts-own-start-codon)).
 
 - It reads `ATG` as the only start codon.
-- It gives the Kozak context and strength of the upstream start codon, and nothing for the start codon of the protein
-  itself.
 - A `uSTOP_lost` entry has no type and no distance of its start codon, so it has fewer fields than the other kinds.
   `frame_with_cds` and `alt_stop` say what becomes of the frame: with `alt_stop` false it runs into the coding sequence.
 - A gained start has no `evidence`, since the frame did not exist.
@@ -529,29 +531,69 @@ The plugin leaves these things out, and the tables add none of them.
 - It tests an insertion or a deletion for a shifted frame and for a gained or lost start, and not for a gained stop.
 - Its authors tested it on alleles of one to five bases.
 - It evaluates a variant inside the exons of the 5′ UTR. A variant upstream of the transcript or in an intron of the UTR
-  has no value.
+  has no value. A variant that reaches from the UTR into an intron or into the coding sequence, and an insertion
+  directly before the protein's start codon that cannot be written inside the UTR, have the counts and no entry.
 
-VEP reads its own files of the gene models, of the releases that the Annotator's catalog was built with. A row of
-`transcripts` in a 5′ UTR can still be without values, where VEP's file lacks the transcript at that version or places
-the variant differently at the edge of the UTR. The manifest counts these rows (`vep_plugins.matching`).
+The rules read gene model files of the releases that the Annotator's catalog was built with, as VEP reads them. A row of
+`transcripts` in a 5′ UTR can still be without values, where the gene model file lacks the transcript at that version or
+the variant is placed differently at the edge of the UTR. The manifest counts these rows (`vep_plugins.matching`).
+
+### The transcript's own start codon
+
+The plugin gives a Kozak context and strength for an upstream start codon and none for the start codon of the protein.
+The tables add both, by the plugin's rule for an upstream start codon: the context is the three bases before the `ATG`,
+the `ATG` and the base after it, and the strength is `Strong`, `Moderate` or `Weak` as above. These four columns are the
+pipeline's own and no value of the plugin.
+
+| Column                                    | Type   | Holds                                                                                               | Null where                                                                                       |
+| ----------------------------------------- | ------ | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `transcripts.utr5_cds_kozak_context`      | string | the Kozak context of the transcript's own start codon, with the reference allele                    | the row has neither the counts nor a context with the allele; the transcript has no such context |
+| `transcripts.utr5_cds_kozak_strength`     | string | `Weak`, `Moderate` or `Strong`, from that context                                                   | as `utr5_cds_kozak_context`                                                                      |
+| `transcripts.utr5_cds_kozak_context_alt`  | string | the context with the allele, where the allele changes a base of it and leaves the start codon whole | the allele leaves the context as it is, or cannot be written without touching the start codon    |
+| `transcripts.utr5_cds_kozak_strength_alt` | string | the strength of the context with the allele                                                         | as `utr5_cds_kozak_context_alt`                                                                  |
+
+A transcript has no context of its own start codon where its coding sequence does not begin with a whole `ATG`, as for a
+transcript whose gene model lacks its first codon, or where its 5′ UTR has fewer than three bases.
+
+The two `_alt` columns are filled only where the context changes, so `utr5_cds_kozak_strength_alt IS NOT NULL` finds the
+alleles that change it, and comparing the two strengths finds those that weaken it. The strength reads two bases of the
+context, the one three before the `ATG` and the one after it, so an allele can change the context and leave the strength
+as it was. The base after the `ATG` is the first of the second codon. An allele that changes it lies in the coding
+sequence, and its row has these four columns and no count of the UTR's reading frames. An insertion or a deletion is
+read by the changed sequence: one that can be written without touching the context has no value here, wherever a record
+writes it.
 
 ### Escape from nonsense-mediated decay
 
 A variant that ends a reading frame early usually leaves no protein, because the cell destroys the transcript
 ([nonsense-mediated decay](glossary.md#nonsense-mediated-decay)). VEP's plugin `NMD` predicts where a transcript escapes
-that, from the place of the variant alone. By the plugin's documentation it counts a variant as escaping in four cases:
-it lies in the last exon; it lies in the last 50 bases of the second-last exon; it lies in the first 100 coding bases;
-or the transcript has no intron.
+that, from the place of the variant alone, and the tables hold the prediction of its rule.
 
 `transcripts.nmd_escaping` holds the prediction for the allele on the transcript.
 
-| `nmd_escaping` | The row                                                                                                                                                     |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| true           | the plugin flags the variant as escaping                                                                                                                    |
-| false          | the plugin evaluated the variant and did not flag it: VEP calls it a stop-gained, frameshift, splice-donor or splice-acceptor variant with coding positions |
-| null           | the plugin did not evaluate the row, as for a missense variant or a transcript that VEP's file lacks                                                        |
+| `nmd_escaping` | The row                                                                                                                                                           |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| true           | the rule predicts that the variant escapes                                                                                                                        |
+| false          | the rule evaluated the variant and predicts no escape: VEP would call it a stop-gained, frameshift, splice-donor or splice-acceptor variant with coding positions |
+| null           | the rule did not evaluate the row, as for a missense variant or a transcript that the gene model file lacks                                                       |
 
-The value is a rule about positions and no measurement. A false says that none of the four cases holds, and the plugin
+`transcripts.nmd_escape_reason` says why, on the rows where `nmd_escaping` is true, and is null on every other row. It
+has the first reason that applies, in the plugin's order and under the plugin's names.
+
+| `nmd_escape_reason` | The variant                                                                            |
+| ------------------- | -------------------------------------------------------------------------------------- |
+| `intronless`        | is on a transcript of one exon                                                         |
+| `E-1`               | ends in the transcript's last exon, its untranslated part included                     |
+| `E-2_end-50`        | ends in the last 52 bases of the last exon but one, which the plugin calls its last 50 |
+| `cds_start+100`     | ends in the first 101 coding bases, which the plugin calls the first 100               |
+
+The rule reads one base of the variant, its last on the genome, which for an insertion is the base before it, and the
+coding position of the variant's last base on the transcript. The numbers are the plugin's own: its code reaches two
+bases further into the last exon but one, and one coding base further, than its documentation says, and the tables keep
+what the code does. The reason is a column of the pipeline's: the plugin of VEP 116.3 writes none, and the names and
+their order are those of the plugin's later edition.
+
+The value is a rule about positions and no measurement. A false says that none of the four reasons holds, and the rule
 says nothing about a row that is null, so `NOT nmd_escaping` leaves the null rows out.
 
 ## Structural variants, copy number and repeats
@@ -1681,7 +1723,7 @@ ended = con.sql(
 ).to_arrow_table()
 ```
 
-`WHERE nmd_escaping` keeps the variants that the plugin flags, and `WHERE nmd_escaping = false` those that it evaluated
+`WHERE nmd_escaping` keeps the variants that the rule flags, and `WHERE nmd_escaping = false` those that it evaluated
 and did not flag. `WHERE NOT nmd_escaping` returns the same rows as the second, since a comparison with a null row is
 null.
 
@@ -3226,6 +3268,11 @@ column name, or of the manifest as plain JSON, finds what it knew as before: `va
 in a folder with and without the others. A reader that checks the manifest against a fixed set of keys has to allow for
 a key that is added under the same version.
 
+The `utr5_` columns and `nmd_escaping` have other values for some alleles, most of them insertions and deletions, than
+Ensembl VEP's plugins gave them
+([Where the values are not the plugin's](annotation.md#where-the-values-are-not-the-plugins)). No table with the
+plugins' own values has been written, so this keeps the tables' version at `0.5.0`.
+
 The tables share these properties:
 
 | Property           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -3265,7 +3312,7 @@ Every manifest holds every key below, also the manifest of a family without the 
 | `alphagenome_avi_breakdown`   | the archive of the breakdown of the AVI score, which the `avi_shap_` columns come from, in the same form, with the notice that DeepMind's terms ask for as `terms`; null in a run that was not given it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `alphagenome_splicing`        | the archive of AlphaGenome's splicing scores, which `alphagenome_splicing` comes from, in the form of `alphagenome_avi_breakdown`; null in a run that was not given it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `joined_files`                | the public files that the run joined to the alleles ([Joined files](annotation.md#joined-files)): an entry for each, with the name of its param as `source`, its `file` name, and its size in `bytes` and its `sha256` as the run read it, in the order of their columns; an empty list in a run that was given none                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `vep_plugins`                 | what the `utr5_` columns and `nmd_escaping` come from. `run` is the record of the VEP run: VEP's version, UTRannotator's commit, the name, size and SHA-256 of the plugin's file of translated reading frames, of `NMD.pm` and of each gene model file as the run read it, the public file that each was prepared from, and VEP's options. `matching` has an entry for `Ensembl` and one for `RefSeq`, of this family's tables: `rows_without_transcript`, the plugins' rows on a transcript that the allele has no row of in `transcripts`; `rows_of_other_ids`, their rows on a feature whose id is no transcript id; and `utr5_transcripts_without_values`, the rows of `transcripts` with `5_prime_UTR_variant` that have no value of UTRannotator's                                                                                                           |
+| `vep_plugins`                 | what the `utr5_` and `nmd_` columns come from. `run` is the record of the rules: the commits of the two plugins that they restate, the release of VEP whose reading of gene models and whose consequence terms they follow, the name, size and SHA-256 of UTRannotator's file of translated reading frames and of each gene model file as the run read it, and the public file that each gene model file was prepared from. `matching` has an entry for `Ensembl` and one for `RefSeq`, of this family's tables: `rows_without_transcript`, the plugins' rows on a transcript that the allele has no row of in `transcripts`; `rows_of_other_ids`, their rows on a feature whose id is no transcript id; and `utr5_transcripts_without_values`, the rows of `transcripts` with `5_prime_UTR_variant` that have no value of UTRannotator's                          |
 | `omitted_columns`             | the columns of `variants` that the run left out because it did not name their source: those of its dated sources, then those of the archives of AlphaGenome's scores that it was not given, then those of the joined files that it was not given                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `transcripts_omitted_columns` | the columns of `transcripts` that the run left out because it was not given the joined file that they come from                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `sv_annotation`               | what annotated the structural variants and copy number segments, in the form of `annotation`: the second Annotator run, which has the catalog and the sources of the first; null in a family without `sv`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |

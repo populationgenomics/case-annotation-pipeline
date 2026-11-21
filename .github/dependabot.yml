@@ -41,12 +41,3 @@ updates:
       docker:
         patterns: ["*"]
         update-types: ["minor", "patch"]
-
-  # The base of the VEP image. A newer VEP is a deliberate change: its plugins move with it, and the tables' values
-  # with them.
-  - package-ecosystem: docker
-    directory: /containers/vep
-    schedule:
-      interval: weekly
-    cooldown:
-      default-days: 7

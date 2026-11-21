@@ -1,5 +1,5 @@
 {
-  "pipeline_version": "0.4.1",
+  "pipeline_version": "0.5.0",
   "tables_version": "0.5.0",
   "workflows": {
     "family_tables.nf": {
@@ -150,11 +150,6 @@
         {
           "name": "gene_models",
           "type": "Path",
-          "required": true
-        },
-        {
-          "name": "vep_container",
-          "type": "String",
           "required": true
         },
         {

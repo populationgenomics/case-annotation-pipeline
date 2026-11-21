@@ -444,7 +444,7 @@ flowchart LR
         SITES["UNION_SITES<br/>each allele once"]
         VALUES["ECHTVAR_VALUES<br/>echtvar archives"]
         JOINED["JOINED_VALUES<br/>public files"]
-        VEP["VEP_SITES, VEP_PLUGINS,<br/>VEP_PLUGIN_TABLE<br/>two plugins of VEP on<br/>the alleles in exons"]
+        VEP["VEP_PLUGIN_TABLE<br/>the rules of two<br/>plugins of VEP on<br/>the alleles in exons"]
         ANNOTATE{{"ILLUMINA_ANNOTATE<br/>or an earlier<br/>run's annotation"}}
         TABLES["ANNOTATION_TABLES<br/>variants,<br/>transcripts"]
         SITES --> VALUES
@@ -509,11 +509,11 @@ flowchart LR
    effects on polyadenylation, gnomAD's genomic constraint, regions of missense constraint and MPC scores, and the
    catalogued branch points whose bases an allele changes ([Joined files](#joined-files)). It runs in every run too, and
    writes a table of the alleles alone in a run without a file.
-1. `VEP_SITES`, `VEP_PLUGINS` and `VEP_PLUGIN_TABLE` run two plugins of Ensembl VEP on the union's alleles that overlap
-   an exon, from the gene models that `gene_models` names, and write what the plugins say as a table by allele and
+1. `VEP_PLUGIN_TABLE` applies the rules of two plugins of Ensembl VEP to the union's alleles that overlap an exon, on
+   the transcripts of the gene models that `gene_models` names, and writes what the rules say as a table by allele and
    transcript
-   ([Upstream reading frames and nonsense-mediated decay](#upstream-reading-frames-and-nonsense-mediated-decay)). They
-   run in every run as well.
+   ([Upstream reading frames and nonsense-mediated decay](#upstream-reading-frames-and-nonsense-mediated-decay)). It
+   runs in every run as well.
 1. `ILLUMINA_ANNOTATE`, the process of the `annotate` mode above, annotates the union with the sources named. A run
    given `annotated`, the folder an earlier run published the union's annotation in, reuses that annotation instead.
 1. `ANNOTATION_TABLES` reads the Annotator's JSON line by line and writes the union's `variants` and `transcripts`
@@ -561,9 +561,9 @@ file gives for an allele and one transcript go into a second table, keyed by var
 fails unless the first table's alleles are exactly the union's, and for a file that is not what its source publishes
 ([Joined files](#joined-files)).
 
-`VEP_SITES` cuts with `bcftools view -R` and the regions of the prepared gene models. It stops if the cut writes an
-allele twice, since an allele's variant id is the key of the plugins' table. `VEP_PLUGIN_TABLE` fails unless VEP wrote
-one document for each allele that it was given and each positive control holds what its plugin writes for it.
+`VEP_PLUGIN_TABLE` cuts with `bcftools view -R` and the regions of the prepared gene models. It stops if the cut writes
+an allele twice, since an allele's variant id is the key of the plugins' table. `case-annotation vep-plugins` then fails
+unless each positive control holds what the rule of its plugin gives it.
 
 `ILLUMINA_ANNOTATE` and a reused annotation give the same thing: the group's annotation is the JSON named after the
 group, and a run without one stops with the group's name.
@@ -821,20 +821,20 @@ launched pipeline says, and the tools image has to be of that release
 
 An included workflow comes without this repository's `nextflow.config`. Its processes keep the directives that are
 written in them, which are the machine type, the CPUs, the memory and the disk of the larger steps, and the time limit
-of `VEP_PLUGINS`. The config of the including pipeline provides the rest:
+of `VEP_PLUGIN_TABLE`. The config of the including pipeline provides the rest:
 
-- the image of each process: the Annotator's image for `ILLUMINA_ANNOTATE` and `ILLUMINA_ANNOTATE_SV`, the VEP image for
-  `VEP_PLUGINS`, and `case-annotation-tools` of the workflow's release for every other process
-- a machine for the steps that name none, which are `FAMILY_CHECK`, the normalisations, the steps of the unions' sites
-  and `VEP_SITES` (`e2-standard-2` in this repository's config)
+- the image of each process: the Annotator's image for `ILLUMINA_ANNOTATE` and `ILLUMINA_ANNOTATE_SV`, and
+  `case-annotation-tools` of the workflow's release for every other process
+- a machine for the steps that name none, which are `FAMILY_CHECK`, the normalisations and the steps of the unions'
+  sites (`e2-standard-2` in this repository's config)
 - outbound access for the VMs of the Annotator's steps
   ([The Annotator's image](annotator-image.md#the-helper-that-fetches-the-key))
 - anything else that it wants of this repository's config, such as `errorStrategy = 'finish'` and the Google Batch
   settings
 
-The processes carry the labels `tools`, `illumina` and `vep`, and this repository's config selects the three images by
-them. An including pipeline whose own processes carry one of these labels for another image selects by the process's
-name instead, since a `withName` selector applies over a `withLabel` selector:
+The processes carry the labels `tools` and `illumina`, and this repository's config selects the two images by them. An
+including pipeline whose own processes carry one of these labels for another image selects by the process's name
+instead, since a `withName` selector applies over a `withLabel` selector:
 
 ```groovy
 process {
@@ -844,14 +844,11 @@ process {
     withName: 'ANNOTATE_FAMILIES:ILLUMINA_ANNOTATE.*' {
         container = params.annotator_container
     }
-    withName: 'ANNOTATE_FAMILIES:VEP_PLUGINS' {
-        container = params.vep_container
-    }
 }
 ```
 
-The selectors of the Annotator and of VEP come after the first, because the later of two `withName` selectors that match
-a process applies. A pattern matches a process's whole name, which also has the name of every workflow that the call of
+The selector of the Annotator comes after the first, because the later of two `withName` selectors that match a process
+applies. A pattern matches a process's whole name, which also has the name of every workflow that the call of
 `ANNOTATE_FAMILIES` lies in.
 
 ### gnomAD's joint values
@@ -1406,41 +1403,44 @@ published variants and whole gene models:
 The Annotator gives a variant in a 5′ untranslated region the consequence `5_prime_UTR_variant`, and does not say what
 the variant does there. It can create a start codon upstream of the gene's own, or change an
 [upstream reading frame](glossary.md#upstream-reading-frame) that the transcript already has, and either can lower the
-amount of protein that is made. Two plugins of Ensembl VEP, the Variant Effect Predictor, say more, and the workflow
-runs VEP for these two alone.
+amount of protein that is made. Two plugins of Ensembl VEP, the Variant Effect Predictor, say more. The workflow applies
+the rules of both to the union's alleles and does not run VEP: the package restates the rules in Python.
 
-| Plugin         | What it says                                                                                                                                                                                                         | From                                                                                                                                                        |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `UTRannotator` | of a variant in a 5′ UTR: each upstream start codon that it gains or loses, and each upstream reading frame whose stop it gains or loses or whose frame it shifts; and how many such frames the transcript's UTR has | [ImperialCardioGenetics/UTRannotator](https://github.com/ImperialCardioGenetics/UTRannotator) at the commit `3d9d466e356752aa69d61b62da493edddf374363`, MIT |
-| `NMD`          | of a variant that ends a reading frame early: whether it is predicted to escape [nonsense-mediated decay](glossary.md#nonsense-mediated-decay), by where the variant lies in the transcript                          | [Ensembl/VEP_plugins](https://github.com/Ensembl/VEP_plugins) as VEP 116.3 ships it, Apache 2.0                                                             |
+| Rules of       | What they say                                                                                                                                                                                                        | Restated from                                                                                                                                                                       |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `UTRannotator` | of a variant in a 5′ UTR: each upstream start codon that it gains or loses, and each upstream reading frame whose stop it gains or loses or whose frame it shifts; and how many such frames the transcript's UTR has | the seven Perl files of [ImperialCardioGenetics/UTRannotator](https://github.com/ImperialCardioGenetics/UTRannotator) at the commit `3d9d466e356752aa69d61b62da493edddf374363`, MIT |
+| `NMD`          | of a variant that ends a reading frame early: whether it is predicted to escape [nonsense-mediated decay](glossary.md#nonsense-mediated-decay), by where the variant lies in the transcript, and for which reason    | `NMD.pm` of [Ensembl/VEP_plugins](https://github.com/Ensembl/VEP_plugins) on the branch `release/116`, at the commit `2341cdc2c173caeae043e60de412fa185efe00bc`, Apache 2.0         |
 
-Both run as their authors published them. The pipeline prepares what VEP reads and turns what VEP writes into a table,
-and classifies nothing itself. UTRannotator is the original plugin of Zhang, Wakeling, Ware and Whiffin. VEP ships a
-plugin of nearly the same name, `UTRAnnotator`, which the workflow does not run: for an allele and transcript with
+UTRannotator is the plugin of Xiaolei Zhang, Matthew Wakeling, James Ware and Nicola Whiffin ("Annotating high-impact 5′
+untranslated region variants with the UTRannotator", Bioinformatics,
+[doi:10.1093/bioinformatics/btaa783](https://doi.org/10.1093/bioinformatics/btaa783)). VEP ships a plugin of nearly the
+same name, `UTRAnnotator`, which Ensembl maintains and which is not the one restated: for an allele and transcript with
 several kinds of effect it reports one of them, and which one can differ between two runs of the same input. The
-original reports every kind. [The VEP image](../containers/vep/README.md) holds both plugins and says where each comes
-from.
+original reports every kind, and so do the tables.
 
-Three steps do the work.
+A plugin of VEP sees an allele on a transcript only where VEP has given the two one of the plugin's consequence terms,
+and VEP builds the transcript from a gene model file in its own way. The package restates both as well, from the modules
+of VEP 116.3 that do them, so that a row has a value where the plugin would have been asked for one.
+[The notices](../src/case_annotation/licenses/README.md) list every work that is restated, with its licence, and the
+package holds the notices that the MIT licence and the Apache licence ask for.
+[vep-rs](https://github.com/natera-open-source/vep-rs), a port of VEP to Rust (Apache 2.0), was read at its tag `v0.6.0`
+for the logic of both plugins and for its account of the defects of Ensembl's edition of UTRannotator. No code of any of
+these works is copied.
 
-- `VEP_SITES` cuts the union down to the alleles that overlap an exon, gives each its variant id as its ID, and adds the
-  positive controls.
-- `VEP_PLUGINS` runs VEP on them once for each of two gene model files, Ensembl's and RefSeq's, in the VEP image, and
-  records what it ran.
-- `VEP_PLUGIN_TABLE` checks the controls and writes the plugins' values as a table by allele and transcript, which is
-  published with the union as `vep_plugins/`.
-
-`FAMILY_TABLES` then gives each row of a family's `transcripts` the values of its allele and transcript, and each row of
-`variants` the kinds of effect over the allele's transcripts
+One step does the work. `VEP_PLUGIN_TABLE` cuts the union down to the alleles that overlap an exon, gives each its
+variant id as its ID, adds the positive controls, applies the rules for the transcripts of two gene model files,
+Ensembl's and RefSeq's, checks the controls and writes the values as a table by allele and transcript, which is
+published with the union as `vep_plugins/`. `FAMILY_TABLES` then gives each row of a family's `transcripts` the values
+of its allele and transcript, and each row of `variants` the kinds of effect over the allele's transcripts
 ([Upstream reading frames and nonsense-mediated decay](family-tables.md#upstream-reading-frames-and-nonsense-mediated-decay)
 has the columns).
 
 #### The gene models
 
-VEP builds its transcripts from a gene model file and the reference, without its cache. The Annotator's catalog `202610`
-annotates with Ensembl release 115 and with RefSeq's release `GCF_000001405.40-RS_2025_08`, so the two files are those
-releases, and a transcript has the same id and version for VEP as it has in `transcripts`. A run with a later catalog
-needs the releases of that catalog.
+The step builds its transcripts from a gene model file and the reference, as VEP does without its cache. The Annotator's
+catalog `202610` annotates with Ensembl release 115 and with RefSeq's release `GCF_000001405.40-RS_2025_08`, so the two
+files are those releases, and a transcript has the same id and version in the step's table as it has in `transcripts`. A
+run with a later catalog needs the releases of that catalog.
 
 | Public file                                                                                                                                | Release                                | Bytes      | SHA-256                                                            |
 | ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------- | ---------- | ------------------------------------------------------------------ |
@@ -1451,9 +1451,10 @@ needs the releases of that catalog.
 The sizes and checksums are of the files as downloaded on 20 November 2026, when each matched the checksum that its
 publisher lists beside it.
 
-VEP reads a gene model file that is sorted, compressed with bgzip and indexed with tabix, and the step needs four small
-files made from the same downloads. One command prepares all of it, in the tools image, and a deployment stores the
-folder that it writes and gives it to every run as `gene_models`:
+A prepared gene model file is sorted, compressed with bgzip and indexed with tabix, which is the layout that VEP reads,
+so that VEP can be run on the same folder to compare the rules with the plugins. The step needs four small files made
+from the same downloads. One command prepares all of it, in the tools image, and a deployment stores the folder that it
+writes and gives it to every run as `gene_models`:
 
 ```sh
 docker run --rm -v "${PWD}:/work" -w /work <registry>/case-annotation-tools@<digest> \
@@ -1478,97 +1479,253 @@ documentation does.
 | `gene-models.json`                                       | the record: each prepared file's size and SHA-256, each public file's name, size and SHA-256, the lines of its head that state its genome build and its release, and each control with the transcript that it is annotated on |
 
 The reference gives each control the base that it is written after, so the folder belongs to references whose sequences
-are named `chr1`, `chr2` and so on and hold GRCh38's bases.
+are named `chr1`, `chr2` and so on and hold GRCh38's bases. The step stops when a gene model file in the folder is not
+the one that the record describes.
+
+A transcript is read from a gene model file as VEP 116.3 reads it, which decides its 5′ UTR and its coding positions.
+
+- A transcript is a feature whose parent is a gene. It has a coding sequence when `CDS` lines give it as their parent,
+  whatever its type, so NCBI's gene segments of the immunoglobulins are read like an mRNA.
+- The coding sequence runs from the start of the first `CDS` line to the end of the last. A gap between two `CDS` lines
+  of one exon, as NCBI writes for a ribosomal frameshift, is not looked at.
+- The phase of the first `CDS` line pads the coding sequence with one or two `N`, and a coding position counts them.
+- A transcript of NCBI's file with two exons that overlap is left out.
+- A transcript of `chrM` is translated by the vertebrate mitochondrial code, whichever file it is from. VEP means to do
+  the same and does not, with a reference that names the genome `chrM`
+  ([Where the values are not the plugin's](#where-the-values-are-not-the-plugins)).
 
 #### The positive controls
 
-A plugin that did not run leaves nothing in VEP's output: its keys are absent, as they are for a union without a variant
-in a 5′ UTR. The preparation therefore makes two alleles for each gene model file whose annotation is known from the
-file. Both are insertions on the first transcript of the forward strand that has room for them.
+Gene models that are not the prepared ones, a reference with other bases and chromosome names that the synonyms do not
+join all leave a table without values, as a union without a variant in a 5′ UTR does. The preparation therefore makes
+two alleles for each gene model file whose values are known from the file. Both are insertions on the first transcript
+of the forward strand that has room for them.
 
-| Control of     | The allele                                                                                         | What the plugin must write for it                                                                       |
-| -------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `UTRannotator` | `ATG` inserted after the 15th base of the first exon, which holds at least 30 bases of 5′ UTR      | a gained upstream start codon, `uAUG_gained`                                                            |
-| `NMD`          | one base inserted after the 15th coding base, where the first coding segment has at least 30 bases | `NMD_escaping_variant`: a frameshift in the first 100 coding bases, which the plugin counts as escaping |
+| Control of     | The allele                                                                                         | What the rules must give it                                                                  |
+| -------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `UTRannotator` | `ATG` inserted after the 15th base of the first exon, which holds at least 30 bases of 5′ UTR      | a gained upstream start codon, `uAUG_gained`                                                 |
+| `NMD`          | one base inserted after the 15th coding base, where the first coding segment has at least 30 bases | a predicted escape: a frameshift in the first 100 coding bases, which the rule counts as one |
 
-The controls are invented and were seen in nobody. `VEP_SITES` adds them to the alleles that VEP reads, and
-`VEP_PLUGIN_TABLE` looks for what each plugin must write on the control's transcript in the output of the control's own
-file. A run stops unless it finds both. That covers a plugin that did not load, a gene model file or a reference that
-VEP could not read, and chromosome names that the synonyms do not join. The controls are left out of the table.
+The controls are invented and were seen in nobody. `VEP_PLUGIN_TABLE` adds them to the alleles that it reads and looks
+for the value of each on the control's transcript, among the rows of the control's own file. A run stops unless it finds
+both. The controls are left out of the table.
 
-#### How VEP runs
+#### How the step runs
 
-`VEP_PLUGINS` gives VEP the alleles as a VCF and reads its JSON, which is one document for each allele with one entry
-for each transcript.
+`VEP_PLUGIN_TABLE` runs in the tools image, which holds the one file of the plugin that the rules read:
+`uORF_5UTR_GRCh38_PUBLIC.txt`, the authors' list of upstream reading frames that ribosome profiling has seen translated
+([the tools image](../containers/tools/README.md)).
 
-- VEP runs once for each gene model file, since it reads one such file in a run, with `--gff`, `--fasta` and
-  `--synonyms`. It needs no network and no cache. The step does not give `--offline`, with which VEP looks for a cache
-  and stops without one. Without a cache and without `--database`, VEP sets its offline mode itself and says so in its
-  first warning, and the step stops for a run without that warning.
-- The step first copies the reference, its index and the folder of the gene models to the container's `/tmp`, and VEP
-  reads the copies. With `--fork`, VEP starts a new process for every few dozen alleles, and each process opens the
-  reference and the gene model file again and reads from many places in both: in a trial with Ensembl's file, about 250
-  reads for 58 alleles, of which 17 to 31 did not continue the one before. An executor that mounts a bucket instead of
-  copying a task's inputs, as Google Batch does, answers each such read with a request to the bucket. The copies are 3.5
-  GB for GRCh38 and the two files above, and the step writes how long the copy and each run of VEP took to its log.
-- `--transcript_version` adds the version to an Ensembl transcript's id. RefSeq's ids end in their version already.
-- `PERL_HASH_SEED=0` and `PERL_PERTURB_KEYS=0` fix the order of Perl's hashes, in which UTRannotator writes the kinds of
-  an allele's effects. Two runs then write the same text, and `VEP_PLUGIN_TABLE` sorts what it writes as well.
-- `--safe` makes VEP stop for a plugin that does not compile or load. Without it VEP only warns and annotates without
-  the plugin. A plugin that fails on one allele leaves a warning even with `--safe`, so the step also stops for a
-  warning that a plugin went wrong.
-- `--fork` gives VEP the task's CPUs, with `--buffer_size 1000`. A process then takes at most 62 alleles with 8 CPUs.
-- The step has a time limit of 12 hours, so that a run that has stalled ends.
+- The step first copies the reference, its index and the folder of the gene models into a folder of its own under
+  `/tmp`, on the VM's disk, and gives the command these copies and no other path to the two. A staged input can be a
+  link into a bucket mount, as on Google Batch, and the rules read the reference in many small pieces, one for each
+  exon, which is slow through such a mount. Each file is copied once, from its first byte to its last.
+- The cut to the exons keeps the run short and loses nothing: a variant in a 5′ UTR lies in an exon, and so does one
+  that ends a reading frame, so every allele that a rule would evaluate is still read. The regions cover 239 Mb, about
+  8% of the genome, so the step reads roughly one allele of a whole genome in twelve. That share is an estimate, and the
+  step writes the count of a run to its log.
+- The command shares the chromosomes among the task's CPUs. A process reads one chromosome's transcripts from both gene
+  model files and that chromosome's alleles, and reads the sequence of a transcript when the first allele meets it.
+- The rows are sorted by variant id and transcript id, and the records of a row by kind and from the 5′ end of the UTR,
+  so two runs of the same inputs write the same table.
+- The command writes a line to its log for every 20,000 alleles of a chromosome that it has read with a gene model file,
+  and a line for every chromosome that is done, each with the seconds since its start. A task's log can be read while
+  the task runs, so a run shows where it is. The step has a time limit of two hours, which ends a task that has stalled.
 
-The cut to the exons keeps the run short and loses nothing: a variant in a 5′ UTR lies in an exon, and so does one that
-ends a reading frame, so every allele that a plugin would evaluate is still read. The regions cover 239 Mb, about 8% of
-the genome, so VEP reads roughly one allele of a whole genome in twelve. That share is an estimate, and `VEP_SITES`
-writes the count of a run to its log. In a trial on a laptop, with the two files above on the container's own disk, VEP
-read 10,399 invented alleles in exons with eight processes on four cores in 21 seconds with Ensembl's file and in 20
-with RefSeq's, in up to 210 MB of memory for each process. At that rate both files take a little over an hour for a
-million alleles.
+On a laptop the command read 849,393 invented alleles with the two gene model files above in 36 seconds with eight
+processes, which is 24,000 alleles a second, and the largest process held 1.2 GB. The alleles lie on every sequence that
+a gene model file gives a feature and the reference holds: 820,226 on `chr1` to `chrM` and 29,167 on 429 other
+sequences, which have no row because the tables hold `chr1` to `chrM`. Of those on the chromosomes, 699,218 are in
+exons, 60,000 anywhere else, and 60,000 in the 150 stretches of 100,000 bases where NCBI's file has the most lines of
+any type, up to 12,502 in one stretch. They are substitutions of one base (87 in 100) and insertions and deletions of 1
+to 12 bases, with 1,000 alleles of up to 6,000 bases and alleles at the first and last bases of every sequence.
+
+| Gene model file | Seconds for the 820,230 alleles on `chr1` to `chrM` | Alleles a second | Largest process | A thousand alleles in a row: median, 99 in 100 under, slowest |
+| --------------- | --------------------------------------------------- | ---------------- | --------------- | ------------------------------------------------------------- |
+| Ensembl's       | 20                                                  | 41,000           | 1.2 GB          | 0.09 s, 0.36 s, 0.65 s on `chr4` from 39.2 to 41.7 Mb         |
+| RefSeq's        | 23                                                  | 36,000           | 1.0 GB          | 0.11 s, 0.53 s, 1.41 s on `chr17` from 42.6 to 43.1 Mb        |
+
+No stretch of the genome is far slower than the rest. The slowest thousand alleles lie where the most transcripts
+overlap one another. The work for an allele does not grow with a transcript's length: the transcripts with the most
+exons, 365, and the 5′ UTRs of up to 94,000 bases that NCBI's file gives some predicted transcripts take no longer than
+any other. The lines of NCBI's file that are no gene, transcript, exon or coding segment are passed over as they are
+read. VEP 116.3 with the two plugins read 10,399 invented alleles in exons in 21 seconds with one gene model file on a
+local disk, which is a little over an hour for a million alleles and both files.
+
+#### Where the values are the plugins'
+
+The rules were held against the plugins themselves: VEP 116.3 with the original UTRannotator and its NMD plugin, run
+without a cache on the two gene model files above and on 90,447 invented alleles. Each allele is a change at a place
+chosen on a public transcript model, on either strand, in 145 stretches of a megabase on every chromosome, and none was
+seen in anybody. The places were chosen to meet the rules.
+
+- In and beside 5′ UTRs: 26,000 substitutions of one base, 13,000 insertions, 13,000 deletions and 6,600 substitutions
+  of several bases or replacements of unequal length. They lie at upstream start and stop codons, at the first bases of
+  the UTR, across its end and the transcript's own start codon, at the junctions of the UTR's exons and anywhere else in
+  it. Some substitutions were chosen to make a start or a stop codon, and some insertions repeat the bases that follow.
+- In coding sequences: 11,294 substitutions that make a stop codon, 10,998 insertions and deletions of a length that
+  shifts the frame, 1,375 of whole codons and 1,333 deletions across an edge of an exon. They lie in the first 110
+  coding bases, in the last 60 bases of the last exon but one, in the last exon, at the stop codon and anywhere else,
+  and some are in genes of one exon and in mitochondrial genes.
+- 6,847 deletions of a whole intron of at most 90 bases with a few bases of both exons.
+
+A row is an allele on a transcript that a rule evaluated, and a row was compared in every field: the three counts, the
+kinds, every field of every record, and the prediction of the NMD rule with the rows that it has none for.
+
+The comparison had two parts. In the first, a second restatement of UTRannotator stood in the place of the step's rules:
+one that follows the plugin line by line, with the place where a record writes an allele and with every difference of
+[the next section](#where-the-values-are-not-the-plugins), and with VEP's two exceptions there undone. It is no part of
+the package. With it the step gave VEP's rows and no other: 1,655,427 rows with Ensembl's file and 1,072,202 with
+RefSeq's, each equal in every field. This part checks the reading of the gene models, the choice of the alleles of each
+rule and the NMD rule against VEP, and it shows that the plugin differs from the step's rules only as the next section
+says. In the second part the step ran as it is, and these rows differ from the plugins':
+
+| Alleles                                               | Number | Rows with Ensembl's file | Not the plugins' | Rows with RefSeq's file | Not the plugins' |
+| ----------------------------------------------------- | ------ | ------------------------ | ---------------- | ----------------------- | ---------------- |
+| substitutions of one base in and beside 5′ UTRs       | 26,000 | 412,804                  | 121              | 266,767                 | 60               |
+| insertions there                                      | 13,000 | 243,739                  | 13,897           | 162,328                 | 8,872            |
+| deletions there                                       | 13,000 | 247,520                  | 3,997            | 163,940                 | 3,370            |
+| substitutions of several bases and replacements there | 6,600  | 114,809                  | 68               | 81,487                  | 94               |
+| alleles in coding sequences                           | 25,000 | 517,764                  | 246              | 333,144                 | 651              |
+| deletions of a whole short intron                     | 6,847  | 118,844                  | 484              | 64,583                  | 813              |
+| all                                                   | 90,447 | 1,655,480                | 18,813           | 1,072,249               | 13,860           |
+
+Every one of these rows has one of the differences of the next section, and none is unexplained. The alleles were made
+to meet the rules, so a union is expected to have far fewer such rows in a hundred: one insertion in five here repeats
+the bases that follow it, and one in six holds a start codon.
+
+| The difference                                                             | Rows with Ensembl's file | Rows with RefSeq's file |
+| -------------------------------------------------------------------------- | ------------------------ | ----------------------- |
+| an insertion or a deletion that can be written in several ways             | 11,877                   | 8,620                   |
+| every start codon that an allele makes                                     | 4,003                    | 2,428                   |
+| an insertion directly before a start codon                                 | 1,294                    | 1,125                   |
+| an insertion directly before a stop codon                                  | 553                      | 336                     |
+| a deletion that leaves a stop codon at its place                           | 303                      | 238                     |
+| an allele at the first two bases of the UTR                                | 230                      | 228                     |
+| a deletion from one exon of the UTR into the next                          | 483                      | 813                     |
+| the 3′ UTR of a reverse-strand transcript, for the alleles of the NMD rule | 40                       | 34                      |
+| the mitochondrial genetic code, for the alleles of the NMD rule            | 59                       | 59                      |
+
+A row can have two of the differences. No row of the comparison had the two differences of the next section that are not
+in this table, a substitution of several bases around an unchanged start codon and a strength without a context. The
+tests of the package hold an invented example of each difference.
+
+Of the 26,000 substitutions of one base, the rows that differ are those of an allele at the first two bases of a UTR,
+181 of 679,571. On every other row of a substitution of one base the values are the plugins'.
+
+The plugin of VEP 116.3 writes no reason for an escape. For the reason, VEP ran the plugin's later edition on the 31,847
+alleles of the last two groups. On every row where both predict an escape the reason is the same: 349,383 rows with
+Ensembl's file and 189,363 with RefSeq's.
+
+The plugin's repository ships five alleles with its output as its test. That output has 41 rows on transcripts of
+Ensembl's release 115. The rules give 39 of them, and the other two are of transcripts whose 5′ UTR is another in
+release 115 than in the release of the output, where VEP with the plugin gives the rules' values as well.
+
+#### Where the values are not the plugin's
+
+UTRannotator decides an insertion or a deletion by the place where the record writes it. Among repeated bases the same
+change can be written at several places, and a VCF writes it at the leftmost on the genome, which is the last place on a
+transcript of the reverse strand. The plugin can then give two sets of records for one changed sequence. The step
+compares the reference UTR with the changed UTR, so that one changed sequence has one set of records, by three rules.
+
+- A start codon is lost only when no way of writing the allele leaves its three bases alone, and a start codon is gained
+  only when no way of writing the allele makes it one of the reference's.
+- A stop codon is lost when a way of writing the allele changes it and the reading frame does not end at its place
+  afterwards. The frame is shifted, and its stop codon is not lost, when the allele can only be written before the stop
+  codon.
+- A whole start codon that is repeated, or removed with its repeat, is counted at the first copy. A reading frame is its
+  start codon with everything behind it, and the later copy keeps what is behind it.
+
+The plugin's records also fail in a few places that have nothing to do with how an allele is written. The table lists
+every difference with an invented 5′ UTR. `[` and `]` enclose the bases that the allele removes, then `>` and the bases
+that it puts there, and each UTR is followed by a coding sequence that begins `ATG`.
+
+| The allele                                                                        | Invented example                                                     | The plugin                                                                                                         | The tables                                                |
+| --------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------- |
+| an insertion directly before a start codon                                        | `GGCACC[>CC]ATGGCT`                                                  | `uAUG_lost`: it reads the codon at its old place, where the inserted bases stand                                   | no record: the codon stands whole, two bases on           |
+| an insertion in a start codon that can be written before it                       | `GGCACCA[>CA]TGGCT`, which is `GGCACC[>AC]ATGGCT`                    | `uAUG_lost`, and for the first way of writing it `uAUG_gained` as well                                             | no record                                                 |
+| an insertion in a start codon that leaves the codon where it stood                | `GGCACCAT[>G]GGCT`, which is `GGCACCATG[>G]GCT`                      | `uAUG_gained` for the first way of writing it, although the reference has the codon there                          | `uFrameShift` of the codon's own frame, as for the second |
+| a replacement of several bases that leaves a start codon where it stood           | `GGCAC[CATGG>TATGA]CTCC`                                             | `uAUG_gained`                                                                                                      | no record                                                 |
+| an allele that makes several start codons                                         | `GGC[>ATGCATGC]ACC`                                                  | `uAUG_gained` for the first of them                                                                                | `uAUG_gained` for each                                    |
+| one more copy, or one fewer, of repeated bases that hold a start codon            | `GGCACCATGC[>ATGC]ATGCCG`                                            | `uAUG_gained` for the second copy and `uFrameShift` of the first copy's frame                                      | `uAUG_gained` for the first copy, and no frame is shifted |
+| an allele at the first two bases of the UTR                                       | `[C>T]GCCGG` in a UTR that ends with `A`                             | `uAUG_gained` one base before the UTR, from the UTR's last base and the new `TG`: its search reaches round the end | no record                                                 |
+| an insertion directly before a stop codon                                         | `ATGGCTCCG[>C]TAAGC`, and the same with `CCC`                        | `uSTOP_lost` for both, with the same stop codon as the next one                                                    | `uFrameShift` for one base, no record for three           |
+| a deletion in a stop codon that leaves a stop codon at its place                  | `ATGGCTCCGT[AG>]AAGC`, where `TAGAA` becomes `TAA`                   | `uSTOP_lost`: it takes every deletion at a stop codon for a loss                                                   | no record                                                 |
+| an insertion or a deletion that can be written into a stop codon                  | `ATGCCCC[TT>]TGACC`, which is `ATGCCCCT[TT>]GACC`                    | `uFrameShift` for the first way of writing it and `uSTOP_lost` for the second                                      | `uSTOP_lost` for both                                     |
+| an allele that removes two start codons, the second in the UTR's last three bases | `GGCAC[CATGGCCGCCATG>]`                                              | gives the second codon, which has no Kozak context, the strength of the first                                      | no strength without a context                             |
+| a deletion from one exon of the UTR into the next                                 | a deletion of the intron between them with a few bases of both exons | takes as many bases from the spliced UTR as the deletion has on the genome, the intron's included                  | the counts and no record                                  |
+
+A substitution of one base has the plugin's records in every row but one, the allele at the first two bases of the UTR.
+A record that writes an allele with bases of the UTR that do not change, before or behind those that do, has the records
+of the change alone, where the plugin goes by the alleles as they are written.
+
+Three things are as in the plugin although the changed sequence could be read further. An insertion directly before the
+transcript's own start codon has the counts and no record, because the plugin reads an allele only when its following
+base lies in the UTR. The step reads such an insertion only where it repeats the UTR's last base at its end, since the
+same change can then be written inside the UTR, and gives it the records of that way of writing it. An insertion or a
+deletion that puts a stop codon into a reading frame without shifting it has no record, because the plugin looks for a
+gained stop codon in a substitution alone. And a row has UTRannotator's values where VEP gives the allele the term
+`5_prime_UTR_variant` as the record writes it, so an insertion or a deletion that a record writes at the first coding
+bases has no such row, even where it could be written in the UTR.
+
+The conditions under which VEP gives an allele to a plugin are VEP's, with two exceptions, both in which alleles the NMD
+rule evaluates.
+
+- VEP reads the 3′ UTR of a reverse-strand transcript of a GFF file from the wrong bases, the span mirrored about the
+  transcript, and uses them to decide whether an insertion or a deletion at a stop codon keeps the stop. The step reads
+  the transcript's own 3′ UTR on both strands.
+- VEP translates a mitochondrial transcript by the vertebrate mitochondrial code when the genome's name is `MT`. With a
+  reference that names it `chrM` it uses the standard code, in which `TGA` ends a protein and `AGA` does not. The step
+  translates a transcript of `chrM` by the mitochondrial code. A substitution that makes `TGA` in a mitochondrial gene
+  is therefore no gained stop and has no value of the NMD rule, where VEP with the plugin predicts an escape.
 
 #### What the table keeps
 
-`VEP_PLUGIN_TABLE` writes a row for an allele and transcript that a plugin evaluated, keyed by variant id and by the
+`VEP_PLUGIN_TABLE` writes a row for an allele and transcript that a rule evaluated, keyed by variant id and by the
 transcript's id with its version, as `transcripts` is.
 
-- UTRannotator evaluates a transcript whose 5′ UTR the allele lies in. The row has the plugin's three counts of the
-  reading frames that the UTR holds and, where the allele has an effect, the kinds of effect and one record for each
-  upstream start codon that is affected. A value is the plugin's own, under a name in snake case: a distance is a whole
-  number, a flag is true or false, what the plugin writes as `NA` or leaves empty is null, and the type of a reading
-  frame that the plugin writes in two spellings has one.
-- The NMD plugin writes a key only where it predicts an escape. It evaluates a variant that VEP calls `stop_gained`,
-  `frameshift_variant`, `splice_donor_variant` or `splice_acceptor_variant` and that has a start and an end in the
-  coding sequence. The table therefore reads these terms and the two coding positions of VEP's entry, for this purpose
-  alone: the row is true where the plugin wrote its key, false where it evaluated the row and wrote none, and absent for
-  every other transcript. Nothing else of VEP's own annotation is kept.
-- NCBI's file also has features that are no transcript of `transcripts`, such as transfer RNAs, with ids that begin
-  `rna-` or `id-`. The table keeps a row of such a feature, and no row of `transcripts` can match it.
+- UTRannotator's rules evaluate a transcript where VEP gives the allele the term `5_prime_UTR_variant`. The row has the
+  three counts of the reading frames that the UTR holds and, where the allele has an effect, the kinds of effect and one
+  record for each upstream start codon that is affected. A value has the plugin's name in snake case: a distance is a
+  whole number, a flag is true or false, what the plugin writes as `NA` or leaves empty is null, and the type of a
+  reading frame that the plugin writes in two spellings has one.
+- The same row has the Kozak context and strength of the transcript's own start codon, which the plugin does not give,
+  by the rule that it applies to an upstream start codon. Where the allele changes a base of that context and leaves the
+  start codon whole, a row has the context and strength with the allele as well, also for an allele that changes the
+  first base behind the start codon, which lies in the coding sequence.
+- The NMD rule evaluates an allele that VEP calls `stop_gained`, `frameshift_variant`, `splice_donor_variant` or
+  `splice_acceptor_variant` and that has a start and an end in the coding sequence. The row is true with the reason
+  where the rule predicts an escape, false where the rule evaluated the row and predicts none, and absent for every
+  other transcript. The plugin of VEP 116.3 writes no reason. The reasons and their order are those of the plugin's
+  later edition on the branch `release/116`.
+- An allele with a base that is not `A`, `C`, `G` or `T` has no row.
+- NCBI's file also has features that are no transcript of `transcripts`, with ids that begin `rna-` or `id-`. The table
+  keeps a row of such a feature, and no row of `transcripts` can match it.
 
-The record beside the table, `vep_plugins.json`, holds VEP's version, the plugin's commit, the name, size and SHA-256 of
-the plugin's file of translated reading frames, of `NMD.pm` and of each gene model file as the run read it, the public
-file that each was prepared from, and VEP's options. It holds no count of the union's alleles or rows, so it is the same
-for every union that the same image and gene models annotate. The step writes those two counts to its log.
+The record beside the table, `vep_plugins.json`, holds the two commits that the rules were restated from, the release of
+VEP that the step follows in reading the gene models and in choosing the alleles of each rule, the name, size and
+SHA-256 of the plugin's file of translated reading frames and of each gene model file as the run read it, and the public
+file that each was prepared from. It holds no count of the union's alleles or rows, so it is the same for every union
+that the same image and gene models annotate. The step writes those two counts to its log.
 
 #### How the rows meet `transcripts`
 
-`FAMILY_TABLES` matches a row of the plugins' table to the row of `transcripts` with the same variant id and the same
-transcript id, version included. VEP's files and the Annotator's are the same releases, and the two still do not always
-agree, so some rows find no partner. That stops no run, and a family's manifest counts such rows for each source of
-transcripts, under `vep_plugins.matching`.
+`FAMILY_TABLES` matches a row of the step's table to the row of `transcripts` with the same variant id and the same
+transcript id, version included. The gene model files and the Annotator's are the same releases, and the two still do
+not always agree, so some rows find no partner. That stops no run, and a family's manifest counts such rows for each
+source of transcripts, under `vep_plugins.matching`.
 
-| Count                             | The rows                                                                                                                                                 |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `rows_without_transcript`         | the plugins' rows of the family's alleles on a transcript that the allele has no row of in `transcripts`; they are left out                              |
-| `rows_of_other_ids`               | the plugins' rows of the family's alleles on a feature whose id is not `ENST`, `NM_`, `NR_`, `XM_` or `XR_` with digits and a version; they are left out |
-| `utr5_transcripts_without_values` | the rows of `transcripts` with the consequence `5_prime_UTR_variant` that have no value of UTRannotator's; their `utr5_` columns are null                |
+| Count                             | The rows                                                                                                                                               |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `rows_without_transcript`         | the step's rows of the family's alleles on a transcript that the allele has no row of in `transcripts`; they are left out                              |
+| `rows_of_other_ids`               | the step's rows of the family's alleles on a feature whose id is not `ENST`, `NM_`, `NR_`, `XM_` or `XR_` with digits and a version; they are left out |
+| `utr5_transcripts_without_values` | the rows of `transcripts` with the consequence `5_prime_UTR_variant` that have no count of the UTR's reading frames; their `utr5_` columns are null    |
 
 A large last count for one source can mean that the gene model file of that source is of another release than the
-catalog's. `FAMILY_TABLES` fails only where the plugins' table holds an allele that the union's annotation lacks, which
-is a table of another union, or a transcript twice for an allele.
+catalog's. `FAMILY_TABLES` fails only where the step's table holds an allele that the union's annotation lacks, which is
+a table of another union, or a transcript twice for an allele.
 
-Neither plugin reads a [dated source](#dated-sources). The gene models are the Annotator's own releases, and
+Neither rule reads a [dated source](#dated-sources). The gene models are the Annotator's own releases, and
 UTRannotator's file of translated reading frames is a list that its authors curated from sorfs.org, which records
 ribosome profiling experiments and asserts nothing about a disease.
 
@@ -1940,11 +2097,16 @@ other gene–disease sources) out of the annotation, whereas Illumina's bundle c
 names them.
 
 The open pipeline is parked, and none of its code is in this repository: the Annotator serves an organisation with an
-Illumina licence, and the open route matters for one without. Two parts of it are in use. The family tables read
-gnomAD's joint values through echtvar, from the archive the open pipeline reads
-([gnomAD's joint values](#gnomads-joint-values)). And the workflow runs Ensembl VEP 116 without its cache, for two of
-its plugins and not for consequences
-([Upstream reading frames and nonsense-mediated decay](#upstream-reading-frames-and-nonsense-mediated-decay)).
+Illumina licence, and the open route matters for one without. One part of it is in use: the family tables read gnomAD's
+joint values through echtvar, from the archive the open pipeline reads ([gnomAD's joint values](#gnomads-joint-values)).
+
+Running Ensembl VEP itself with the two plugins was the first implementation of their columns
+([Upstream reading frames and nonsense-mediated decay](#upstream-reading-frames-and-nonsense-mediated-decay)). VEP
+without its cache builds its transcripts from the GFF file and the reference again in every process that it starts, and
+needed a little over an hour for a million alleles in exons with both gene model files on a local disk, and an image of
+its own. The plugins' rules, restated in Python, read each transcript once and take about a minute for as many alleles,
+in the tools image. They also decide an insertion or a deletion by the changed sequence, where the plugin goes by the
+place at which a record writes it.
 
 ## Reference
 
@@ -1975,11 +2137,10 @@ as JSON, for a program that writes a sheet or launches a run.
 | `branch_points`                                                           | optional: the prepared catalogue of branch points ([The catalogue of branch points](#the-catalogue-of-branch-points))                                  |
 | `strchive`                                                                | optional: the loci of one release of STRchive, for the size ranges in `repeats` ([STRchive's ranges of the repeats](#strchives-ranges-of-the-repeats)) |
 | `strchive_release`, `strchive_release_date`                               | with `strchive`: the release that the file is of, and the day on which it was published as `YYYY-MM-DD`, which a family's manifest records as stated   |
-| `gene_models`                                                             | the folder of gene models that `case-annotation gene-models` prepared, which VEP reads ([The gene models](#the-gene-models))                           |
-| `vep_container`                                                           | the image `case-annotation-vep`, which runs VEP with the UTRannotator plugin ([The VEP image](../containers/vep/README.md))                            |
+| `gene_models`                                                             | the folder of gene models that `case-annotation gene-models` prepared, which `VEP_PLUGIN_TABLE` reads ([The gene models](#the-gene-models))            |
 | `workers`                                                                 | the Annotator's worker processes, 8 by default                                                                                                         |
 | `annotator_container`, `annotator`, `annotator_version`, `license_secret` | the Annotator's image, path and version, and the licence's secret, as for `annotator.nf`; needed unless the run reuses an annotation                   |
-| `tools_container`                                                         | the image `case-annotation-tools`, which runs every step but the Annotator's and VEP's                                                                 |
+| `tools_container`                                                         | the image `case-annotation-tools`, which runs every step but the Annotator's                                                                           |
 | `output_dir`                                                              | where the folders below are published                                                                                                                  |
 
 ### Params of `annotator.nf`
@@ -2076,9 +2237,7 @@ process has the rest, such as the form of a name, a run config of another catalo
 | `SV_UNION`             | a record has no ID, or two records of a family's callers share one; a record that is not a breakend has no INFO `END`, or a breakend has one; a record has no `SVTYPE`, or one that is none of `DEL`, `INS`, `DUP`, `INV`, `BND` and `CNV`, or a copy-number segment has an allele other than `<DEL>` and `<DUP>`; a record's `END` lies before its position; a record has another number of `SVLEN` values than of alleles; the families' files declare a contig with two lengths; no record is left on the primary chromosomes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `ECHTVAR_VALUES`       | the alleles of its table are not exactly the union's; two archives add a field of the same name; an archive lacks a field that its columns come from, or holds one as another type; an archive marks an allele that it lacks with a value that the field could hold; an allele has some of the scores of one of AlphaGenome's archives and not others; an archive of the breakdown or of the splicing scores has a field without the notice in its description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `JOINED_VALUES`        | a REF of gnomAD's mitochondrial VCF is not the reference's sequence; that VCF has samples, lacks one of the INFO fields that the columns come from or declares it with another type or number, or has a record that is off chrM, holds several alleles, lacks a field that every record of gnomAD's file has, or holds an allele that another record holds; a line of GENCODE's file is not the nine fields of a GTF, a feature is none of `polyA_signal`, `polyA_site` and `pseudo_polyA`, a feature has no start and end as positions in that order, or the file has no `polyA_signal` on a primary chromosome; the header of APARENT2's table is not its 15 columns, or a row has another number of fields or lacks a chromosome, a GRCh38 position, a base as its reference or its changed nucleotide, or a finite number as its usage or its change of the log odds; the header of MitoTIP's table is not its 8 columns, or a row lacks a position, a base as its reference, another base or `:` as its change, a finite score or one of `Q1` to `Q4`, or two rows hold one change of a position; the header of gnomAD's table of windows is not its 9 columns, or a row lacks a primary chromosome, a start that is a multiple of 1,000, an end after it and at most 1,000 bases on, or a finite z score, or two rows hold one window; the header of gnomAD's table of regions is not its 11 columns, or a row lacks an Ensembl transcript id without a version, a number of regions, a primary chromosome, a start and an end in that order, a finite ratio of 0 or more, a p-value from 0 to 1, or `true` or `false` as its coverage, or two regions of one transcript overlap or lie on two chromosomes, or a transcript has another number of regions than its rows say; the header of gnomAD's table of MPC scores is not its 4 columns, or a row lacks a locus on a primary chromosome, a list of two alleles of bases, an Ensembl transcript id without a version or a finite score, or two rows hold one allele of the union and one transcript; the header of the catalogue of branch points is not its 14 columns, or a row lacks a primary chromosome, a position, a strand, a name of the three with a kind and a base, the paper's name with the same kind and base, or a list of sources, fills some of the columns of an intron and not all, or fills them with something other than a gene, a list of introns, `major` or `minor`, a length, a negative distance, a rank within its total and a class of consensus, or two rows hold one branch point in the same introns, or the file has no row; a row of one of these tables has another number of fields than its header; a gzipped file is cut off; the alleles of its table are not exactly the union's |
-| `VEP_SITES`            | the cut to the exons writes an allele twice                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `VEP_PLUGINS`          | VEP fails; a plugin does not compile or load; VEP warns that a plugin went wrong on an allele                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `VEP_PLUGIN_TABLE`     | a positive control lacks what its plugin writes for it, or VEP does not list the control's transcript; VEP's documents are not exactly those of the alleles it was given, each once; a record of UTRannotator has a kind, a key or a value that the plugin is not known to write; a plugin evaluated a transcript twice for an allele; a gene model file that VEP read has another size or SHA-256 than the record of the prepared folder gives it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `VEP_PLUGIN_TABLE`     | the cut to the exons writes an allele twice; a gene model file has another size or SHA-256 than the record of the prepared folder gives it; the file of translated upstream reading frames is not in the layout of UTRannotator's; a positive control lacks what the rule of its plugin gives it, or has no row on its transcript                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `ROH_UPD`              | a family with a child whose parents are both sequenced has no `GQ` in its VCF; the archive of gnomAD's joint release writes another stand-in than 0 for the frequency of an allele it lacks; `bcftools roh` or `upd` fails; a tool's output is not what the tool writes, or the installed `upd` did not come from a commit of upd's repository                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `ILLUMINA_ANNOTATE`    | the bundle lacks a source named or is of another catalog; the licence is invalid for a source                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `ANNOTATION_TABLES`    | the JSON's alleles are not exactly the union's; the JSON holds ClinVar or dbSNP records, or a dated source's entry in its header, that the run did not name; the genes section holds a record without a symbol, an HGNC id that is not a positive integer or two HGNC ids for one symbol, or lacks the symbol of a transcript; the JSON lists a transcript twice for one allele; a SpliceAI entry has a key the conversion does not know, or a score without its distance, or a distance without its score; a PromoterAI entry lacks its score or its distance from the TSS; a regulatory feature lacks its id or its type; a gnomAD entry lacks its coverage, has a key the conversion does not know, or has some of a group's four values and not the others; an amino-acid conservation entry lacks its scores; a ClinVar record of the allele lacks the date of its last update, or a record of another allele lacks its accession or one of its alleles; a transcript's `hgvsc` has a position of a form that the conversion reads no intron offset from                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |

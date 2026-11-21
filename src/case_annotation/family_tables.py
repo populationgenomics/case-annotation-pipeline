@@ -393,9 +393,9 @@ class FamilyMember(pydantic.BaseModel, frozen=True, extra='forbid'):
 class PluginMatching(pydantic.BaseModel, frozen=True, extra='forbid'):
     """How the rows of VEP's plugins met the family's `transcripts` rows of one source of transcripts.
 
-    VEP reads its own files of the gene models, so a transcript, or a version of one, can be in VEP's file and not
-    among the Annotator's, or the other way round, and the two can place a variant differently at the edge of a 5' UTR.
-    Neither stops a run.
+    The rules read the prepared gene model files, as VEP did, and not the Annotator's own, so a transcript, or a
+    version of one, can be in a gene model file and not among the Annotator's, or the other way round, and the two can
+    place a variant differently at the edge of a 5' UTR. Neither stops a run.
     """
 
     source: gene_models.Source
@@ -409,10 +409,10 @@ class PluginMatching(pydantic.BaseModel, frozen=True, extra='forbid'):
 
 
 class VepPlugins(pydantic.BaseModel, frozen=True, extra='forbid'):
-    """What the columns of VEP's two plugins come from, and how its rows met the family's.
+    """What the columns of the rules of VEP's two plugins come from, and how its rows met the family's.
 
-    `run` is the record of the VEP run, which holds nothing of the union's alleles, and `matching` is of this family's
-    tables.
+    `run` is the record of the rules and of the files that they read, which holds nothing of the union's alleles, and
+    `matching` is of this family's tables.
     """
 
     run: vep_plugins.VepPluginsInfo
@@ -444,7 +444,7 @@ class FamilyManifest(pydantic.BaseModel, frozen=True, extra='forbid'):
     # The public files that the run joined to the alleles, each with the name of its source, in the order of their
     # columns in variants; none in a run that was given none.
     joined_files: tuple[joined_values.JoinedFile, ...]
-    vep_plugins: VepPlugins  # the VEP run that the utr5_ columns and nmd_escaping come from
+    vep_plugins: VepPlugins  # what the utr5_ and nmd_ columns come from
     # The variants columns of the sources the run did not name: its dated sources, then the archives it need not read,
     # then the files it need not join.
     omitted_columns: tuple[str, ...]
@@ -923,7 +923,7 @@ def assemble(
 
     The inputs are its normalised VCF, its PED file, the union's tables (annotation_tables.convert's output folder),
     the union's values from the echtvar archives (echtvar_values.convert's output folder), its values from the joined
-    files (joined_values.convert's output folder), its table of VEP's plugins (vep_plugins.convert's output folder),
+    files (joined_values.convert's output folder), its table of VEP's plugins (vep_plugins.annotate's output folder),
     the sample id of the proband that the run's sheet names, or None for a family in which it designates none
     (member_roles), and the VCFs of its larger variants that the sheet names, with the normalised sequences of its
     structural variants where it names their VCF (read_sv_alleles) and the annotation of the group's structural

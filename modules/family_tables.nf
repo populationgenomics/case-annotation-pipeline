@@ -1,14 +1,13 @@
 // The steps of the family tables (family_tables.nf, docs/annotation.md) other than the Annotator's own: checking a
 // family's inputs, normalising its VCF and the sequences of its structural variants, taking the union of the families'
-// sites, reading the union's values from echtvar archives, joining public files to the union's alleles, running two
-// plugins of Ensembl VEP on the union's alleles in exons, converting the union's annotation, finding each family's runs
-// of homozygosity and regions of uniparental disomy, and writing each family's tables. The structural variants and
-// copy-number segments of a group have a union of their own, which SV_SITES cuts from each family's VCFs, SV_UNION
-// joins and SV_ANNOTATION_TABLES converts the annotation of.
-// NORMALISE_FAMILY, NORMALISE_SV, UNION_SITES, SV_SITES and VEP_SITES run bcftools alone, ECHTVAR_VALUES echtvar and
-// case-annotation, SV_UNION and JOINED_VALUES case-annotation and bcftools, ROH_UPD bcftools, echtvar, upd and
-// case-annotation, and the others case-annotation, all in the tools image (label 'tools'). VEP_PLUGINS alone runs in
-// the VEP image (label 'vep', containers/vep).
+// sites, reading the union's values from echtvar archives, joining public files to the union's alleles, applying the
+// rules of two plugins of Ensembl VEP to the union's alleles in exons, converting the union's annotation, finding each
+// family's runs of homozygosity and regions of uniparental disomy, and writing each family's tables. The structural
+// variants and copy-number segments of a group have a union of their own, which SV_SITES cuts from each family's VCFs,
+// SV_UNION joins and SV_ANNOTATION_TABLES converts the annotation of.
+// NORMALISE_FAMILY, NORMALISE_SV, UNION_SITES and SV_SITES run bcftools alone, ECHTVAR_VALUES echtvar and
+// case-annotation, SV_UNION, JOINED_VALUES and VEP_PLUGIN_TABLE case-annotation and bcftools, ROH_UPD bcftools,
+// echtvar, upd and case-annotation, and the others case-annotation, all in the tools image (label 'tools').
 //
 // A family's structural-variant VCF, its copy-number VCF and its members' repeat VCFs are optional. A process takes
 // each as the files the sheet names with their indexes, staged in a folder of their own, or as an empty list.
@@ -330,71 +329,32 @@ process JOINED_VALUES {
     """
 }
 
-// The union's alleles that VEP reads: those that overlap an exon of a gene model file, each under its variant id, and
-// the positive controls of the prepared gene models (case-annotation gene-models) among them. A variant in a 5' UTR
-// and one that ends a reading frame lie in an exon, so the cut leaves out no allele that a plugin would evaluate, and
-// VEP reads a few alleles in a hundred. The regions do not overlap one another, and an allele that the cut still
-// writes twice stops the step, since an allele's id is the key of its rows in the plugins' table.
-process VEP_SITES {
+// What the rules of VEP's UTRannotator and NMD plugins say of the union's alleles, as a table by allele and
+// transcript, with a record of what the values come from. case-annotation applies the rules to the transcripts of the
+// prepared gene models (case-annotation gene-models) and to the reference, and the step runs no VEP.
+// bcftools first cuts the union to the alleles that a rule can evaluate: those that overlap an exon of a gene model
+// file, each under its variant id, with the positive controls of the prepared gene models among them. A variant in a
+// 5' UTR and one that ends a reading frame lie in an exon, so the cut leaves out no allele that a rule would evaluate,
+// and the command reads a few alleles in a hundred. The regions do not overlap one another, and an allele that the cut
+// still writes twice stops the step, since an allele's id is the key of its rows in the table.
+// The command fails unless each positive control holds what its rule gives it: gene models and a reference that do
+// not fit one another would otherwise leave every row empty, like a union without a variant in a 5' UTR.
+// A staged input can be a link into a bucket mount, as on Google Batch, and reading the reference and the gene models
+// through such a mount, in many small reads, is slow. The step copies both into a folder of the task's own on the
+// VM's disk, once, in one sequential read each, and the commands are given the copies and read nothing else of the two.
+// The command writes a line to the log for every 20,000 alleles of a chromosome that it has read with a gene model
+// file and for every chromosome that is done, with the seconds since its start, so a running task shows where it is.
+// The time limit ends a task that has stalled: on eight CPUs the command reads 800,000 alleles in about a minute, and
+// the copy is of 3.5 GB for GRCh38 with both gene model files.
+// The stub gives its folder a fixed time, as the stub of ECHTVAR_VALUES does.
+process VEP_PLUGIN_TABLE {
     tag "${group}"
     label 'tools'
-
-    input:
-    tuple val(group), path(sites), path(sites_index)
-    path exons
-    path controls
-
-    output:
-    tuple val(group), path("${group}.exons.vcf.gz"), path("${group}.exons.vcf.gz.tbi")
-
-    script:
-    """
-    set -o pipefail
-    bcftools view --no-version -R ${exons} -Ou ${sites} \\
-        | bcftools annotate --no-version --set-id '%CHROM-%POS-%REF-%ALT' -Ov -o exons.vcf
-    echo "\$(grep -vc '^#' exons.vcf) alleles of the union overlap an exon"
-    grep -v '^#' ${controls} >> exons.vcf
-    bcftools sort -Oz -o ${group}.exons.vcf.gz exons.vcf
-    bcftools index -t ${group}.exons.vcf.gz
-    repeated=\$(bcftools query -f '%ID\\n' ${group}.exons.vcf.gz | sort | uniq -d | awk 'NR <= 5')
-    if [[ -n \${repeated} ]]; then
-        echo "${group}: alleles that the cut to the exons wrote more than once: \${repeated}" >&2
-        exit 1
-    fi
-    """
-
-    stub:
-    """
-    touch ${group}.exons.vcf.gz ${group}.exons.vcf.gz.tbi
-    """
-}
-
-// What the UTRannotator and NMD plugins of Ensembl VEP say of the union's alleles in exons: VEP's JSON for each gene
-// model file, with a record of the run. VEP runs once for each file, since it reads one, and without its cache and
-// without a network: it builds each transcript from the file and the reference. PERL_HASH_SEED and PERL_PERTURB_KEYS
-// fix the order of Perl's hashes, in which UTRannotator writes the kinds of an allele's effects, so that two runs
-// write the same text. --safe makes VEP fail for a plugin that does not load. A plugin that fails on an allele only
-// leaves a warning, so the step fails for such a warning too. VEP takes no --offline, with which it looks for a cache:
-// without a cache and without --database it sets its offline mode itself and says so in a warning, and the step fails
-// for a run without that warning.
-// The reference, its index and the gene models are copied to a folder of the container's /tmp, and VEP reads the
-// copies. The folder has a fixed name, since VEP's warnings quote the path. With --fork VEP starts a process for every
-// few dozen alleles, and each one opens the reference and the gene model file again and reads from many places in
-// both. An executor that mounts a bucket instead of copying a task's inputs, as Google Batch does, answers such a read
-// with a request to the bucket, which takes far longer than a read from a disk. The disk holds the image, the copies,
-// which are 3.5 GB for GRCh38 with both files of the gene models, and VEP's output.
-// The time limit ends a run that has stalled. With eight processes on four cores VEP read 10,000 alleles in 21
-// seconds with either file, so both files take a little over an hour for a million alleles in exons, and the limit
-// leaves room for a union several times that size on a slower machine.
-// The stub gives its folder a fixed time, as the stub of ECHTVAR_VALUES does.
-process VEP_PLUGINS {
-    tag "${group}"
-    label 'vep'
     machineType 'n2d-standard-8'
     cpus 8
-    memory 32.GB
+    memory 16.GB
     disk 50.GB
-    time 12.h
+    time 2.h
 
     input:
     tuple val(group), path(sites), path(sites_index)
@@ -402,90 +362,30 @@ process VEP_PLUGINS {
     path gene_models, stageAs: 'gene-models'
 
     output:
-    path 'vep'
-
-    script:
-    """
-    set -o pipefail
-    export PERL_HASH_SEED=0 PERL_PERTURB_KEYS=0
-    options=(--json --compress_output gzip --no_stats --safe --transcript_version --buffer_size 1000)
-    plugins=(--plugin UTRannotator,\${UTRANNOTATOR_DIR}/uORF_5UTR_GRCh38_PUBLIC.txt --plugin NMD)
-    recorded() {
-        # A file as the run read it: its name, its size and its SHA-256.
-        printf '{"name": "%s", "bytes": %s, "sha256": "%s"}' "\$(basename "\$1")" "\$(stat -L -c %s "\$1")" \\
-            "\$(sha256sum "\$1" | cut -d ' ' -f 1)"
-    }
-    inputs=/tmp/vep-inputs
-    mkdir "\${inputs}"
-    trap 'rm -rf "\${inputs}"' EXIT
-    cp -L ${reference} ${reference_index} "\${inputs}/"
-    cp -rL gene-models "\${inputs}/gene-models"
-    echo "copied the reference and the gene models to \${inputs} in \${SECONDS} s"
-    mkdir vep
-    read_models=()
-    for model in Ensembl:ensembl.gff3.gz:ensembl RefSeq:refseq.gff.gz:refseq; do
-        IFS=: read -r source file name <<< "\${model}"
-        started=\${SECONDS}
-        vep --input_file ${sites} --output_file vep/\${name}.json.gz --warning_file vep/\${name}.warnings.txt \\
-            --gff "\${inputs}/gene-models/\${file}" --fasta "\${inputs}/${reference.name}" \\
-            --synonyms "\${inputs}/gene-models/chromosome-synonyms.txt" \\
-            --dir_plugins "\${UTRANNOTATOR_DIR}" "\${plugins[@]}" --fork ${task.cpus} "\${options[@]}"
-        echo "VEP read \${file} in \$((SECONDS - started)) s"
-        if ! grep -q 'Setting offline mode' vep/\${name}.warnings.txt; then
-            echo "${group}: VEP did not say that it ran offline while it read \${file}" >&2
-            exit 1
-        fi
-        if grep -E "Plugin '[^']+' (went wrong|did not return)|Failed to (compile|instantiate) plugin" vep/\${name}.warnings.txt >&2; then
-            echo "${group}: a plugin failed while VEP read \${file}" >&2
-            exit 1
-        fi
-        read_models+=("\$(printf '{"source": "%s", "file": %s}' "\${source}" "\$(recorded "\${inputs}/gene-models/\${file}")")")
-    done
-    version=\$(vep --help | awk '\$1 == "ensembl-vep" { print \$3 }')
-    quoted() {
-        # The words given as a JSON list of strings.
-        printf '"%s", ' "\$@" | sed 's/, \$//'
-    }
-    printf '{"vep_version": "%s", "utrannotator_commit": "%s", "uorf_evidence": %s, "nmd_plugin": %s, "options": [%s], "environment": [%s], "gene_models": [%s]}\\n' \\
-        "\${version}" "\${UTRANNOTATOR_COMMIT}" "\$(recorded "\${UTRANNOTATOR_DIR}/uORF_5UTR_GRCh38_PUBLIC.txt")" \\
-        "\$(recorded /plugins/NMD.pm)" \\
-        "\$(quoted --gff --fasta --synonyms --dir_plugins --plugin UTRannotator,uORF_5UTR_GRCh38_PUBLIC.txt --plugin NMD "\${options[@]}")" \\
-        "\$(quoted PERL_HASH_SEED=\${PERL_HASH_SEED} PERL_PERTURB_KEYS=\${PERL_PERTURB_KEYS})" \\
-        "\$(IFS=,; echo "\${read_models[*]}")" > vep/vep.json
-    """
-
-    stub:
-    """
-    mkdir vep
-    touch vep/ensembl.json.gz vep/refseq.json.gz vep/vep.json
-    touch -t 200001010000 vep
-    """
-}
-
-// The plugins' values as a table by allele and transcript, with the record of the run and of the gene models. It
-// fails unless VEP's documents are exactly those of the alleles it was given, and unless each positive control holds
-// what its plugin writes for it: a plugin that did not run would otherwise leave every row empty, like a union without
-// a variant in a 5' UTR.
-// The stub gives its folder a fixed time, as the stub of ECHTVAR_VALUES does.
-process VEP_PLUGIN_TABLE {
-    tag "${group}"
-    label 'tools'
-    machineType 'n2d-standard-4'
-    cpus 4
-    memory 16.GB
-    disk 50.GB
-
-    input:
-    tuple val(group), path(given), path(given_index)
-    path vep
-    path gene_models_record
-
-    output:
     path 'vep_plugins'
 
     script:
     """
-    case-annotation vep-plugins --given ${given} --vep ${vep} --gene-models ${gene_models_record} --output vep_plugins
+    set -o pipefail
+    copies=\$(mktemp -d /tmp/plugin-rules.XXXXXX)
+    trap 'rm -rf "\${copies}"' EXIT
+    mkdir "\${copies}/gene-models"
+    cp -L ${reference} ${reference_index} "\${copies}/"
+    cp -L gene-models/* "\${copies}/gene-models/"
+    bcftools view --no-version -R "\${copies}/gene-models/exons.bed" -Ou ${sites} \\
+        | bcftools annotate --no-version --set-id '%CHROM-%POS-%REF-%ALT' -Ov -o exons.vcf
+    echo "\$(grep -vc '^#' exons.vcf) alleles of the union overlap an exon"
+    grep -v '^#' "\${copies}/gene-models/controls.vcf" >> exons.vcf
+    bcftools sort -Oz -o ${group}.exons.vcf.gz exons.vcf
+    bcftools index -t ${group}.exons.vcf.gz
+    repeated=\$(bcftools query -f '%ID\\n' ${group}.exons.vcf.gz | sort | uniq -d | awk 'NR <= 5')
+    if [[ -n \${repeated} ]]; then
+        echo "${group}: alleles that the cut to the exons wrote more than once: \${repeated}" >&2
+        exit 1
+    fi
+    case-annotation vep-plugins --given ${group}.exons.vcf.gz --gene-models "\${copies}/gene-models" \\
+        --reference "\${copies}/${reference.name}" --uorf-evidence "\${UORF_EVIDENCE}" --workers ${task.cpus} \\
+        --output vep_plugins
     """
 
     stub:

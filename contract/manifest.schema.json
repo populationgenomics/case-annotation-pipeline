@@ -484,7 +484,7 @@
       "type": "object"
     },
     "PluginMatching": {
-      "description": "How the rows of VEP's plugins met the family's `transcripts` rows of one source of transcripts.\n\nVEP reads its own files of the gene models, so a transcript, or a version of one, can be in VEP's file and not\namong the Annotator's, or the other way round, and the two can place a variant differently at the edge of a 5' UTR.\nNeither stops a run.",
+      "description": "How the rows of VEP's plugins met the family's `transcripts` rows of one source of transcripts.\n\nThe rules read the prepared gene model files, as VEP did, and not the Annotator's own, so a transcript, or a\nversion of one, can be in a gene model file and not among the Annotator's, or the other way round, and the two can\nplace a variant differently at the edge of a 5' UTR. Neither stops a run.",
       "properties": {
         "source": {
           "$ref": "#/$defs/Source"
@@ -777,7 +777,7 @@
       "type": "object"
     },
     "VepPlugins": {
-      "description": "What the columns of VEP's two plugins come from, and how its rows met the family's.\n\n`run` is the record of the VEP run, which holds nothing of the union's alleles, and `matching` is of this family's\ntables.",
+      "description": "What the columns of the rules of VEP's two plugins come from, and how its rows met the family's.\n\n`run` is the record of the rules and of the files that they read, which holds nothing of the union's alleles, and\n`matching` is of this family's tables.",
       "properties": {
         "run": {
           "$ref": "#/$defs/VepPluginsInfo"
@@ -798,35 +798,25 @@
       "type": "object"
     },
     "VepPluginsInfo": {
-      "description": "The VEP run that the columns of the two plugins come from (INFO_NAME).",
+      "description": "What the columns of the two plugins' rules come from (INFO_NAME).",
       "properties": {
-        "vep_version": {
-          "title": "Vep Version",
+        "utrannotator_commit": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Utrannotator Commit",
           "type": "string"
         },
-        "utrannotator_commit": {
-          "title": "Utrannotator Commit",
+        "nmd_plugin_commit": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Nmd Plugin Commit",
+          "type": "string"
+        },
+        "vep_release": {
+          "minLength": 1,
+          "title": "Vep Release",
           "type": "string"
         },
         "uorf_evidence": {
           "$ref": "#/$defs/FileRecord"
-        },
-        "nmd_plugin": {
-          "$ref": "#/$defs/FileRecord"
-        },
-        "options": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Options",
-          "type": "array"
-        },
-        "environment": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Environment",
-          "type": "array"
         },
         "gene_models": {
           "items": {
@@ -837,12 +827,10 @@
         }
       },
       "required": [
-        "vep_version",
         "utrannotator_commit",
+        "nmd_plugin_commit",
+        "vep_release",
         "uorf_evidence",
-        "nmd_plugin",
-        "options",
-        "environment",
         "gene_models"
       ],
       "title": "VepPluginsInfo",
