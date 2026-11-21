@@ -16,7 +16,7 @@ NOTES = importlib.resources.files(case_annotation).joinpath(family_tables.NOTES)
 
 # The most that the file holds, in characters: a reader takes it whole at the start of its work on a family, so it
 # holds what a query gets wrong without an error and no list of columns.
-LIMIT = 8_900
+LIMIT = 4_400
 # How the notes write a member's column, which each family names as its sample.
 MEMBER = '<member>'
 
