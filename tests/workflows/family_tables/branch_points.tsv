@@ -3,6 +3,7 @@
 chrom	pos	strand	name	gene	transcript_introns	intron_type	intron_length	acceptor_offset	rank	total	consensus	sources	grch37_name
 chr1	200	+	mBP_chr1_200_+_G	INVENTED1	ENST01_IVS2	major	900	-24	1	1	1:YTNAY	eBP_Invented,cBP_Invented	mBP_chr1_200_+_G
 chr1	402	-	cBP_chr1_402_-_A									cBP_Invented	cBP_chr1_402_-_A
+chr1	486	+	cBP_chr1_486_+_A									cBP_Invented	cBP_chr1_486_+_A
 chr2	92	+	eBP_chr2_92_+_A	INVENTED2	ENST01_IVS4	minor	85	-20	1	2	0:none	eBP_Invented	eBP_chr2_92_+_A
 chr2	92	+	eBP_chr2_92_+_A	INVENTED2	ENST02_IVS1,ENST03_IVS1	major	4000	-31	2	2	3:TNA	eBP_Invented	eBP_chr2_92_+_A
 chr2	94	+	cBP_chr2_94_+_C									cBP_Invented	cBP_chr2_94_+_C

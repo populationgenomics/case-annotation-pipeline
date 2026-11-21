@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 import gzip
+import hashlib
 import json
 import pathlib
 import re
@@ -312,13 +313,204 @@ def test_a_run_writes_a_row_for_each_allele_and_transcript_that_a_rule_evaluated
         ('RefSeq', 'refseq.gff.gz', 'invented.gff.gz'),
     ]
     written = json.loads((output / transcript_rules.INFO_NAME).read_text())
+    assert (info.branch_points, written['branch_points']) == (None, None)
     assert sorted(written) == [
+        'branch_points',
         'gene_models',
         'nmd_plugin_commit',
         'uorf_evidence',
         'utrannotator_commit',
         'vep_release',
     ]
+
+
+# The invented catalogue of the workflow's test gives the third intron of the invented gene a branch point at chr1:486,
+# 24 bases before the fourth exon, and the intron holds an `AG` behind it. A `G` at chr1:502 makes a second one.
+CATALOGUE = FIXTURE / 'branch_points.tsv'
+GAINED = {
+    'branch_point_pos': 486,
+    'branch_point_distance': 16,
+    'acceptor_distance': -7,
+    'yag': True,
+    'high_risk': True,
+    'existing_ag': True,
+    'score': 4,
+}
+BESIDE_EXONS = (*ALLELES, ('chr1', 496, 'C', 'G'), ('chr1', 502, 'T', 'G'), ('chr1', 506, 'A', 'ACAGAG'))
+
+
+@pytest.mark.parametrize('workers', [1, 2])
+def test_a_run_with_the_catalogue_of_branch_points_writes_the_ags_that_an_allele_gains(
+    tmp_path: pathlib.Path, workers: int
+) -> None:
+    prepared = _prepared(tmp_path)
+    given = _given(tmp_path, prepared, alleles=BESIDE_EXONS)
+    output = tmp_path / 'out'
+    info = transcript_rules.annotate(
+        given, prepared, REFERENCE, _evidence(tmp_path), output, workers, branch_points=CATALOGUE
+    )
+    table = pq.read_table(output / transcript_rules.TABLE_NAME)
+    assert table.schema.equals(transcript_rules.TABLE)
+    gained = {
+        (row['variant_id'], row['transcript_id'], row['source']): row[transcript_rules.AG_GAINS.name]
+        for row in table.to_pylist()
+        if row[transcript_rules.AG_GAINS.name] is not None
+    }
+    # The substitution gains one `AG` on the gene's transcript of each file, and the insertion two. The third allele
+    # of the intron makes no `AG` and has no row.
+    transcripts = (('ENST01.1', 'Ensembl'), ('NM_01.1', 'RefSeq'))
+    assert set(gained) == {
+        (allele, *transcript) for allele in ('chr1-502-T-G', 'chr1-506-A-ACAGAG') for transcript in transcripts
+    }
+    for transcript in transcripts:
+        assert gained[('chr1-502-T-G', *transcript)] == [GAINED]
+        two = gained[('chr1-506-A-ACAGAG', *transcript)]
+        assert [(gain['branch_point_distance'], gain['acceptor_distance']) for gain in two] == [(23, -5), (25, -3)]
+    assert all(row['variant_id'] != 'chr1-496-C-G' for row in table.to_pylist())
+    # The rows of the two plugins' rules are those of a run without the catalogue.
+    transcript_rules.annotate(given, prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'without', workers)
+    without = pq.read_table(tmp_path / 'without' / transcript_rules.TABLE_NAME)
+    assert without.column(transcript_rules.AG_GAINS.name).null_count == without.num_rows
+    assert table.filter(table.column(transcript_rules.AG_GAINS.name).is_null()).equals(without)
+    # The record names the catalogue as the run read it.
+    assert info.branch_points == transcript_rules.FileRecord(
+        name=CATALOGUE.name, bytes=CATALOGUE.stat().st_size, sha256=hashlib.sha256(CATALOGUE.read_bytes()).hexdigest()
+    )
+    assert transcript_rules.read_info(tmp_path / 'without').branch_points is None
+
+
+def test_the_plugins_rules_read_the_alleles_of_the_exon_regions_with_or_without_the_catalogue(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The gene's first intron has 12 bases and lies in its 5' UTR, where VEP's rules count the UTR's reading frames.
+
+    The cut to the exons leaves an allele inside that intron out, so a run without the catalogue never reads it. A
+    run with the catalogue is given it, and reads it for the gained `AG` alone.
+    """
+    prepared = _prepared(tmp_path)
+    given = _given(tmp_path, prepared, alleles=(('chr1', 100, 'G', 'A'), ('chr1', 185, 'CC', 'AG')))
+    lines = CATALOGUE.read_text().splitlines()
+    row = 'chr1\t{pos}\t+\tcBP_chr1_{pos}_+_G\t\t\t\t\t\t\t\t\tcBP_Invented\tcBP_chr1_{pos}_+_G'
+    rows = {}
+    # A branch point ten bases before the second exon, in the intron, and one 13 bases before it, in the first exon,
+    # which is no branch point of the intron.
+    for where, pos in (('inside', 183), ('outside', 180)):
+        catalogue = tmp_path / f'{where}.tsv'
+        catalogue.write_text('\n'.join([*lines[:3], row.format(pos=pos), *lines[3:]]) + '\n')
+        output = tmp_path / where
+        transcript_rules.annotate(given, prepared, REFERENCE, _evidence(tmp_path), output, branch_points=catalogue)
+        rows[where] = pq.read_table(output / transcript_rules.TABLE_NAME).to_pylist()
+    transcript_rules.annotate(given, prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'without')
+    without = pq.read_table(tmp_path / 'without' / transcript_rules.TABLE_NAME).to_pylist()
+    assert [row['variant_id'] for row in without] == ['chr1-100-G-A'] * 2
+    assert rows['outside'] == without
+    in_intron = [row for row in rows['inside'] if row['variant_id'] == 'chr1-185-CC-AG']
+    assert [row for row in rows['inside'] if row not in in_intron] == without
+    assert [(row['transcript_id'], row['source']) for row in in_intron] == [
+        ('ENST01.1', 'Ensembl'),
+        ('NM_01.1', 'RefSeq'),
+    ]
+    values = {'branch_point_pos': 183, 'branch_point_distance': 3, 'acceptor_distance': -6}
+    for row in in_intron:
+        assert row[transcript_rules.AG_GAINS.name] == [GAINED | values | {'high_risk': False, 'existing_ag': False}]
+        assert all(row[column] is None for column in transcript_rules.COLUMNS.names[:-1])
+
+
+# An invented gene of the reverse strand on chr2, whose last exon lies inside a run of thirteen `CT` from chr2:91 to
+# chr2:116, with a `G` on either side. Its intron ends at chr2:107, and a branch point lies at chr2:130.
+REVERSE_GENE = (
+    '2\tinvented\tgene\t101\t300\t.\t-\t.\tID=gene:ENSG02;Name=GENEB;biotype=protein_coding;gene_id=ENSG02;version=1\n'
+    '2\tinvented\tmRNA\t101\t300\t.\t-\t.\tID=transcript:ENST02;Parent=gene:ENSG02;Name=GENEB-201;'
+    'biotype=protein_coding;transcript_id=ENST02;version=1\n'
+    '2\tinvented\texon\t200\t300\t.\t-\t.\tParent=transcript:ENST02;Name=ENSE05;exon_id=ENSE05;rank=1;version=1\n'
+    '2\tinvented\texon\t101\t106\t.\t-\t.\tParent=transcript:ENST02;Name=ENSE06;exon_id=ENSE06;rank=2;version=1\n'
+    '2\tinvented\tCDS\t210\t290\t.\t-\t0\tID=CDS:ENSP02;Parent=transcript:ENST02;protein_id=ENSP02\n'
+)
+
+
+def test_an_insertion_that_a_record_writes_before_a_transcript_gains_the_ag_of_its_writing_in_the_intron(
+    tmp_path: pathlib.Path,
+) -> None:
+    """One more `CT` of the run is one more `AG` on the gene's strand, behind the branch point of its last intron.
+
+    The record writes it at the run's first base on the genome, which lies before the gene, and no base of the record
+    is the gene's.
+    """
+    with pysam.FastaFile(str(REFERENCE)) as fixture:
+        sequences = {name: fixture.fetch(name) for name in fixture.references}
+    sequences['chr2'] = sequences['chr2'][:89] + 'G' + 'CT' * 13 + 'G' + sequences['chr2'][117:]
+    reference = tmp_path / 'with-a-run.fa'
+    reference.write_text(''.join(f'>{name}\n{bases}\n' for name, bases in sequences.items()))
+    pysam.faidx(str(reference))
+    models = FIXTURE / 'gene-models'
+    public: dict[gene_models.Source, pathlib.Path] = {
+        'Ensembl': _gzipped(tmp_path / 'invented.gff3.gz', (models / 'ensembl.gff3').read_text('utf-8') + REVERSE_GENE),
+        'RefSeq': _gzipped(tmp_path / 'invented.gff.gz', (models / 'refseq.gff').read_text('utf-8')),
+    }
+    prepared = tmp_path / 'gene-models'
+    gene_models.prepare(public, models / 'assembly-report.txt', reference, prepared)
+    catalogue = tmp_path / 'catalogue.tsv'
+    row = 'chr2\t130\t-\tcBP_chr2_130_-_A\t\t\t\t\t\t\t\t\tcBP_Invented\tcBP_chr2_130_-_A'
+    catalogue.write_text('\n'.join([*CATALOGUE.read_text().splitlines()[:3], row]) + '\n')
+    gained = GAINED | {'branch_point_pos': 130, 'branch_point_distance': 15, 'acceptor_distance': -10}
+    # As the record writes it, before the gene, and as the same change is written inside the intron.
+    for record in (('chr2', 90, 'G', 'GCT'), ('chr2', 114, 'T', 'TCT')):
+        given = _given(tmp_path, prepared, alleles=(record,))
+        output = tmp_path / f'at-{record[1]}'
+        transcript_rules.annotate(given, prepared, reference, _evidence(tmp_path), output, branch_points=catalogue)
+        rows = pq.read_table(output / transcript_rules.TABLE_NAME).to_pylist()
+        assert [(row['transcript_id'], row[transcript_rules.AG_GAINS.name]) for row in rows] == [('ENST02.1', [gained])]
+        assert all(rows[0][column] is None for column in transcript_rules.COLUMNS.names[:-1])
+
+
+def test_a_record_is_in_the_exon_regions_by_the_bases_of_its_ref() -> None:
+    exons = [(68, 181), (191, 261)]
+    starts = [start for start, _end in exons]
+    in_exons = {
+        (pos, ref) for pos, ref in ((69, 'A'), (181, 'A'), (67, 'ACG'), (182, 'ACGTACGTACG'), (192, 'AC'), (261, 'A'))
+    }
+    outside = {(68, 'A'), (67, 'AC'), (182, 'A'), (182, 'ACGTACGTAC'), (262, 'A'), (5, 'A')}
+    for pos, ref in in_exons | outside:
+        assert transcript_rules._in_exons(starts, exons, pos, ref) is ((pos, ref) in in_exons), (pos, ref)
+
+
+EXONS_REFUSED = {
+    'a line without an end': 'chr1\t68\n',
+    'a start that is no number': 'chr1\tx\t181\n',
+    'an end at its start': 'chr1\t181\t181\n',
+    'a region before the one above it': 'chr1\t191\t261\nchr1\t68\t181\n',
+    'a region that meets the one above it': 'chr1\t68\t181\nchr1\t181\t261\n',
+}
+
+
+@pytest.mark.parametrize('case', EXONS_REFUSED)
+def test_regions_of_the_exons_that_are_not_as_prepared_are_refused(tmp_path: pathlib.Path, case: str) -> None:
+    prepared = _prepared(tmp_path)
+    given = _given(tmp_path, prepared)
+    (prepared / gene_models.EXONS_NAME).write_text(EXONS_REFUSED[case])
+    with pytest.raises(ValueError, match=r'exons\.bed: line [12] is'):
+        transcript_rules.annotate(given, prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
+
+
+def test_a_catalogue_that_is_not_the_prepared_one_is_refused(tmp_path: pathlib.Path) -> None:
+    prepared = _prepared(tmp_path)
+    other = tmp_path / 'other.tsv'
+    other.write_text('chrom\tpos\nchr1\t486\n')
+    with pytest.raises(ValueError, match='its header is not that of the prepared catalogue of branch points'):
+        transcript_rules.annotate(
+            _given(tmp_path, prepared), prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out', branch_points=other
+        )
+    assert not (tmp_path / 'out').exists()
+
+
+def test_the_command_takes_the_catalogue_of_branch_points(tmp_path: pathlib.Path) -> None:
+    prepared = _prepared(tmp_path)
+    given = _given(tmp_path, prepared, alleles=BESIDE_EXONS)
+    arguments = ['--given', str(given), '--gene-models', str(prepared), '--reference', str(REFERENCE)]
+    arguments += ['--uorf-evidence', str(_evidence(tmp_path)), '--output', str(tmp_path / 'out')]
+    cli.main(['transcript-rules', *arguments, '--branch-points', str(CATALOGUE)])
+    table = pq.read_table(tmp_path / 'out' / transcript_rules.TABLE_NAME)
+    assert table.num_rows - table.column(transcript_rules.AG_GAINS.name).null_count == 4
 
 
 def test_two_runs_of_the_same_inputs_write_the_same_table(tmp_path: pathlib.Path) -> None:
@@ -485,6 +677,7 @@ def test_a_record_with_a_malformed_value_or_another_key_is_refused(field: dict[s
         'vep_release': '116.3',
         'uorf_evidence': {'name': 'invented-uorfs.txt', 'bytes': 1, 'sha256': '2' * 64},
         'gene_models': [],
+        'branch_points': None,
     }
     transcript_rules.TranscriptRulesInfo.model_validate(record)
     with pytest.raises(pydantic.ValidationError):

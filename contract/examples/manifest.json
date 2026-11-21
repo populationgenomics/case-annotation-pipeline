@@ -1,6 +1,6 @@
 {
   "schema_version": "0.5.0",
-  "pipeline_version": "0.5.1",
+  "pipeline_version": "0.5.2",
   "family": "family-a",
   "members": [
     {
@@ -302,7 +302,8 @@
             ]
           }
         }
-      ]
+      ],
+      "branch_points": null
     },
     "matching": [
       {
@@ -344,10 +345,12 @@
     "aparent2_ref_usage",
     "genomic_constraint_z",
     "mpc_max",
-    "branch_points"
+    "branch_points",
+    "ag_gain_high_risk"
   ],
   "transcripts_omitted_columns": [
-    "mpc"
+    "mpc",
+    "ag_gains"
   ],
   "sv_annotation": {
     "annotator": "Invented Annotator 1.0",

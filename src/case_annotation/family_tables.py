@@ -9,9 +9,9 @@ annotated in, and the runs of homozygosity and regions of uniparental disomy tha
 - `variants.parquet`: one row per allele. It holds the union's `variants` row of the allele, less the columns of the
   dated sources the run did not name, its values from the archives that the run read (gnomAD's joint values, and
   AlphaGenome's scores where the run names their archives), its values from the public files that the run joined
-  (joined_values), the kinds of effect that UTRannotator reports for it, the family's own QUAL and FILTER and, as in a
-  VCF, one column per sequenced member, named as the member's sample in the VCF and in the VCF's order, with that
-  member's own call of the allele;
+  (joined_values), the kinds of effect that UTRannotator reports for it, whether an `AG` that it gains before an
+  acceptor lies in the high-risk region, the family's own QUAL and FILTER and, as in a VCF, one column per sequenced
+  member, named as the member's sample in the VCF and in the VCF's order, with that member's own call of the allele;
 - `transcripts.parquet`: the union's `transcripts` rows of the family's alleles, each with the values that the joined
   files give for its allele and its transcript and with what the transcript rules say of the two (transcript_rules);
 - `roh.parquet`: one row per run of homozygosity of a sequenced member, on the autosomes;
@@ -122,18 +122,26 @@ _RECORD = (pa.field('qual', pa.float64()), pa.field('filters', pa.list_(_STRING)
 # The kinds of effect that UTRannotator reports for the allele on any of its transcripts: the column that a search
 # filters on before it reads the transcripts' own.
 _UTR5 = transcript_rules.COLUMNS.field('utr5_consequences')
+# Whether an `AG` that the allele gains between a branch point and its acceptor, on any of its transcripts, lies in
+# the high-risk region (transcript_rules.AG_GAINS): true with such an `AG`, false with gained `AG`s outside the region
+# alone, and null for an allele that gains none.
+_AG_GAIN = pa.field('ag_gain_high_risk', pa.bool_())
 # The columns of the variants table that describe the allele, in the table's order: the union's annotation of it,
-# its values from each echtvar archive and from each joined file, UTRannotator's kinds of effect and the family's
-# record. The members' columns follow them.
+# its values from each echtvar archive and from each joined file, UTRannotator's kinds of effect, the gained `AG`s
+# and the family's record. The members' columns follow them.
 ALLELE = pa.schema(
     [
         *annotation_tables.VARIANTS,
         *(field for source in echtvar_values.SOURCES.values() for field in source.fields),
         *(field for source in joined_values.SOURCES.values() for field in source.fields),
         _UTR5,
+        _AG_GAIN,
         *_RECORD,
     ]
 )
+# The catalogue of branch points is read by two steps: the one that joins it to the alleles, and the one that applies
+# the transcript rules, whose columns of the gained `AG`s a run without the catalogue leaves out with the joined one.
+_CATALOGUE = joined_values.BRANCH_POINTS.name
 # The columns of the variants table that a run can leave out, by the source that it then did not name: a dated source
 # of the annotation, by its name in a run config, or an echtvar archive or a joined file that a run need not read, by
 # its param's name.
@@ -144,7 +152,10 @@ VARIANT_SOURCES: Mapping[str, tuple[str, ...]] = {
         for source in echtvar_values.SOURCES.values()
         if source is not echtvar_values.REQUIRED
     },
-    **{source.name: source.columns for source in joined_values.SOURCES.values()},
+    **{
+        source.name: (*source.columns, _AG_GAIN.name) if source.name == _CATALOGUE else source.columns
+        for source in joined_values.SOURCES.values()
+    },
 }
 # The columns of the transcripts table, in the table's order: the union's annotation of an allele's transcript, the
 # values that each joined file gives for the two, and the columns of the transcript rules as their table declares
@@ -159,7 +170,8 @@ TRANSCRIPT = pa.schema(
 )
 # The columns of the transcripts table that a run can leave out, by the joined file that it then was not given.
 TRANSCRIPT_SOURCES: Mapping[str, tuple[str, ...]] = {
-    source.name: source.transcript_columns for source in joined_values.SOURCES.values() if source.transcript_fields
+    **{source.name: source.transcript_columns for source in joined_values.SOURCES.values() if source.transcript_fields},
+    _CATALOGUE: (transcript_rules.AG_GAINS.name,),
 }
 
 
@@ -400,9 +412,10 @@ class PluginMatching(pydantic.BaseModel, frozen=True, extra='forbid'):
     """
 
     source: gene_models.Source
-    # The plugins' rows of the family's alleles on a transcript that the allele has no row of in `transcripts`.
+    # The rules' rows of the family's alleles on a transcript that the allele has no row of in `transcripts`, those
+    # of a gained `AG` among them.
     rows_without_transcript: int
-    # The plugins' rows of the family's alleles on a feature whose id is no transcript id of `transcripts`
+    # The rules' rows of the family's alleles on a feature whose id is no transcript id of `transcripts`
     # (transcript_rules.TRANSCRIPT_ID), which no row can match.
     rows_of_other_ids: int
     # The `transcripts` rows with the consequence 5_prime_UTR_variant that have no value of UTRannotator's.
@@ -445,11 +458,12 @@ class FamilyManifest(pydantic.BaseModel, frozen=True, extra='forbid'):
     # The public files that the run joined to the alleles, each with the name of its source, in the order of their
     # columns in variants; none in a run that was given none.
     joined_files: tuple[joined_values.JoinedFile, ...]
-    transcript_rules: TranscriptRules  # what the utr5_ and nmd_ columns come from
+    transcript_rules: TranscriptRules  # what the utr5_ and nmd_ columns and the gained `AG`s come from
     # The variants columns of the sources the run did not name: its dated sources, then the archives it need not read,
     # then the files it need not join.
     omitted_columns: tuple[str, ...]
-    # The transcripts columns of the joined files that the run was not given.
+    # The transcripts columns of the joined files that the run was not given, the catalogue of branch points among
+    # them.
     transcripts_omitted_columns: tuple[str, ...]
     # What annotated the family's structural variants and copy-number segments, and the sv columns of the dated
     # sources that run did not name; None and no columns in a family without the sv table.
@@ -877,6 +891,46 @@ def _structural_queries(
     return queries, counts
 
 
+# UTRannotator's kinds of effect over an allele's rows of the view `family_transcripts`.
+_KINDS = (
+    f'SELECT variant_id, list_sort(list_distinct(flatten(list({_UTR5.name})))) AS {_UTR5.name} '  # noqa: S608 (a column name of this package's own)
+    f'FROM family_transcripts WHERE {_UTR5.name} IS NOT NULL GROUP BY variant_id'
+)
+# A join of the same view that gives an allele's row of variants its _AG_GAIN, as `g`.
+_GAINED = (
+    'LEFT JOIN (SELECT variant_id, '  # noqa: S608 (column names of this package's own)
+    f'bool_or(list_bool_or(list_transform({transcript_rules.AG_GAINS.name}, lambda gain: gain.high_risk))) '
+    f'AS {_AG_GAIN.name} FROM family_transcripts WHERE {transcript_rules.AG_GAINS.name} IS NOT NULL '
+    'GROUP BY variant_id) g USING (variant_id) '
+)
+
+
+def _rule_columns(omitted: Collection[str]) -> list[str]:
+    """The columns that a row of transcripts takes from the transcript rules' table `p`, in a run that omits some."""
+    return [f'p.{column}' for column in transcript_rules.COLUMNS.names if column not in omitted]
+
+
+def _read_rules(folder: pathlib.Path, joined: joined_values.JoinedFiles) -> transcript_rules.TranscriptRulesInfo:
+    """The record of the transcript rules in their folder.
+
+    One run gives the catalogue of branch points to the step that joins it and to the transcript rules, so that a
+    family's columns of the catalogue are of one file: all there, or all left out.
+
+    Raises:
+        ValueError: if the transcript rules read another catalogue of branch points than was joined to the alleles,
+            or one of the two steps read none.
+    """
+    rules = transcript_rules.read_info(folder)
+    joined_file = next(((f.file, f.bytes, f.sha256) for f in joined.files if f.source == _CATALOGUE), None)
+    read = rules.branch_points and (rules.branch_points.name, rules.branch_points.bytes, rules.branch_points.sha256)
+    if joined_file != read:
+        raise ValueError(
+            f'the catalogue of branch points that was joined to the alleles is {joined_file}, and the transcript '
+            f'rules read {read}: both are the same file, or neither has one'
+        )
+    return rules
+
+
 def _plugin_matching(con: duckdb.DuckDBPyConnection, source: gene_models.Source) -> PluginMatching:
     """How the plugins' rows of the family's alleles met the family's transcripts table, for one source.
 
@@ -939,6 +993,10 @@ def assemble(
     A row of `transcripts` gets the plugins' values of its allele and transcript, matched by the transcript's id with
     its version. A row of the plugins without such a row is left out and counted, and so is a row of `transcripts` in
     a 5' UTR without a value (PluginMatching).
+
+    Raises:
+        ValueError: if an input is not what its role needs, the union's tables are not of the family's alleles, or
+            the catalogue of branch points that the transcript rules read is not the one that was joined.
     """
     ped = pedigree.read(ped_path)
     if ped.family != family:
@@ -956,7 +1014,7 @@ def assemble(
         )
     archives = echtvar_values.read_info(archive_values)
     joined_files = joined_values.read_info(joined)
-    plugins_info = transcript_rules.read_info(plugins)
+    plugins_info = _read_rules(plugins, joined_files)
     segment_info = roh_upd.read_info(segments)
     loci = None if ranges is None else strchive.read(ranges.file)
     output.mkdir(parents=True)
@@ -1042,22 +1100,21 @@ def assemble(
         # The family's transcripts rows, each with the values that the joined files and the plugins give for its
         # allele and transcript.
         con.sql(
-            f'SELECT {", ".join(["t.*", *by_transcript, *(f"p.{c}" for c in transcript_rules.COLUMNS.names)])} '  # noqa: S608 (column names of this package's own)
+            f'SELECT {", ".join(["t.*", *by_transcript, *_rule_columns(transcripts_omitted)])} '  # noqa: S608 (column names of this package's own)
             'FROM (SELECT * FROM union_transcripts SEMI JOIN records USING (variant_id)) t '
             f'LEFT JOIN union_plugins p USING (variant_id, transcript_id) {joined_transcripts}'
         ).create_view('family_transcripts')
-        # UTRannotator's kinds of effect over an allele's rows of transcripts, for the allele's row of variants.
-        kinds = (
-            f'SELECT variant_id, list_sort(list_distinct(flatten(list({_UTR5.name})))) AS {_UTR5.name} '  # noqa: S608 (a column name of this package's own)
-            f'FROM family_transcripts WHERE {_UTR5.name} IS NOT NULL GROUP BY variant_id'
-        )
+        # The two columns that are taken over an allele's rows of transcripts, for the allele's row of variants. A run
+        # without the catalogue of branch points has no column of the gained `AG`s.
+        over_transcripts = [f'u.{_UTR5.name}', *([] if _AG_GAIN.name in omitted else [f'g.{_AG_GAIN.name}'])]
         # A record's columns after its id are the family's QUAL and FILTER and the members' calls, as variants ends.
         queries = {
             'variants': (
-                f'SELECT v.*{exclude}, {", ".join([*from_archives, *from_files])}, u.{_UTR5.name}, '  # noqa: S608 (column names of this package's own)
+                f'SELECT v.*{exclude}, {", ".join([*from_archives, *from_files, *over_transcripts])}, '  # noqa: S608 (column names of this package's own)
                 'r.* EXCLUDE (variant_id) '
                 'FROM union_variants v JOIN records r USING (variant_id) JOIN union_archives a USING (variant_id) '
-                f'JOIN union_joined j USING (variant_id) LEFT JOIN ({kinds}) u USING (variant_id) '
+                f'JOIN union_joined j USING (variant_id) LEFT JOIN ({_KINDS}) u USING (variant_id) '
+                f'{_GAINED if len(over_transcripts) > 1 else ""}'
                 'ORDER BY chrom_rank(v.chrom), v.pos, v.ref, v.alt'
             ),
             'transcripts': (

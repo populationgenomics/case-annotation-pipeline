@@ -3,6 +3,7 @@ chr1	100	G	C
 chr1	200	G	A
 chr1	300	T	A
 chr1	400	TCA	T
+chr1	502	T	G
 chr2	40	C	T
 chr2	60	C	A
 chr2	70	T	A

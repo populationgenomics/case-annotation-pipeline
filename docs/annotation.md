@@ -444,7 +444,7 @@ flowchart LR
         SITES["UNION_SITES<br/>each allele once"]
         VALUES["ECHTVAR_VALUES<br/>echtvar archives"]
         JOINED["JOINED_VALUES<br/>public files"]
-        RULES["TRANSCRIPT_RULES<br/>the rules of two<br/>plugins of VEP on<br/>the alleles in exons"]
+        RULES["TRANSCRIPT_RULES<br/>the rules of two<br/>plugins of VEP and<br/>of the gained AG"]
         ANNOTATE{{"ILLUMINA_ANNOTATE<br/>or an earlier<br/>run's annotation"}}
         TABLES["ANNOTATION_TABLES<br/>variants,<br/>transcripts"]
         SITES --> VALUES
@@ -513,7 +513,9 @@ flowchart LR
    the transcripts of the gene models that `gene_models` names, and writes what the rules say as a table by allele and
    transcript
    ([Upstream reading frames and nonsense-mediated decay](#upstream-reading-frames-and-nonsense-mediated-decay)). It
-   runs in every run as well.
+   runs in every run as well. In a run that names `branch_points` it also reads the alleles within 100 bases of an exon
+   and writes the `AG`s that an allele gains between a branch point and its acceptor
+   ([AG gained between a branch point and its acceptor](#ag-gained-between-a-branch-point-and-its-acceptor)).
 1. `ILLUMINA_ANNOTATE`, the process of the `annotate` mode above, annotates the union with the sources named. A run
    given `annotated`, the folder an earlier run published the union's annotation in, reuses that annotation instead.
 1. `ANNOTATION_TABLES` reads the Annotator's JSON line by line and writes the union's `variants` and `transcripts`
@@ -561,9 +563,10 @@ file gives for an allele and one transcript go into a second table, keyed by var
 fails unless the first table's alleles are exactly the union's, and for a file that is not what its source publishes
 ([Joined files](#joined-files)).
 
-`TRANSCRIPT_RULES` cuts with `bcftools view -R` and the regions of the prepared gene models. It stops if the cut writes
-an allele twice, since an allele's variant id is the key of the step's table. `case-annotation transcript-rules` then
-fails unless each positive control holds what the rule of its plugin gives it.
+`TRANSCRIPT_RULES` cuts with `bcftools view -R` and the regions of the prepared gene models, which it first widens by
+100 bases on either side in a run with the catalogue of branch points. It stops if the cut writes an allele twice, since
+an allele's variant id is the key of the step's table. `case-annotation transcript-rules` then fails unless each
+positive control holds what the rule of its plugin gives it.
 
 `ILLUMINA_ANNOTATE` and a reused annotation give the same thing: the group's annotation is the JSON named after the
 group, and a run without one stops with the group's name.
@@ -1076,16 +1079,16 @@ tables of a run without a file lack its columns, as they lack those of an archiv
 does not name: the manifest lists those of `variants` in `omitted_columns` and those of `transcripts` in
 `transcripts_omitted_columns`, and a query that reads one fails.
 
-| Param                | The file                                                                  | Adds                                                                                                           |
-| -------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `gnomad_mito`        | gnomAD's sites VCF of the mitochondrial genome                            | to `variants` the 13 `gnomad_mito_` columns: gnomAD's counts and frequencies of an allele on chrM              |
-| `mitotip`            | MitoTIP's table of scores                                                 | to `variants` `mitotip_score` and `mitotip_quartile`, for a single-base change in a mitochondrial tRNA gene    |
-| `gencode_polya`      | GENCODE's GTF of polyadenylation features                                 | to `variants` `gencode_polya_signal`, which says whether the allele changes a base of a polyadenylation signal |
-| `aparent2`           | APARENT2's table of the effects of single-base changes on polyadenylation | to `variants` `aparent2_min`, `aparent2_max` and `aparent2_ref_usage`                                          |
-| `genomic_constraint` | gnomAD's table of genomic constraint in windows of 1,000 bases            | to `variants` `genomic_constraint_z`                                                                           |
-| `mcr`                | gnomAD's table of regions of missense constraint                          | to `transcripts` `mcr_oe`, `mcr_regions`, `mcr_oe_p` and `mcr_high_coverage`, and to `variants` `mcr_oe_min`   |
-| `mpc`                | gnomAD's table of MPC scores                                              | to `transcripts` `mpc`, and to `variants` `mpc_max`                                                            |
-| `branch_points`      | the prepared catalogue of branch points                                   | to `variants` `branch_points`, the catalogued branch points whose three bases the allele changes               |
+| Param                | The file                                                                  | Adds                                                                                                                                                                                                                                                                                                                          |
+| -------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gnomad_mito`        | gnomAD's sites VCF of the mitochondrial genome                            | to `variants` the 13 `gnomad_mito_` columns: gnomAD's counts and frequencies of an allele on chrM                                                                                                                                                                                                                             |
+| `mitotip`            | MitoTIP's table of scores                                                 | to `variants` `mitotip_score` and `mitotip_quartile`, for a single-base change in a mitochondrial tRNA gene                                                                                                                                                                                                                   |
+| `gencode_polya`      | GENCODE's GTF of polyadenylation features                                 | to `variants` `gencode_polya_signal`, which says whether the allele changes a base of a polyadenylation signal                                                                                                                                                                                                                |
+| `aparent2`           | APARENT2's table of the effects of single-base changes on polyadenylation | to `variants` `aparent2_min`, `aparent2_max` and `aparent2_ref_usage`                                                                                                                                                                                                                                                         |
+| `genomic_constraint` | gnomAD's table of genomic constraint in windows of 1,000 bases            | to `variants` `genomic_constraint_z`                                                                                                                                                                                                                                                                                          |
+| `mcr`                | gnomAD's table of regions of missense constraint                          | to `transcripts` `mcr_oe`, `mcr_regions`, `mcr_oe_p` and `mcr_high_coverage`, and to `variants` `mcr_oe_min`                                                                                                                                                                                                                  |
+| `mpc`                | gnomAD's table of MPC scores                                              | to `transcripts` `mpc`, and to `variants` `mpc_max`                                                                                                                                                                                                                                                                           |
+| `branch_points`      | the prepared catalogue of branch points                                   | to `variants` `branch_points`, the catalogued branch points whose three bases the allele changes. `TRANSCRIPT_RULES` reads the same file and adds `ag_gains` to `transcripts` and `ag_gain_high_risk` to `variants` ([AG gained between a branch point and its acceptor](#ag-gained-between-a-branch-point-and-its-acceptor)) |
 
 Reading the family tables says what each column holds and shows queries on them, under
 [Mitochondrial frequencies and polyadenylation](family-tables.md#mitochondrial-frequencies-and-polyadenylation),
@@ -1427,8 +1430,10 @@ package holds the notices that the MIT licence and the Apache licence ask for.
 for the logic of both plugins and for its account of the defects of Ensembl's edition of UTRannotator. No code of any of
 these works is copied.
 
-One step does the work. `TRANSCRIPT_RULES` cuts the union down to the alleles that overlap an exon, gives each its
-variant id as its ID, adds the positive controls, applies the rules for the transcripts of two gene model files,
+One step does the work. `TRANSCRIPT_RULES` cuts the union down to the alleles that overlap an exon, with those beside
+the exons in a run that names the catalogue of branch points
+([AG gained between a branch point and its acceptor](#ag-gained-between-a-branch-point-and-its-acceptor)), gives each
+its variant id as its ID, adds the positive controls, applies the rules for the transcripts of two gene model files,
 Ensembl's and RefSeq's, checks the controls and writes the values as a table by allele and transcript, which is
 published with the union as `transcript_rules/`. The step, its table and the manifest's key have their name from what
 the two sets of rules read: a transcript's structure and its sequence. `FAMILY_TABLES` then gives each row of a family's
@@ -1523,9 +1528,13 @@ both. The controls are left out of the table.
   link into a bucket mount, as on Google Batch, and the rules read the reference in many small pieces, one for each
   exon, which is slow through such a mount. Each file is copied once, from its first byte to its last.
 - The cut to the exons keeps the run short and loses nothing: a variant in a 5′ UTR lies in an exon, and so does one
-  that ends a reading frame, so every allele that a rule would evaluate is still read. The regions cover 239 Mb, about
-  8% of the genome, so the step reads roughly one allele of a whole genome in twelve. That share is an estimate, and the
-  step writes the count of a run to its log.
+  that ends a reading frame, so every allele that a rule of the plugins would evaluate is still read. The regions cover
+  239 Mb, about 8% of the genome, so the step reads roughly one allele of a whole genome in twelve. That share is an
+  estimate, and the step writes the count of a run to its log.
+- In a run with the catalogue of branch points the step widens each region by 100 bases on either side before the cut
+  and joins the regions that then meet. A branch point counts up to 99 bases before an exon, and the regions do not say
+  on which side of an exon its acceptor lies. For the two files above the widened regions cover 318 Mb, about 10% of the
+  genome. The catalogue is read once, in the process that starts the others.
 - The command shares the chromosomes among the task's CPUs. A process reads one chromosome's transcripts from both gene
   model files and that chromosome's alleles, and reads the sequence of a transcript when the first allele meets it.
 - The rows are sorted by variant id and transcript id, and the records of a row by kind and from the 5′ end of the UTR,
@@ -1700,15 +1709,20 @@ transcript's id with its version, as `transcripts` is.
   where the rule predicts an escape, false where the rule evaluated the row and predicts none, and absent for every
   other transcript. The plugin of VEP 116.3 writes no reason. The reasons and their order are those of the plugin's
   later edition on the branch `release/116`.
+- In a run with the catalogue of branch points, the rule of the gained `AG` evaluates an allele that can be written
+  between the first branch point of an intron of the transcript and the intron's last base. The row has an entry for
+  each `AG` that the allele gains there, and an allele that gains none has no value, and no row unless a plugin's rule
+  gives it one.
 - An allele with a base that is not `A`, `C`, `G` or `T` has no row.
 - NCBI's file also has features that are no transcript of `transcripts`, with ids that begin `rna-` or `id-`. The table
   keeps a row of such a feature, and no row of `transcripts` can match it.
 
 The record beside the table, `transcript_rules.json`, holds the two commits that the rules were restated from, the
 release of VEP that the step follows in reading the gene models and in choosing the alleles of each rule, the name, size
-and SHA-256 of the plugin's file of translated reading frames and of each gene model file as the run read it, and the
-public file that each was prepared from. It holds no count of the union's alleles or rows, so it is the same for every
-union that the same image and gene models annotate. The step writes those two counts to its log.
+and SHA-256 of the plugin's file of translated reading frames and of each gene model file as the run read it, the public
+file that each was prepared from, and as `branch_points` the name, size and SHA-256 of the catalogue of branch points,
+or null in a run without it. It holds no count of the union's alleles or rows, so it is the same for every union that
+the same image and gene models annotate. The step writes those two counts to its log.
 
 #### How the rows meet `transcripts`
 
@@ -1725,11 +1739,177 @@ source of transcripts, under `transcript_rules.matching`.
 
 A large last count for one source can mean that the gene model file of that source is of another release than the
 catalog's. `FAMILY_TABLES` fails only where the step's table holds an allele that the union's annotation lacks, which is
-a table of another union, or a transcript twice for an allele.
+a table of another union, or a transcript twice for an allele, or where the step read another catalogue of branch points
+than `JOINED_VALUES` joined, or only one of the two steps read one.
 
 Neither rule reads a [dated source](#dated-sources). The gene models are the Annotator's own releases, and
 UTRannotator's file of translated reading frames is a list that its authors curated from sorfs.org, which records
 ribosome profiling experiments and asserts nothing about a disease.
+
+### AG gained between a branch point and its acceptor
+
+The spliceosome takes the first `AG` behind a [branch point](glossary.md#branch-point) as the end of the intron, so the
+stretch between a branch point and its acceptor site normally holds no `AG`. A variant that creates one there can move
+the acceptor or make the cell skip the next exon. The Annotator gives such a variant the consequence of its place in the
+intron and does not say that it creates an `AG`. Zhang et al. describe a rule for these variants, which they call
+AG-gain variants, and offer a tool that applies it, AGAIN (Zhang P, et al. Genome-wide detection of human intronic
+AG-gain variants located between splicing branchpoints and canonical splice acceptor sites. Proc Natl Acad Sci U S A.
+2023;120(46):e2314225120, [doi:10.1073/pnas.2314225120](https://doi.org/10.1073/pnas.2314225120)). A run that names
+`branch_points` applies the rule in `TRANSCRIPT_RULES`, which already reads what the rule needs beside the catalogue:
+the transcripts of the gene models and the reference. `FAMILY_TABLES` gives each row of a family's `transcripts` the
+`AG`s that its allele gains on its transcript, as `ag_gains`, and each row of `variants` the column `ag_gain_high_risk`
+([AG gained before an acceptor](family-tables.md#ag-gained-before-an-acceptor) has the fields). A run without the
+catalogue has neither column.
+
+The rule is restated in Python from the article: its text, its Box 1 and its Figure 2, whose third panel defines the
+score. PubMed Central gives the article's licence as "This open access article is distributed under Creative Commons
+Attribution License 4.0 (CC BY)" ([PMC10655562](https://pmc.ncbi.nlm.nih.gov/articles/PMC10655562/)), and the record of
+the article in its open-data bucket gives the licence code `CC BY`. The authors offer the tool and its reference files
+under other terms (CC BY-NC-ND 4.0, by the article's statement of availability). The tool was not read, and the tables
+use neither the tool nor those files. [The notices](../src/case_annotation/licenses/README.md) list the article with the
+other works that the package restates.
+
+#### The rule
+
+The rule is stated for one intron of one transcript. The step reads the transcripts with a coding sequence, as it does
+for the plugins' rules, so an intron of a non-coding transcript has no entry.
+
+- The intron's first branch point is the catalogued branch point nearest its acceptor. A branch point counts from 4 to
+  99 bases before the exon, which are the distances of the catalogue's own rows by intron, and only inside the intron. A
+  branch point that the catalogue lists without an intron counts as well: the article placed the branch points on later
+  gene models than the catalogue's, and the step places them on the gene models of the run.
+- The zone runs from the first base behind that branch point to the fourth base before the exon, so it leaves out the
+  acceptor's own three bases. This is the article's zone 1.
+- An allele gains an `AG` when the changed sequence has an `AG`, both bases in the zone, that the reference does not
+  have. A substitution can make one, an insertion can hold one or complete one, and a deletion can join an `A` and a
+  `G`.
+- The high-risk region is the part of the zone from the eighth base behind the branch point on, which the article writes
+  as `[BP+8, ACC-4]`.
+- The score starts at 1. It gains 1 for an `AG` of zone 1, 1 for the high-risk region, 1 for a `C` or a `T` before the
+  `AG`, which makes it the `YAG` of an acceptor, and 1 where the reference has no `AG` in the zone. The tables hold zone
+  1 alone, so a score is 2 to 5, and one of the high-risk region is at least 3.
+
+The article's tool also reports an `AG` gained between an intron's second branch point and its first, as zone 2, with
+the score 1. The tables leave that zone out, because the published results that the rule was held against have no row of
+it.
+
+The article gives no sign that a number of the rule was fitted to disease variants. It takes the high-risk region from
+the reference genome, where 95% of the `AG`s that the zones hold lie within seven bases behind the branch point, and it
+then finds 330 of 350 published disease variants of HGMD 2023.1 in that region. Its advice to prefer the high-risk
+region with a score of 3 or more rests on those variants and on their scores, and it adds nothing to the region, since
+every score there is at least 3. The rule reads no [dated source](#dated-sources): the catalogue, the gene models and
+the reference are current sources.
+
+The article leaves some details open. The table says how each was decided, and the published results are those of
+[the comparison below](#the-rule-against-the-published-results).
+
+| Detail                                       | In the tables                                                                                                                                                                              | Decided by                                                                                                                                                                                                                                                                                                            |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| where a distance is counted to               | `branch_point_distance` is counted from the branch point to the `G` of the gained `AG`, and `acceptor_distance` is the number of bases of the intron behind that `G`, as a negative number | every substitution of the published results. The article's worked examples give the same distance to the acceptor                                                                                                                                                                                                     |
+| which branch points count                    | every catalogued branch point from 4 to 99 bases before an exon of the run's gene models                                                                                                   | the published results: the catalogue's rows by intron alone, with their nearest branch point, reproduce 95.9% of the rows from gnomAD v2, and the gene models with every catalogued branch point 99.5%. A branch point three bases before the exon, which the catalogue holds for some introns, is none of the tool's |
+| which `AG` of the reference lowers the score | one with both bases in the zone                                                                                                                                                            | the published results: the score agrees on every row whose distances agree                                                                                                                                                                                                                                            |
+| an `AG` whose `A` is the branch point itself | not of the zone, which begins behind the branch point                                                                                                                                      | the article's definition of the zone. The published results have no row that decides it                                                                                                                                                                                                                               |
+
+#### Insertions and deletions
+
+The article shows one example of a deletion and two of an insertion, and gives no rule for an allele that can be written
+at several places. Among repeated bases the same change can be written at each of them, and a VCF writes it at the
+leftmost on the genome, which is the far end of the repeat for a transcript of the reverse strand. The step compares the
+reference with the changed sequence, as it does for the reading frames of a 5′ UTR
+([Where the values are not the plugin's](#where-the-values-are-not-the-plugins)), so that one changed sequence has one
+answer on either strand.
+
+- The stretch is read back from the exon, which keeps its place in the changed sequence. Bases that an allele puts in
+  are counted as part of the intron wherever the allele can be written with the whole exon behind it, and the distances
+  are counted in the changed sequence.
+- An `AG` is gained when no way of writing the allele makes it one of the reference's. One more copy of an `AG` that the
+  reference has is counted once, at the first copy.
+- An allele that can be written before the branch point gains nothing, because everything from the branch point to the
+  exon is then as it was. An allele that changes the branch point or a base of the exon gains nothing either.
+- An allele can gain several `AG`s, and each has an entry.
+- The transcripts and introns that an insertion or a deletion can be written in are found by its reach over the bases
+  that it repeats, so a record that lies before a transcript among repeated bases still has the gain of its writing in
+  that transcript's intron. The cut before the step goes by the record alone: an allele whose record lies more than 100
+  bases from every exon is not read, also where the bases that it repeats reach a zone. The step reads a record as
+  `bcftools norm` writes it, and a record with further shared bases at its ends is read as a replacement of bases.
+
+The table has an invented example of each, with the end of an intron whose branch point is the `A` in brackets, `|`
+before the exon and the inserted bases between `<` and `>`.
+
+| The allele                                                   | Invented example                                                                                                | The tables                                                                          |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| an insertion that repeats the acceptor                       | `[A]CTTCCTTTTCTT<CAG>CAG\|CAGGT`, which a record of the reverse strand writes in the exon, as `CAG\|CAG<CAG>GT` | one gained `AG` three bases before the acceptor's own, for either record            |
+| an insertion at the acceptor that leaves one `AG`            | `[A]CTTCCTTTTCTTCA<GGG>G\|GTCC`, which is `CAG\|G<GGG>TCC`                                                      | none: the intron still ends in the one `AG`, and the inserted bases are in the exon |
+| a deletion before an `AG` of the reference                   | `[A]CTTC<T>TTCCAGTTTCTTCAG\|GT` without the `T` between `<` and `>`                                             | none: the `AG` is the reference's, one base nearer the branch point                 |
+| an insertion behind the branch point that ends with its base | `TGCT[A]<CAGA>CTTC`, which is `TGCT<ACAG>[A]CTTC`                                                               | none: written before the branch point, the allele leaves the zone as it was         |
+| an insertion that holds two `AG`s                            | `[A]CTTCCTT<AGCAG>TTCTTCAG\|GT`                                                                                 | two entries                                                                         |
+
+#### The rule against the published results
+
+The article's supplement holds the tool's output for four sets of variants on GRCh37: 350 published disease variants
+(Dataset S1), the variants of gnomAD v2.1.1 and of gnomAD v3.1.2 that gain an `AG` in the high-risk region of a
+canonical transcript and have a frequency under 1% (Datasets S2 and S3), and 127 somatic variants of COSMIC (Dataset
+S4). Each row has the tool's two distances, its `YAG`, its high-risk flag and its score. The variants were lifted to
+GRCh38 with UCSC's chain file, and the rule was applied with the catalogue that the same chain file gives
+([The catalogue of branch points](#the-catalogue-of-branch-points)), the two gene model files of
+[The gene models](#the-gene-models) and a GRCh38 reference. A row counts as reproduced when the step gives the allele an
+entry with the tool's five values on a transcript of either file. The check was made on 21 November 2026 and stays
+outside the repository, because it reads published variants and whole gene models.
+
+| Dataset                        | Rows   | Lifted with the reference's bases | Reproduced in all five values | Substitutions of them | Not reproduced |
+| ------------------------------ | ------ | --------------------------------- | ----------------------------- | --------------------- | -------------- |
+| S1, published disease variants | 350    | 350                               | 349                           | 341 of 342            | 1              |
+| S2, gnomAD v2.1.1              | 18,506 | 18,505                            | 18,407                        | 18,120 of 18,121      | 98             |
+| S3, gnomAD v3.1.2              | 14,204 | 14,159                            | 14,076                        | 13,811 of 13,815      | 83             |
+| S4, COSMIC                     | 127    | 127                               | 115                           | 110 of 110            | 12             |
+
+The 46 rows that were not lifted are five insertions or deletions in stretches that GRCh38 turned around and 41 rows of
+Dataset S3 whose reference allele is not the base of GRCh38 at the lifted place. Every row that the step does not
+reproduce is of one of these kinds:
+
+| Rows that are not reproduced                                                                           | S1  | S2  | S3  | S4  | Cause                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------ | --- | --- | --- | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a substitution at a branch point that the catalogue lacks, or at an acceptor that the gene models lack | 0   | 1   | 4   | 0   | the tool read a file of branch points of its own, on GENCODE 44, which is not published with the article. Four of the five rows have the tool's acceptor distance and another branch point                                                                                                                                                                             |
+| a substitution for which the catalogue has a nearer branch point                                       | 1   | 0   | 0   | 0   | the same file: the catalogue has a branch point 19 bases before the exon that the tool did not use                                                                                                                                                                                                                                                                     |
+| an insertion that lies before the branch point, or that can be written before it                       | 0   | 71  | 65  | 1   | the changed sequence has nothing new between the branch point and the exon. The records write 67 of the 71 of Dataset S2 before the branch point, where the tool still reports a distance behind it. For 36 of the 67 the reported distances come out when the inserted bases are put as far before the intron's end as the record writes them before the branch point |
+| an insertion or a deletion with as many `AG`s behind the branch point as the reference has             | 0   | 23  | 13  | 11  | the tool reports an `AG` of the reference at its new distance: an insertion at the acceptor's own `AG`, or, in Dataset S4 alone, a deletion before an `AG` of the zone                                                                                                                                                                                                 |
+| an insertion that gains an `AG` in the intron's last three bases                                       | 0   | 3   | 1   | 0   | the allele can be written in the exon, and the gained `AG` then lies outside the zone                                                                                                                                                                                                                                                                                  |
+
+The step gives 34 of the reproduced insertions more than one gained `AG`. The tool reports one for each, and in every
+case it is the one nearest the acceptor. Every deletion of Datasets S1 to S3 is reproduced, 102 in all.
+
+The published results hold only variants that the tool reported, so they cannot show an allele that the step flags and
+the tool would not. The two gnomAD sets come nearest to such a check, because the article gives each as the variants of
+a whole release. They were held against gnomAD's own sites on chr21: every record of the genomes of gnomAD v3.1.2, and
+of the exomes of gnomAD v2.1.1 as gnomAD lifted them to GRCh38, in the 1,779 stretches from a first branch point to its
+acceptor on a MANE Select transcript.
+
+| On chr21                                                                               | gnomAD v2.1.1 exomes | gnomAD v3.1.2 genomes |
+| -------------------------------------------------------------------------------------- | -------------------- | --------------------- |
+| records read                                                                           | 15,004               | 11,460                |
+| alleles with a gained `AG` in the high-risk region                                     | 284                  | 217                   |
+| of them in the published set                                                           | 224                  | 145                   |
+| not in it: no allele counted, a filter other than `PASS`, or a frequency of 1% or more | 26                   | 40                    |
+| not in it: an insertion or a deletion of ten bases or more, which neither set holds    | 10                   | 9                     |
+| not in it, and in the other release's set with the step's distances                    | 5                    | 8                     |
+| not in it, and unexplained                                                             | 19                   | 15                    |
+
+This is no sound test of what the tool would leave out. The 13 alleles of the last row but one pass in one release with
+a frequency under 1%, the tool reports them for the other release, and their own release's set lacks them, so a set does
+not hold every allele of its release that the tool reports. The 34 unexplained alleles, about 7 in 100 of those that the
+step flags on this chromosome, can be alleles that the authors' selection of intronic variants left out or alleles that
+the tool does not report. Six of them are the same allele in both releases. Nothing published decides between the two.
+
+What the comparison leaves open:
+
+- The tool's own file of branch points is not public, so the step's first branch points could only be held against the
+  tool's output. Outside the rows above, an intron whose first branch point differs between the two would show only
+  where a published variant lies in it.
+- The published results hold zone 1 alone, and Datasets S2 to S4 the high-risk region alone. The 20 rows of Dataset S1
+  outside that region are the only check of a false flag, and no published row has the score 2.
+- The results are of substitutions for 98 rows in 100. The rule for an insertion or a deletion that can be written at
+  several places is the step's own, and the tool decides such an allele by where the record writes it.
+- Everything was lifted from GRCh37. The rule was not held against a run of the tool on GRCh38.
 
 ### De novo variants
 
@@ -2117,33 +2297,33 @@ as JSON, for a program that writes a sheet or launches a run.
 
 ### Params of `family_tables.nf`
 
-| Param                                                                     | Holds                                                                                                                                                  |
-| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `families`                                                                | the sheet of families, with its four columns and the three optional ones ([The input contract](#the-input-contract))                                   |
-| `group`                                                                   | the name of the run's families together, which names the union and its folder                                                                          |
-| `reference`                                                               | the reference the VCFs are called against, with its `.fai` beside it; the normalisation left-aligns against it                                         |
-| `catalog`, `annotation_data`                                              | the catalog's id and the data directory its download published                                                                                         |
-| `sources`                                                                 | the sources to annotate with; given together with `annotated`, the run stops                                                                           |
-| `annotated`                                                               | an earlier run's annotation of the same unions, used instead of annotating again: the folder it published the Annotator's output in                    |
-| `gnomad_joint`                                                            | the echtvar archive of gnomAD's joint release                                                                                                          |
-| `alphagenome_avi`                                                         | optional: the archive of AlphaGenome's AVI scores, for commercial and non-commercial use ([terms](#alphagenomes-scores))                               |
-| `alphagenome_avi_breakdown`                                               | optional: the archive of the AVI score's breakdown by input, for non-commercial use only ([terms](#alphagenomes-scores))                               |
-| `alphagenome_splicing`                                                    | optional: the archive of AlphaGenome's splicing scores, for non-commercial use only ([terms](#alphagenomes-scores))                                    |
-| `gnomad_mito`                                                             | optional: gnomAD's sites VCF of the mitochondrial genome ([Joined files](#joined-files))                                                               |
-| `mitotip`                                                                 | optional: MitoTIP's table of scores ([Joined files](#joined-files))                                                                                    |
-| `gencode_polya`                                                           | optional: GENCODE's GTF of polyadenylation features ([Joined files](#joined-files))                                                                    |
-| `aparent2`                                                                | optional: APARENT2's table of the effects of single-base changes on polyadenylation ([Joined files](#joined-files))                                    |
-| `genomic_constraint`                                                      | optional: gnomAD's table of genomic constraint in windows of 1,000 bases ([Joined files](#joined-files))                                               |
-| `mcr`                                                                     | optional: gnomAD's table of regions of missense constraint ([Joined files](#joined-files))                                                             |
-| `mpc`                                                                     | optional: gnomAD's table of MPC scores ([Joined files](#joined-files))                                                                                 |
-| `branch_points`                                                           | optional: the prepared catalogue of branch points ([The catalogue of branch points](#the-catalogue-of-branch-points))                                  |
-| `strchive`                                                                | optional: the loci of one release of STRchive, for the size ranges in `repeats` ([STRchive's ranges of the repeats](#strchives-ranges-of-the-repeats)) |
-| `strchive_release`, `strchive_release_date`                               | with `strchive`: the release that the file is of, and the day on which it was published as `YYYY-MM-DD`, which a family's manifest records as stated   |
-| `gene_models`                                                             | the folder of gene models that `case-annotation gene-models` prepared, which `TRANSCRIPT_RULES` reads ([The gene models](#the-gene-models))            |
-| `workers`                                                                 | the Annotator's worker processes, 8 by default                                                                                                         |
-| `annotator_container`, `annotator`, `annotator_version`, `license_secret` | the Annotator's image, path and version, and the licence's secret, as for `annotator.nf`; needed unless the run reuses an annotation                   |
-| `tools_container`                                                         | the image `case-annotation-tools`, which runs every step but the Annotator's                                                                           |
-| `output_dir`                                                              | where the folders below are published                                                                                                                  |
+| Param                                                                     | Holds                                                                                                                                                                         |
+| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `families`                                                                | the sheet of families, with its four columns and the three optional ones ([The input contract](#the-input-contract))                                                          |
+| `group`                                                                   | the name of the run's families together, which names the union and its folder                                                                                                 |
+| `reference`                                                               | the reference the VCFs are called against, with its `.fai` beside it; the normalisation left-aligns against it                                                                |
+| `catalog`, `annotation_data`                                              | the catalog's id and the data directory its download published                                                                                                                |
+| `sources`                                                                 | the sources to annotate with; given together with `annotated`, the run stops                                                                                                  |
+| `annotated`                                                               | an earlier run's annotation of the same unions, used instead of annotating again: the folder it published the Annotator's output in                                           |
+| `gnomad_joint`                                                            | the echtvar archive of gnomAD's joint release                                                                                                                                 |
+| `alphagenome_avi`                                                         | optional: the archive of AlphaGenome's AVI scores, for commercial and non-commercial use ([terms](#alphagenomes-scores))                                                      |
+| `alphagenome_avi_breakdown`                                               | optional: the archive of the AVI score's breakdown by input, for non-commercial use only ([terms](#alphagenomes-scores))                                                      |
+| `alphagenome_splicing`                                                    | optional: the archive of AlphaGenome's splicing scores, for non-commercial use only ([terms](#alphagenomes-scores))                                                           |
+| `gnomad_mito`                                                             | optional: gnomAD's sites VCF of the mitochondrial genome ([Joined files](#joined-files))                                                                                      |
+| `mitotip`                                                                 | optional: MitoTIP's table of scores ([Joined files](#joined-files))                                                                                                           |
+| `gencode_polya`                                                           | optional: GENCODE's GTF of polyadenylation features ([Joined files](#joined-files))                                                                                           |
+| `aparent2`                                                                | optional: APARENT2's table of the effects of single-base changes on polyadenylation ([Joined files](#joined-files))                                                           |
+| `genomic_constraint`                                                      | optional: gnomAD's table of genomic constraint in windows of 1,000 bases ([Joined files](#joined-files))                                                                      |
+| `mcr`                                                                     | optional: gnomAD's table of regions of missense constraint ([Joined files](#joined-files))                                                                                    |
+| `mpc`                                                                     | optional: gnomAD's table of MPC scores ([Joined files](#joined-files))                                                                                                        |
+| `branch_points`                                                           | optional: the prepared catalogue of branch points ([The catalogue of branch points](#the-catalogue-of-branch-points)), which `JOINED_VALUES` and `TRANSCRIPT_RULES` both read |
+| `strchive`                                                                | optional: the loci of one release of STRchive, for the size ranges in `repeats` ([STRchive's ranges of the repeats](#strchives-ranges-of-the-repeats))                        |
+| `strchive_release`, `strchive_release_date`                               | with `strchive`: the release that the file is of, and the day on which it was published as `YYYY-MM-DD`, which a family's manifest records as stated                          |
+| `gene_models`                                                             | the folder of gene models that `case-annotation gene-models` prepared, which `TRANSCRIPT_RULES` reads ([The gene models](#the-gene-models))                                   |
+| `workers`                                                                 | the Annotator's worker processes, 8 by default                                                                                                                                |
+| `annotator_container`, `annotator`, `annotator_version`, `license_secret` | the Annotator's image, path and version, and the licence's secret, as for `annotator.nf`; needed unless the run reuses an annotation                                          |
+| `tools_container`                                                         | the image `case-annotation-tools`, which runs every step but the Annotator's                                                                                                  |
+| `output_dir`                                                              | where the folders below are published                                                                                                                                         |
 
 ### Params of `annotator.nf`
 
@@ -2239,7 +2419,7 @@ process has the rest, such as the form of a name, a run config of another catalo
 | `SV_UNION`             | a record has no ID, or two records of a family's callers share one; a record that is not a breakend has no INFO `END`, or a breakend has one; a record has no `SVTYPE`, or one that is none of `DEL`, `INS`, `DUP`, `INV`, `BND` and `CNV`, or a copy-number segment has an allele other than `<DEL>` and `<DUP>`; a record's `END` lies before its position; a record has another number of `SVLEN` values than of alleles; the families' files declare a contig with two lengths; no record is left on the primary chromosomes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `ECHTVAR_VALUES`       | the alleles of its table are not exactly the union's; two archives add a field of the same name; an archive lacks a field that its columns come from, or holds one as another type; an archive marks an allele that it lacks with a value that the field could hold; an allele has some of the scores of one of AlphaGenome's archives and not others; an archive of the breakdown or of the splicing scores has a field without the notice in its description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `JOINED_VALUES`        | a REF of gnomAD's mitochondrial VCF is not the reference's sequence; that VCF has samples, lacks one of the INFO fields that the columns come from or declares it with another type or number, or has a record that is off chrM, holds several alleles, lacks a field that every record of gnomAD's file has, or holds an allele that another record holds; a line of GENCODE's file is not the nine fields of a GTF, a feature is none of `polyA_signal`, `polyA_site` and `pseudo_polyA`, a feature has no start and end as positions in that order, or the file has no `polyA_signal` on a primary chromosome; the header of APARENT2's table is not its 15 columns, or a row has another number of fields or lacks a chromosome, a GRCh38 position, a base as its reference or its changed nucleotide, or a finite number as its usage or its change of the log odds; the header of MitoTIP's table is not its 8 columns, or a row lacks a position, a base as its reference, another base or `:` as its change, a finite score or one of `Q1` to `Q4`, or two rows hold one change of a position; the header of gnomAD's table of windows is not its 9 columns, or a row lacks a primary chromosome, a start that is a multiple of 1,000, an end after it and at most 1,000 bases on, or a finite z score, or two rows hold one window; the header of gnomAD's table of regions is not its 11 columns, or a row lacks an Ensembl transcript id without a version, a number of regions, a primary chromosome, a start and an end in that order, a finite ratio of 0 or more, a p-value from 0 to 1, or `true` or `false` as its coverage, or two regions of one transcript overlap or lie on two chromosomes, or a transcript has another number of regions than its rows say; the header of gnomAD's table of MPC scores is not its 4 columns, or a row lacks a locus on a primary chromosome, a list of two alleles of bases, an Ensembl transcript id without a version or a finite score, or two rows hold one allele of the union and one transcript; the header of the catalogue of branch points is not its 14 columns, or a row lacks a primary chromosome, a position, a strand, a name of the three with a kind and a base, the paper's name with the same kind and base, or a list of sources, fills some of the columns of an intron and not all, or fills them with something other than a gene, a list of introns, `major` or `minor`, a length, a negative distance, a rank within its total and a class of consensus, or two rows hold one branch point in the same introns, or the file has no row; a row of one of these tables has another number of fields than its header; a gzipped file is cut off; the alleles of its table are not exactly the union's |
-| `TRANSCRIPT_RULES`     | the cut to the exons writes an allele twice; a gene model file has another size or SHA-256 than the record of the prepared folder gives it; the file of translated upstream reading frames is not in the layout of UTRannotator's; a positive control lacks what the rule of its plugin gives it, or has no row on its transcript                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `TRANSCRIPT_RULES`     | the cut to the exons writes an allele twice; a gene model file has another size or SHA-256 than the record of the prepared folder gives it; the file of translated upstream reading frames is not in the layout of UTRannotator's; a positive control lacks what the rule of its plugin gives it, or has no row on its transcript; the catalogue of branch points has another header than the prepared one, a row with another number of fields or without a primary chromosome, a whole position and a strand, or no row                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `ROH_UPD`              | a family with a child whose parents are both sequenced has no `GQ` in its VCF; the archive of gnomAD's joint release writes another stand-in than 0 for the frequency of an allele it lacks; `bcftools roh` or `upd` fails; a tool's output is not what the tool writes, or the installed `upd` did not come from a commit of upd's repository                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `ILLUMINA_ANNOTATE`    | the bundle lacks a source named or is of another catalog; the licence is invalid for a source                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `ANNOTATION_TABLES`    | the JSON's alleles are not exactly the union's; the JSON holds ClinVar or dbSNP records, or a dated source's entry in its header, that the run did not name; the genes section holds a record without a symbol, an HGNC id that is not a positive integer or two HGNC ids for one symbol, or lacks the symbol of a transcript; the JSON lists a transcript twice for one allele; a SpliceAI entry has a key the conversion does not know, or a score without its distance, or a distance without its score; a PromoterAI entry lacks its score or its distance from the TSS; a regulatory feature lacks its id or its type; a gnomAD entry lacks its coverage, has a key the conversion does not know, or has some of a group's four values and not the others; an amino-acid conservation entry lacks its scores; a ClinVar record of the allele lacks the date of its last update, or a record of another allele lacks its accession or one of its alleles; a transcript's `hgvsc` has a position of a form that the conversion reads no intron offset from                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |

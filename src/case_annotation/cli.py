@@ -383,8 +383,8 @@ def _transcript_rules_arguments(parser: argparse.ArgumentParser) -> None:
         type=path,
         required=True,
         help=(
-            "the union's alleles that overlap an exon, each under its variant id, and the positive controls: a VCF "
-            'compressed with bgzip, with its index beside it'
+            "the union's alleles that a rule can evaluate, each under its variant id, and the positive controls: a "
+            'VCF compressed with bgzip, with its index beside it'
         ),
     )
     parser.add_argument(
@@ -409,6 +409,14 @@ def _transcript_rules_arguments(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        '--branch-points',
+        type=path,
+        help=(
+            f'the prepared catalogue of branch points, {branch_points.FILE_NAME} (case-annotation branch-points), '
+            'with which the AG dinucleotides that an allele gains before an acceptor are found as well'
+        ),
+    )
+    parser.add_argument(
         '--workers',
         type=int,
         default=1,
@@ -429,7 +437,13 @@ def _transcript_rules(args: argparse.Namespace) -> None:
     if args.workers < 1:
         raise ValueError(f'--workers is {args.workers}, and at least one process is needed')
     transcript_rules.annotate(
-        args.given, args.gene_models, args.reference, args.uorf_evidence, args.output, workers=args.workers
+        args.given,
+        args.gene_models,
+        args.reference,
+        args.uorf_evidence,
+        args.output,
+        workers=args.workers,
+        branch_points=args.branch_points,
     )
 
 
