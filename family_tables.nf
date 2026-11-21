@@ -2,7 +2,8 @@
 // normalised, the union of their sites is annotated once with Illumina's Annotator and converted into tables, the
 // union's values from echtvar archives are read (gnomAD's joint values, and AlphaGenome's scores where the run names
 // their archives), the public files that the run names are joined to the union's alleles, the rules of two plugins of
-// Ensembl VEP are applied to the union's alleles in exons, and each family's tables are cut from all four. Each
+// Ensembl VEP are applied to the union's alleles in exons, with the rule of the gained AG where the run names the
+// catalogue of branch points, and each family's tables are cut from all four. Each
 // family's runs of homozygosity and regions of uniparental disomy come from its own VCF, which two published tools read
 // with gnomAD's frequencies from the same archive. The union and what annotates it reveal every family's alleles, so
 // they are published under annotation-unions/<group>/ and never beside a family's tables, which go to
@@ -273,8 +274,9 @@ workflow ANNOTATE_FAMILIES {
         settings.mpc ?: [],
         settings.branch_points ?: [],
     )
-    // The rules of VEP's two plugins, applied to the union's alleles in the exons of the prepared gene models.
-    transcript_rules = TRANSCRIPT_RULES(union, reference, settings.gene_models)
+    // The rules of VEP's two plugins, applied to the union's alleles in the exons of the prepared gene models, and
+    // the rule of the gained AG, applied to those beside the exons too, in a run with the catalogue of branch points.
+    transcript_rules = TRANSCRIPT_RULES(union, reference, settings.gene_models, settings.branch_points ?: [])
 
     if (settings.annotated != null) {
         def reused = settings.annotated.resolve("out/${settings.group}.json.gz")

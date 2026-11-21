@@ -10,7 +10,7 @@
 // carries, an allele that the mother has no call of, a record that only a call of ./1 carries, a deletion of six bases,
 // a record off the primary chromosomes and a record of two alleles on X with genotype likelihoods, called in a haploid
 // father and a diploid mother and daughter; family-b.vcf holds an allele family A shares, the same deletion
-// left-aligned, and one of its own. gnomad-joint.vcf stands in for gnomAD's joint sites VCF, with invented counts and
+// left-aligned, one of its own, and one in an intron of the invented gene. gnomad-joint.vcf stands in for gnomAD's joint sites VCF, with invented counts and
 // frequencies under gnomAD's field names, and echtvar-config.json encodes it as the public archive of
 // docs/annotation.md is encoded: it holds one of the two alleles at a site, an allele counted 0 times, the deletion at
 // its left-aligned position, the deletion of six bases (echtvar keeps alleles of more than four bases in a table of
@@ -57,7 +57,8 @@
 // branch_points.tsv stands in for the prepared catalogue of branch points, with invented branch points under the
 // catalogue's column names and two lines before its header: a single-base change at one branch point, a deletion that
 // ends at one of the reverse strand, and a deletion over two branch points that lie two bases apart, of which the first
-// is in two introns and the second in none.
+// is in two introns and the second in none. A fourth branch point, at chr1:486, lies in the third intron of the
+// invented gene, 24 bases before its fourth exon, and no allele changes it.
 // The run names no file of gnomAD's mitochondrial sites and none of MitoTIP's scores, so the families' tables lack
 // those columns. gnomad_mito.vcf and mitotip.tsv stand in for those files, with invented values under the field names
 // of gnomAD's file and the column names of MitoTIP's, and are joined to mito-union.vcf, an invented union on an
@@ -72,8 +73,12 @@
 // controls and writes the table of the plugins' rules for both files. Of the union's alleles, the two at chr1:100 lie
 // in the 5' UTR without an effect, chr1-200-G-A makes a stop codon in the upstream reading frame, chr1-300-T-A is a
 // missense variant, which neither plugin's rules evaluate, and chr1-400-TCA-T is a frameshift in the third exon, which
-// the NMD plugin's rule evaluates and does not flag. A folder of gene models whose record names the controls on
-// another transcript is refused, which is what a run meets whose gene models are not as their record describes them.
+// the NMD plugin's rule evaluates and does not flag. The step is given the catalogue of branch points as well, and
+// widens its cut to the alleles beside the exons: family B's chr1-502-T-G lies in the third intron, 16 bases behind
+// the branch point at chr1:486, and makes an AG there, where the intron already has one. Family B's tables hold the
+// gained AG on the gene's transcript and say in variants that it lies in the high-risk region, and family A's hold
+// none. A run without the catalogue cuts the union to the exons and has no row of that allele. A folder of gene
+// models whose record names the controls on another transcript is refused, which is what a run meets whose gene models are not as their record describes them.
 // Sites that hold an allele of the exons twice are refused before the rules are applied to them.
 // Refused inputs must fail, and so must Annotator outputs without the group's annotation. The case-annotation and
 // echtvar steps run in the tools image, built first. Run with Docker from the repository's root, with this folder's
@@ -90,6 +95,7 @@ include { ROH_UPD as ROH_UPD_NO_KEPT_SITE } from '../../modules/family_tables'
 include { ROH_UPD as ROH_UPD_FAILING_UPD_REFUSED } from '../../modules/family_tables'
 include { ECHTVAR_VALUES as ECHTVAR_VALUES_GNOMAD_ALONE } from '../../modules/family_tables'
 include { JOINED_VALUES as JOINED_VALUES_MITO } from '../../modules/family_tables'
+include { TRANSCRIPT_RULES as TRANSCRIPT_RULES_WITHOUT_CATALOGUE } from '../../modules/family_tables'
 include { TRANSCRIPT_RULES as TRANSCRIPT_RULES_CONTROL_REFUSED } from '../../modules/family_tables'
 include { TRANSCRIPT_RULES as TRANSCRIPT_RULES_REPEATED_REFUSED } from '../../modules/family_tables'
 include { SV_SITES as SV_SITES_NO_END } from '../../modules/family_tables'
@@ -132,7 +138,7 @@ workflow {
         }
     structural = larger.mix(channel.of(tuple('family-b', [], [], [])))
 
-    checked = FAMILY_CHECK(families.join(structural), '0.5.1')
+    checked = FAMILY_CHECK(families.join(structural), '0.5.2')
     normalised = NORMALISE_FAMILY(
         families.join(checked.map { f -> [f] }).map { f, vcf, _ped, _proband -> tuple(f, vcf) },
         reference,
@@ -208,10 +214,13 @@ workflow {
         mito,
         mitotip,
     )
-    // The rules of VEP's two plugins, applied to the union's alleles in the exons of the invented gene.
+    // The rules of VEP's two plugins, applied to the union's alleles in the exons of the invented gene, and the rule of
+    // the gained AG, applied to those beside the exons too.
     gene_models = INVENTED_GENE_MODELS(file("${fixture}/gene-models"), reference)
-    transcript_rules = TRANSCRIPT_RULES(union, reference, gene_models)
-    CHECK_TRANSCRIPT_RULES(transcript_rules)
+    transcript_rules = TRANSCRIPT_RULES(union, reference, gene_models, catalogue)
+    CHECK_TRANSCRIPT_RULES(transcript_rules, catalogue)
+    // A run without the catalogue cuts the union to the exons, and its table has no gained AG.
+    CHECK_RULES_WITHOUT_CATALOGUE(TRANSCRIPT_RULES_WITHOUT_CATALOGUE(union, reference, gene_models, []))
     // The union of the group's structural variants and copy-number segments, which are family A's, and its tables.
     sv_sites = SV_SITES(
         structural.join(checked.map { f -> [f] }).filter { _f, sv, cnv, _repeats -> sv || cnv }.map { f, sv, cnv, _repeats -> tuple(f, sv, cnv) }
@@ -244,12 +253,13 @@ workflow {
         'v0.0.0',
         '2099-01-01',
         '0.5.0',
-        '0.5.1',
+        '0.5.2',
     )
     // What FAMILY_TABLES gives of a family: its id, variants, transcripts, roh, the manifest, the notes, and the
     // tables that only some families have.
     CHECK_TABLES(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[0], w[1], w[2], w[4], w[5]) }, archive)
     CHECK_NO_ROLES(written.filter { w -> w[0] == 'family-b' }.map { w -> w[4] })
+    CHECK_AG_GAIN(written.filter { w -> w[0] == 'family-b' }.map { w -> tuple(w[1], w[2]) })
     CHECK_JOINED(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[1], w[2], w[4]) }, polya, effects, windows, regions, scores, catalogue)
     CHECK_LARGER(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[1], w[4], w[6]) })
     CHECK_SEGMENTS(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[3], w[4], w[6]) }, archive)
@@ -331,15 +341,15 @@ workflow {
     )
     other_proband = FAMILY_CHECK_PROBAND_REFUSED(
         channel.of(tuple('family-a', file("${fixture}/family-a.vcf"), file("${fixture}/family-a.ped"), 'B3', [], [], [])),
-        '0.5.1',
+        '0.5.2',
     )
     two_repeats = FAMILY_CHECK_REPEATS_REFUSED(
         channel.of(tuple('family-a', file("${fixture}/family-a.vcf"), file("${fixture}/family-a.ped"), 'A3', [], [], [file("${fixture}/A1.repeats.vcf"), file("${fixture}/A2.repeats.vcf")])),
-        '0.5.1',
+        '0.5.2',
     )
     other_samples = FAMILY_CHECK_SV_SAMPLES_REFUSED(
         channel.of(tuple('family-b', file("${fixture}/family-b.vcf"), file("${fixture}/family-b.ped"), '', [file("${fixture}/family-a.sv.vcf")], [], [])),
-        '0.5.1',
+        '0.5.2',
     )
     sv_mismatch = NORMALISE_SV_REF_MISMATCH_REFUSED(
         channel.of(tuple('sv-mismatch', [file("${fixture}/sv-ref-mismatch.vcf")])),
@@ -358,8 +368,8 @@ workflow {
         frequencies,
     )
     failing_upd = ROH_UPD_FAILING_UPD_REFUSED(channel.of(tuple('trio-t', trio, trio_ped)), frequencies)
-    other_control = TRANSCRIPT_RULES_CONTROL_REFUSED(union, reference, INVENTED_OTHER_CONTROLS(gene_models))
-    repeated_sites = TRANSCRIPT_RULES_REPEATED_REFUSED(INVENTED_REPEATED_SITES(), reference, gene_models)
+    other_control = TRANSCRIPT_RULES_CONTROL_REFUSED(union, reference, INVENTED_OTHER_CONTROLS(gene_models), [])
+    repeated_sites = TRANSCRIPT_RULES_REPEATED_REFUSED(INVENTED_REPEATED_SITES(), reference, gene_models, catalogue)
     unprefixed.sites
         .map { _s -> 'unprefixed contigs' }
         .mix(
@@ -463,17 +473,21 @@ process INVENTED_REPEATED_SITES {
 // a rule evaluated, for the transcript of each gene model file, and none for a control: the alleles in the 5' UTR have
 // the counts of the reading frames that the UTR holds, which is one that runs into the coding sequence in frame; the
 // allele that makes a stop codon in that frame has one record of a gained stop, with the plugin's values; the
-// frameshift is evaluated by the NMD plugin's rule and not flagged; the missense variant has no row. The record holds
-// the release of VEP that the step follows, the commits that the rules are restated from, the plugin's file of
-// translated reading frames as the image holds it, and each gene model file with the invented file that it was
-// prepared from, and no count of the union's.
+// frameshift is evaluated by the NMD plugin's rule and not flagged; the missense variant has no row; the allele in the
+// third intron, which the cut to the exons alone would leave out, has the AG that it gains behind the invented branch
+// point and no value of a plugin's rule. The record holds the release of VEP that the step follows, the commits that
+// the rules are restated from, the plugin's file of translated reading frames as the image holds it, each gene model
+// file with the invented file that it was prepared from, and the catalogue of branch points as the step read it, and
+// no count of the union's.
 process CHECK_TRANSCRIPT_RULES {
     input:
     path transcript_rules
+    path catalogue
 
     script:
     """
     python3 - <<'EOF'
+import hashlib
 import json
 import re
 
@@ -485,10 +499,17 @@ table = pq.read_table('${transcript_rules}/transcript_rules.parquet')
 assert table.schema.equals(transcript_rules.TABLE), table.schema
 rows = table.to_pylist()
 keys = [(r['variant_id'], r['transcript_id'], r['source']) for r in rows]
-evaluated = ['chr1-100-G-A', 'chr1-100-G-C', 'chr1-200-G-A', 'chr1-400-TCA-T']
+evaluated = ['chr1-100-G-A', 'chr1-100-G-C', 'chr1-200-G-A', 'chr1-400-TCA-T', 'chr1-502-T-G']
 assert keys == [(a, t, s) for a in evaluated for t, s in (('ENST01.1', 'Ensembl'), ('NM_01.1', 'RefSeq'))], keys
 counts = ('utr5_existing_uorfs', 'utr5_existing_oorfs_out_of_frame', 'utr5_existing_oorfs_in_frame')
+gained = {'branch_point_pos': 486, 'branch_point_distance': 16, 'acceptor_distance': -7, 'yag': True,
+          'high_risk': True, 'existing_ag': True, 'score': 4}
 for row in rows:
+    if row['variant_id'] == 'chr1-502-T-G':
+        assert row['ag_gains'] == [gained], row
+        assert all(row[c] is None for c in table.column_names[3:] if c != 'ag_gains'), row
+        continue
+    assert row['ag_gains'] is None, row
     in_utr = row['variant_id'] != 'chr1-400-TCA-T'
     assert tuple(row[c] for c in counts) == ((0, 0, 1) if in_utr else (None, None, None)), row
     assert row['nmd_escaping'] is (None if in_utr else False), row
@@ -510,9 +531,63 @@ assert info['uorf_evidence']['sha256'] == 'e220023a747465dcdf6725ce809511bccc20b
 models = [(m['source'], m['file']['name'], m['prepared_from']['name']) for m in info['gene_models']]
 assert models == [('Ensembl', 'ensembl.gff3.gz', 'invented.gff3.gz'),
                   ('RefSeq', 'refseq.gff.gz', 'invented.gff.gz')], models
-assert sorted(info) == ['gene_models', 'nmd_plugin_commit', 'uorf_evidence', 'utrannotator_commit', 'vep_release'], info
+assert sorted(info) == ['branch_points', 'gene_models', 'nmd_plugin_commit', 'uorf_evidence', 'utrannotator_commit',
+                        'vep_release'], info
+read = open('${catalogue}', 'rb').read()
+assert info['branch_points'] == {
+    'name': '${catalogue.name}', 'bytes': len(read), 'sha256': hashlib.sha256(read).hexdigest()}, info
 stated = [m['prepared_from']['stated'] for m in info['gene_models']]
 assert [len(lines) for lines in stated] == [2, 3] and all(line.startswith('#!') for lines in stated for line in lines), info
+EOF
+    """
+}
+
+// The table of a run without the catalogue of branch points: the rows of the alleles in the exons, none of the allele
+// in the intron, no gained AG, and a record that names no catalogue.
+process CHECK_RULES_WITHOUT_CATALOGUE {
+    input:
+    path transcript_rules
+
+    script:
+    """
+    python3 - <<'EOF'
+import json
+
+import pyarrow.parquet as pq
+
+rows = pq.read_table('${transcript_rules}/transcript_rules.parquet').to_pylist()
+alleles = sorted({r['variant_id'] for r in rows})
+assert alleles == ['chr1-100-G-A', 'chr1-100-G-C', 'chr1-200-G-A', 'chr1-400-TCA-T'], alleles
+assert all(r['ag_gains'] is None for r in rows), rows
+assert json.load(open('${transcript_rules}/transcript_rules.json'))['branch_points'] is None
+EOF
+    """
+}
+
+// Family B's tables: the allele in the intron has the gained AG on its row of transcripts, with the distances that the
+// invented intron gives it, and its row of variants says that the AG lies in the high-risk region. No other allele of
+// the family has either.
+process CHECK_AG_GAIN {
+    input:
+    tuple path(variants), path(transcripts)
+
+    script:
+    """
+    python3 - <<'EOF'
+import pyarrow.parquet as pq
+
+variants = pq.read_table('${variants}')
+at = variants.column_names.index('utr5_consequences')
+assert variants.column_names[at + 1:at + 3] == ['ag_gain_high_risk', 'qual'], variants.column_names
+flags = {r['variant_id']: r['ag_gain_high_risk'] for r in variants.to_pylist()}
+assert flags == {'chr1-100-G-A': None, 'chr1-400-TCA-T': None, 'chr1-502-T-G': True, 'chr2-40-C-T': None,
+                 'chr2-70-T-A': None}, flags
+transcripts = pq.read_table('${transcripts}')
+assert transcripts.column_names[-1] == 'ag_gains', transcripts.column_names
+gained = {(r['variant_id'], r['transcript_id']): r['ag_gains'] for r in transcripts.to_pylist() if r['ag_gains']}
+assert gained == {('chr1-502-T-G', 'ENST01.1'): [
+    {'branch_point_pos': 486, 'branch_point_distance': 16, 'acceptor_distance': -7, 'yag': True, 'high_risk': True,
+     'existing_ag': True, 'score': 4}]}, gained
 EOF
     """
 }
@@ -764,8 +839,9 @@ process INVENTED_ALPHAGENOME_ARCHIVE {
 // the invented annotation and Ensembl's layout of the invented gene models call ENST01.1: the counts of the 5' UTR's
 // reading frames for the three alleles in the UTR, the record of a gained stop for chr1-200-G-A, the false of the NMD
 // plugin's rule for the frameshift, and nothing for the alleles that no rule evaluated. The plugins' six columns end
-// with nmd_escaping, and the five columns that no plugin gives follow them and end the table. The allele's row of
-// variants has the kind of the effect. The manifest counts the four rows of the rules' table on the RefSeq transcript,
+// with nmd_escaping, the five columns that no plugin gives follow them, and the column of the gained AGs ends the
+// table, with no value for an allele of family A. The allele's row of variants has the kind of the effect, and no
+// value in the column of the gained AGs. The manifest counts the four rows of the rules' table on the RefSeq transcript,
 // which the invented annotation lacks, and holds the record of the run.
 process CHECK_TABLES {
     input:
@@ -909,14 +985,16 @@ for name in ('alphagenome_avi', 'alphagenome_avi_breakdown', 'alphagenome_splici
 notice = 'By using this information, you agree to AlphaGenome Output Terms of Use found at '
 assert manifest['alphagenome_splicing']['terms'].startswith(notice), manifest
 assert not set(added) & set(manifest['omitted_columns']), manifest
-assert variants.column_names[-6] == 'utr5_consequences', variants.column_names
+assert variants.column_names[-7:-5] == ['utr5_consequences', 'ag_gain_high_risk'], variants.column_names
+assert variants.column('ag_gain_high_risk').null_count == variants.num_rows, variants
 kinds = {r['variant_id']: r['utr5_consequences'] for r in variants.to_pylist() if r['utr5_consequences']}
 assert kinds == {'chr1-200-G-A': ['uSTOP_gained']}, kinds
 plugins = ('utr5_consequences', 'utr5_uorfs', 'utr5_existing_uorfs', 'utr5_existing_oorfs_out_of_frame',
            'utr5_existing_oorfs_in_frame', 'nmd_escaping')
 beside = ('utr5_cds_kozak_context', 'utr5_cds_kozak_strength', 'utr5_cds_kozak_context_alt',
           'utr5_cds_kozak_strength_alt', 'nmd_escape_reason')
-assert transcripts.column_names[-11:] == [*plugins, *beside], transcripts.column_names
+assert transcripts.column_names[-12:] == [*plugins, *beside, 'ag_gains'], transcripts.column_names
+assert transcripts.column('ag_gains').null_count == transcripts.num_rows, transcripts
 said = {r['variant_id']: tuple(r[c] for c in plugins) for r in transcripts.to_pylist()
         if any(r[c] is not None for c in plugins)}
 assert set(said) == {'chr1-100-G-A', 'chr1-100-G-C', 'chr1-200-G-A', 'chr1-400-TCA-T'}, said
@@ -930,8 +1008,9 @@ assert (record['consequence'], record['ref_type'], record['new_stop_distance_to_
 assert record['type'] is None and record['distance_to_cds'] is None, record
 ran = manifest['transcript_rules']
 assert ran['run']['vep_release'] == '116.3', ran
-assert sorted(ran['run']) == ['gene_models', 'nmd_plugin_commit', 'uorf_evidence', 'utrannotator_commit',
-                              'vep_release'], ran
+assert sorted(ran['run']) == ['branch_points', 'gene_models', 'nmd_plugin_commit', 'uorf_evidence',
+                              'utrannotator_commit', 'vep_release'], ran
+assert ran['run']['branch_points']['name'] == 'branch_points.tsv', ran
 assert ran['matching'] == [
     {'source': 'Ensembl', 'rows_without_transcript': 0, 'rows_of_other_ids': 0, 'utr5_transcripts_without_values': 0},
     {'source': 'RefSeq', 'rows_without_transcript': 4, 'rows_of_other_ids': 0, 'utr5_transcripts_without_values': 0},

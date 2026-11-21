@@ -498,20 +498,29 @@ def _write_joined(path: pathlib.Path, alleles: Sequence[str], sources: Sequence[
     (path / joined_values.INFO_NAME).write_text(info.model_dump_json())
 
 
-_PLUGINS_INFO = transcript_rules.TranscriptRulesInfo(
-    utrannotator_commit='0' * 40,
-    nmd_plugin_commit='2' * 40,
-    vep_release='0.0',
-    uorf_evidence=transcript_rules.FileRecord(name='invented-uorfs.txt', bytes=1, sha256='1' * 64),
-    gene_models=tuple(
-        transcript_rules.GeneModelAnnotated(
-            source=source,
-            file=transcript_rules.FileRecord(name=gene_models.FILES[source], bytes=1, sha256='3' * 64),
-            prepared_from=gene_models.PublicFile(name=f'invented.{source}.gz', bytes=1, sha256='4' * 64, stated=()),
-        )
-        for source in gene_models.FILES
-    ),
-)
+def _plugins_info(catalogue: transcript_rules.FileRecord | None) -> transcript_rules.TranscriptRulesInfo:
+    """An invented record of a run of the transcript rules, which read this catalogue of branch points or none."""
+    return transcript_rules.TranscriptRulesInfo(
+        utrannotator_commit='0' * 40,
+        nmd_plugin_commit='2' * 40,
+        vep_release='0.0',
+        uorf_evidence=transcript_rules.FileRecord(name='invented-uorfs.txt', bytes=1, sha256='1' * 64),
+        gene_models=tuple(
+            transcript_rules.GeneModelAnnotated(
+                source=source,
+                file=transcript_rules.FileRecord(name=gene_models.FILES[source], bytes=1, sha256='3' * 64),
+                prepared_from=gene_models.PublicFile(name=f'invented.{source}.gz', bytes=1, sha256='4' * 64, stated=()),
+            )
+            for source in gene_models.FILES
+        ),
+        branch_points=catalogue,
+    )
+
+
+# The catalogue of branch points as the invented record of the joined files has it (_joined_file), which a run gives
+# to the transcript rules as well.
+_CATALOGUE = transcript_rules.FileRecord(name=f'{joined_values.BRANCH_POINTS.name}.invented', bytes=1, sha256='1' * 64)
+_PLUGINS_INFO = _plugins_info(_CATALOGUE)
 
 
 def _uorf(consequence: str, **fields: object) -> dict[str, Any]:
@@ -544,14 +553,18 @@ _PLUGINS: tuple[tuple[str, str, str, dict[str, Any]], ...] = (
 )
 
 
-def _write_plugins(path: pathlib.Path, rows: Sequence[tuple[str, str, str, Mapping[str, Any]]]) -> None:
+def _write_plugins(
+    path: pathlib.Path,
+    rows: Sequence[tuple[str, str, str, Mapping[str, Any]]],
+    info: transcript_rules.TranscriptRulesInfo = _PLUGINS_INFO,
+) -> None:
     path.mkdir()
     table = [
         {'variant_id': vid, 'transcript_id': transcript, 'source': source} | dict(columns)
         for vid, transcript, source, columns in rows
     ]
     pq.write_table(pa.Table.from_pylist(table, schema=transcript_rules.TABLE), path / transcript_rules.TABLE_NAME)
-    (path / transcript_rules.INFO_NAME).write_text(_PLUGINS_INFO.model_dump_json())
+    (path / transcript_rules.INFO_NAME).write_text(info.model_dump_json())
 
 
 # The tables of a family's alleles, which every family has.
@@ -593,7 +606,12 @@ def _inputs(
     _write_union(tmp_path / 'union', _ALLELES, info or _info('Ensembl', 'dbSNP', 'clinvar'), utr5)
     _write_joint(tmp_path / 'joint', joint, scores)
     _write_joined(tmp_path / 'joined', joined_alleles, joined)
-    _write_plugins(tmp_path / 'plugins', plugins)
+    # The transcript rules read the catalogue of branch points in a run that joins it, and none in any other.
+    _write_plugins(
+        tmp_path / 'plugins',
+        plugins,
+        _PLUGINS_INFO if joined_values.BRANCH_POINTS in joined else _plugins_info(None),
+    )
     return {
         'family': 'fam-1',
         'vcf_path': tmp_path / 'family.vcf.gz',
@@ -939,6 +957,88 @@ def test_a_search_for_one_kind_of_record_reads_the_entries_of_its_list(tmp_path:
             'evidence': True,
         }
     ]
+
+
+def _ag_gain(distance: int, *, high_risk: bool) -> dict[str, Any]:
+    """One invented gained `AG` as the table of the transcript rules holds it."""
+    return {
+        'branch_point_pos': 70,
+        'branch_point_distance': distance,
+        'acceptor_distance': distance - 30,
+        'yag': True,
+        'high_risk': high_risk,
+        'existing_ag': False,
+        'score': 4 + high_risk,
+    }
+
+
+# Rows of the transcript rules with gained `AG`s: the first allele gains one outside the high-risk region, the fourth
+# one outside it and one in it, and the fifth one in it on a RefSeq transcript that `transcripts` lacks.
+_AG_GAINS: tuple[tuple[str, str, str, dict[str, Any]], ...] = (
+    (_ALLELES[0], 'ENST01.1', 'Ensembl', {'ag_gains': [_ag_gain(5, high_risk=False)]}),
+    (_ALLELES[3], 'ENST01.1', 'Ensembl', {'ag_gains': [_ag_gain(5, high_risk=False), _ag_gain(12, high_risk=True)]}),
+    (_ALLELES[4], 'NM_77.1', 'RefSeq', {'ag_gains': [_ag_gain(12, high_risk=True)]}),
+)
+
+
+def test_a_transcript_row_has_the_ags_that_its_allele_gains_and_the_alleles_row_says_whether_one_is_high_risk(
+    tmp_path: pathlib.Path,
+) -> None:
+    family_tables.assemble(**_inputs(tmp_path, plugins=(*_PLUGINS, *_AG_GAINS)))
+    gained = {
+        row['variant_id']: row['ag_gains']
+        for row in pq.read_table(tmp_path / 'out' / 'transcripts.parquet').to_pylist()
+    }
+    assert gained == {
+        **dict.fromkeys(_ALLELES),
+        _ALLELES[0]: _AG_GAINS[0][3]['ag_gains'],
+        _ALLELES[3]: _AG_GAINS[1][3]['ag_gains'],
+    }
+    # True with a gained `AG` in the high-risk region on a transcript of `transcripts`, false with gained ones outside
+    # it alone, and null for an allele without one: the fifth allele's is on a transcript that `transcripts` lacks.
+    variants = tmp_path / 'out' / 'variants.parquet'
+    flags = {row['variant_id']: row['ag_gain_high_risk'] for row in _rows(variants)}
+    assert flags == {**dict.fromkeys(_ALLELES), _ALLELES[0]: False, _ALLELES[3]: True}
+    assert _rows(variants, 'SELECT variant_id FROM t WHERE ag_gain_high_risk') == [{'variant_id': _ALLELES[3]}]
+    found = _rows(
+        tmp_path / 'out' / 'transcripts.parquet',
+        'SELECT variant_id, g.branch_point_distance AS distance, g.score '
+        'FROM (SELECT variant_id, unnest(ag_gains) AS g FROM t) WHERE g.high_risk',
+    )
+    assert found == [{'variant_id': _ALLELES[3], 'distance': 12, 'score': 5}]
+    names = pq.read_schema(variants).names
+    assert names[names.index('utr5_consequences') + 1 : names.index('qual')] == ['ag_gain_high_risk']
+
+
+def test_a_run_without_the_catalogue_of_branch_points_leaves_out_the_columns_of_the_gained_ags(
+    tmp_path: pathlib.Path,
+) -> None:
+    without = tuple(source for source in _JOINED_SOURCES if source is not joined_values.BRANCH_POINTS)
+    manifest = family_tables.assemble(**_inputs(tmp_path, joined=without))
+    assert manifest.transcript_rules.run.branch_points is None
+    assert manifest.omitted_columns == ('branch_points', 'ag_gain_high_risk')
+    assert manifest.transcripts_omitted_columns == ('ag_gains',)
+    assert 'ag_gain_high_risk' not in pq.read_schema(tmp_path / 'out' / 'variants.parquet').names
+    assert 'ag_gains' not in pq.read_schema(tmp_path / 'out' / 'transcripts.parquet').names
+
+
+_OTHER_CATALOGUE = transcript_rules.FileRecord(name=_CATALOGUE.name, bytes=1, sha256='2' * 64)
+CATALOGUES = {
+    'the transcript rules read none and one was joined': (_JOINED_SOURCES, None),
+    'the transcript rules read one and none was joined': ((joined_values.MCR,), _CATALOGUE),
+    'the transcript rules read another file than was joined': (_JOINED_SOURCES, _OTHER_CATALOGUE),
+}
+
+
+@pytest.mark.parametrize('case', CATALOGUES)
+def test_transcript_rules_of_another_catalogue_of_branch_points_than_the_joined_one_are_refused(
+    tmp_path: pathlib.Path, case: str
+) -> None:
+    joined, read = CATALOGUES[case]
+    inputs = _inputs(tmp_path, joined=joined)
+    _write_plugins(tmp_path / 'other-plugins', _PLUGINS, _plugins_info(read))
+    with pytest.raises(ValueError, match='both are the same file, or neither has one'):
+        family_tables.assemble(**{**inputs, 'plugins': tmp_path / 'other-plugins'})
 
 
 def test_the_manifest_counts_the_rows_that_did_not_meet(tmp_path: pathlib.Path) -> None:
@@ -2491,10 +2591,15 @@ def test_a_family_has_the_columns_of_the_files_its_run_joined(tmp_path: pathlib.
     path = tmp_path / 'out' / 'variants.parquet'
     schema = pq.read_schema(path)
     assert schema.equals(family_tables.variants_schema(('S1', 'S2', 'S3'), manifest.omitted_columns))
-    # The columns of a file that the run did not join are left out and listed, after those of the archives.
+    # The columns of a file that the run did not join are left out and listed, after those of the archives. The
+    # transcript rules read the catalogue of branch points too, and their column goes with the catalogue's own.
     held = [column for source in given for column in source.columns]
+    gained = [family_tables._AG_GAIN.name] if joined_values.BRANCH_POINTS in given else []
     assert [name for name in schema.names if name in _JOINED_COLUMNS] == held
-    assert manifest.omitted_columns == tuple(column for column in _JOINED_COLUMNS if column not in held)
+    assert [name for name in schema.names if name == family_tables._AG_GAIN.name] == gained
+    assert manifest.omitted_columns == tuple(
+        column for column in (*_JOINED_COLUMNS, family_tables._AG_GAIN.name) if column not in (*held, *gained)
+    )
     # The columns of the files stand between those of the archives and the family's record.
     order = [name for name in schema.names if name in (_SCORE_COLUMNS[-1], *held, 'qual')]
     assert order == [_SCORE_COLUMNS[-1], *held, 'qual']
@@ -2514,9 +2619,15 @@ def test_a_family_has_the_columns_of_the_files_its_run_joined(tmp_path: pathlib.
     # transcript rules, and the manifest lists those of a file that the run did not join.
     by_transcript = pq.read_schema(tmp_path / 'out' / 'transcripts.parquet')
     held = [column for source in given for column in source.transcript_columns]
-    assert by_transcript.names == [*annotation_tables.TRANSCRIPTS.names, *held, *transcript_rules.COLUMNS.names]
+    gains = transcript_rules.AG_GAINS.name
+    of_rules = [column for column in transcript_rules.COLUMNS.names if gained or column != gains]
+    assert by_transcript.names == [*annotation_tables.TRANSCRIPTS.names, *held, *of_rules]
     assert [by_transcript.field(column) for column in held] == [family_tables.TRANSCRIPT.field(c) for c in held]
-    assert manifest.transcripts_omitted_columns == tuple(c for c in _JOINED_TRANSCRIPT_COLUMNS if c not in held)
+    assert manifest.transcripts_omitted_columns == tuple(
+        column
+        for column in (*_JOINED_TRANSCRIPT_COLUMNS, gains)
+        if column not in held and not (gained and column == gains)
+    )
     assert json.loads(by_transcript.metadata[b'joined_files']) == written['joined_files']
     # A row has the values of its allele and its transcript, which the files write without its version.
     for row in _rows(tmp_path / 'out' / 'transcripts.parquet'):
@@ -2597,7 +2708,9 @@ def test_a_run_without_the_joined_files_writes_the_other_columns_as_a_run_with_t
         (tmp_path / run).mkdir()
     family_tables.assemble(**_inputs(tmp_path / 'with'))
     family_tables.assemble(**_inputs(tmp_path / 'without', joined=()))
-    for table, joined in (('variants', _JOINED_COLUMNS), ('transcripts', _JOINED_TRANSCRIPT_COLUMNS)):
+    of_catalogue = {'variants': family_tables._AG_GAIN.name, 'transcripts': transcript_rules.AG_GAINS.name}
+    for table, files in (('variants', _JOINED_COLUMNS), ('transcripts', _JOINED_TRANSCRIPT_COLUMNS)):
+        joined = (*files, of_catalogue[table])
         with_files = _rows(tmp_path / 'with' / 'out' / f'{table}.parquet')
         assert [{name: value for name, value in row.items() if name not in joined} for row in with_files] == _rows(
             tmp_path / 'without' / 'out' / f'{table}.parquet'

@@ -424,6 +424,7 @@ def _example_plugins() -> family_tables.TranscriptRules:
         vep_release='116.3',
         uorf_evidence=recorded('invented-uorfs.txt', 2_000_000, 'e'),
         gene_models=models,
+        branch_points=None,
     )
     matching = tuple(
         family_tables.PluginMatching(
@@ -536,7 +537,10 @@ def example_manifest() -> family_tables.FamilyManifest:
             )
             for column in family_tables.VARIANT_SOURCES[source]
         ),
-        transcripts_omitted_columns=family_tables.TRANSCRIPT_SOURCES['mpc'],
+        transcripts_omitted_columns=(
+            *family_tables.TRANSCRIPT_SOURCES['mpc'],
+            *family_tables.TRANSCRIPT_SOURCES['branch_points'],
+        ),
         sv_annotation=annotation,
         sv_omitted_columns=(),
         strchive=strchive.StrchiveFile(

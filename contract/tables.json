@@ -1473,6 +1473,12 @@
           }
         },
         {
+          "name": "ag_gain_high_risk",
+          "type": "bool",
+          "nullable": true,
+          "source": "branch_points"
+        },
+        {
           "name": "qual",
           "type": "float64",
           "nullable": true
@@ -1983,6 +1989,53 @@
           "name": "nmd_escape_reason",
           "type": "string",
           "nullable": true
+        },
+        {
+          "name": "ag_gains",
+          "type": "list",
+          "nullable": true,
+          "element": {
+            "type": "struct",
+            "nullable": true,
+            "fields": [
+              {
+                "name": "branch_point_pos",
+                "type": "int32",
+                "nullable": false
+              },
+              {
+                "name": "branch_point_distance",
+                "type": "int32",
+                "nullable": false
+              },
+              {
+                "name": "acceptor_distance",
+                "type": "int32",
+                "nullable": false
+              },
+              {
+                "name": "yag",
+                "type": "bool",
+                "nullable": false
+              },
+              {
+                "name": "high_risk",
+                "type": "bool",
+                "nullable": false
+              },
+              {
+                "name": "existing_ag",
+                "type": "bool",
+                "nullable": false
+              },
+              {
+                "name": "score",
+                "type": "int32",
+                "nullable": false
+              }
+            ]
+          },
+          "source": "branch_points"
         }
       ]
     },

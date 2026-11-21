@@ -16,14 +16,19 @@ three things that no plugin gives: the Kozak context and strength of the transcr
 with the allele where the allele changes them, and the reason for a predicted escape, which only a later edition of
 the NMD plugin writes.
 
-The alleles are those of the union that overlap an exon, with the positive controls of the prepared gene models
-among them (gene_models.Control). A run is refused unless each control comes back with the value that its rule gives
-it, which is how gene models, a reference or chromosome names that do not fit one another are told from a union
-without such variants.
+A run that is given the prepared catalogue of branch points (branch_points) applies a third rule, which reads the
+same transcripts and the reference: the `AG` dinucleotides that an allele creates between the first branch point of
+an intron and its acceptor (ag_gain). It is the rule of a published article and of no plugin.
+
+The alleles are those of the union that lie in an exon or, in a run with the catalogue, within a hundred bases of one,
+with the positive controls of the prepared gene models among them (gene_models.Control). A run is refused unless each
+control comes back with the value that its rule gives it, which is how gene models, a reference or chromosome names
+that do not fit one another are told from a union without such variants.
 """
 
 from __future__ import annotations
 
+import bisect
 import concurrent.futures
 import dataclasses
 import hashlib
@@ -41,7 +46,7 @@ import pyarrow.parquet as pq
 import pydantic
 import pysam
 
-from case_annotation import annotation_tables, gene_models, nmd, plugin_gates, transcript_models, utr5
+from case_annotation import ag_gain, annotation_tables, gene_models, nmd, plugin_gates, transcript_models, utr5
 
 TABLE_NAME = 'transcript_rules.parquet'
 INFO_NAME = 'transcript_rules.json'
@@ -80,6 +85,21 @@ UORF = pa.struct(
         pa.field('evidence', _BOOL),
     ]
 )
+# One `AG` that the allele creates between the first branch point of an intron of the transcript and the intron's
+# acceptor, as ag_gain.Gain describes it, with the position of that branch point on the genome.
+AG_GAIN = pa.struct(
+    [
+        pa.field('branch_point_pos', _INT, nullable=False),
+        pa.field('branch_point_distance', _INT, nullable=False),
+        pa.field('acceptor_distance', _INT, nullable=False),
+        pa.field('yag', _BOOL, nullable=False),
+        pa.field('high_risk', _BOOL, nullable=False),
+        pa.field('existing_ag', _BOOL, nullable=False),
+        pa.field('score', _INT, nullable=False),
+    ]
+)
+# The column of the rule that reads the catalogue of branch points, which a run without the catalogue leaves empty.
+AG_GAINS = pa.field('ag_gains', pa.list_(AG_GAIN))
 # The columns that the table gives a row of `transcripts`, in their order.
 COLUMNS = pa.schema(
     [
@@ -94,6 +114,7 @@ COLUMNS = pa.schema(
         pa.field('utr5_cds_kozak_context_alt', _STRING),
         pa.field('utr5_cds_kozak_strength_alt', _STRING),
         pa.field('nmd_escape_reason', _STRING),
+        AG_GAINS,
     ]
 )
 TABLE = pa.schema(
@@ -188,6 +209,9 @@ class TranscriptRulesInfo(pydantic.BaseModel, frozen=True, extra='forbid'):
     # The plugin's file of upstream reading frames that were seen translated, which gives a record its `evidence`.
     uorf_evidence: FileRecord
     gene_models: tuple[GeneModelAnnotated, ...]
+    # The prepared catalogue of branch points that the rule of the gained `AG`s read, as the run was given it. None
+    # in a run without the catalogue, whose table has no value of that rule.
+    branch_points: FileRecord | None
 
 
 def _recorded(path: pathlib.Path) -> FileRecord:
@@ -335,38 +359,84 @@ class _Task:
     models: Mapping[gene_models.Source, pathlib.Path]
     reference: pathlib.Path
     evidence: frozenset[int]
+    # The regions of the chromosome's exons (gene_models.EXONS_NAME), in order: half-open, from 0, without overlaps.
+    exons: Sequence[tuple[int, int]]
+    # The catalogued branch points of the chromosome, or None in a run without the catalogue.
+    branch_points: ag_gain.BranchPoints | None
+
+
+def read_exons(path: pathlib.Path) -> dict[str, list[tuple[int, int]]]:
+    """The regions of the exons of the prepared gene models, by chromosome, as the file gives them.
+
+    Raises:
+        ValueError: if a line is no chromosome with a start and an end, or the regions of a chromosome are not in
+            order and apart, as gene_models.prepare writes them.
+    """
+    regions: dict[str, list[tuple[int, int]]] = {}
+    for number, line in enumerate(path.read_text('utf-8').splitlines(), start=1):
+        fields = line.split('\t')
+        if len(fields) != 3 or not (fields[1].isdigit() and fields[2].isdigit()) or int(fields[1]) >= int(fields[2]):
+            raise ValueError(f'{path}: line {number} is no chromosome with a start and an end behind it')
+        of_chrom = regions.setdefault(fields[0], [])
+        if of_chrom and int(fields[1]) <= of_chrom[-1][1]:
+            raise ValueError(f'{path}: line {number} is not behind the region before it')
+        of_chrom.append((int(fields[1]), int(fields[2])))
+    return regions
+
+
+def _in_exons(starts: Sequence[int], exons: Sequence[tuple[int, int]], pos: int, ref: str) -> bool:
+    """Whether a record overlaps a region of the exons, as `bcftools view -R` decides it: by the bases of its REF."""
+    at = bisect.bisect_left(starts, pos + len(ref) - 1) - 1
+    return at >= 0 and exons[at][1] >= pos
 
 
 def _chromosome(task: _Task) -> tuple[pa.Table, int]:
     """The rows of one chromosome's alleles, for the transcripts of every gene model file, and the count of the alleles.
+
+    The plugins' rules read the alleles whose record overlaps a region of the exons, which are all of them in a run
+    without the catalogue of branch points. In a run with it the step is given the alleles beside the exons too, and
+    the rule of the gained `AG` reads every allele. A row of the plugins' rules is therefore the same in both.
 
     It writes a line to the log for every PROGRESS_EVERY alleles that it has read with a gene model file, and one when
     it has read them all, so that a run shows in its log where it is and how fast it goes.
     """
     rows: list[dict[str, Any]] = []
     started = time.monotonic()
+    starts = [start for start, _end in task.exons]
     with pysam.FastaFile(str(task.reference)) as reference, pysam.VariantFile(str(task.sites)) as sites:
         if task.chrom not in sites.header.contigs:
             return TABLE.empty_table(), 0
-        alleles = []
+        # Each allele under its id, with whether the plugins' rules read it and, in a run with the catalogue, its
+        # reach over every way of writing it.
+        alleles: list[tuple[str, plugin_gates.Allele, bool, tuple[int, int] | None]] = []
         for record in sites.fetch(task.chrom):
             if record.ref is None or record.alts is None or len(record.alts) != 1 or record.id is None:
                 raise ValueError(f'{task.sites}: {record.chrom}:{record.pos} is no record of one allele under its id')
             if _ALLELE.fullmatch(record.ref) and _ALLELE.fullmatch(record.alts[0]):
-                alleles.append((record.id, plugin_gates.Allele.of_record(record.pos, record.ref, record.alts[0])))
+                allele = plugin_gates.Allele.of_record(record.pos, record.ref, record.alts[0])
+                span = None
+                if task.branch_points is not None:
+                    span = ag_gain.written_span(allele, reference, task.chrom)
+                alleles.append((record.id, allele, _in_exons(starts, task.exons, record.pos, record.ref), span))
         if not alleles:
             return TABLE.empty_table(), 0
         for source, path in task.models.items():
             transcripts = transcript_models.read(path, task.chrom, task.names)
             overlapping = transcript_models.Overlapping(transcripts)
             annotated: dict[int, Annotated] = {}
-            for done, (variant_id, allele) in enumerate(alleles, start=1):
+            for done, (variant_id, allele, in_exons, span) in enumerate(alleles, start=1):
                 for transcript in overlapping.of(allele.low, allele.high):
-                    held = annotated.get(id(transcript))
-                    if held is None:
-                        held = annotated[id(transcript)] = Annotated(transcript, reference)
-                    columns = transcript_columns(held, allele, task.evidence)
-                    if columns is not None:
+                    columns: dict[str, Any] = {}
+                    if in_exons:
+                        held = annotated.get(id(transcript))
+                        if held is None:
+                            held = annotated[id(transcript)] = Annotated(transcript, reference)
+                        columns = transcript_columns(held, allele, task.evidence) or {}
+                    if task.branch_points is not None and span is not None:
+                        gained = ag_gain.of_transcript(transcript, allele, span, reference, task.branch_points)
+                        if gained:
+                            columns[AG_GAINS.name] = gained
+                    if columns:
                         key = {'variant_id': variant_id, 'transcript_id': transcript.transcript_id, 'source': source}
                         rows.append(key | columns)
                 if done % PROGRESS_EVERY == 0 or done == len(alleles):
@@ -428,21 +498,24 @@ def annotate(
     uorf_evidence: pathlib.Path,
     output: pathlib.Path,
     workers: int = 1,
+    branch_points: pathlib.Path | None = None,
 ) -> TranscriptRulesInfo:
     """Writes the table of a union's alleles and the record of what its values come from into the output folder.
 
-    `given` is the union's alleles that overlap an exon, each under its variant id, with the positive controls: a
-    VCF compressed with bgzip, with its index beside it. `prepared` is the folder of the prepared gene models,
+    `given` is the union's alleles that a rule can evaluate, each under its variant id, with the positive controls:
+    a VCF compressed with bgzip, with its index beside it. `prepared` is the folder of the prepared gene models,
     `reference` the FASTA that the alleles are called against, with its `.fai`, and `uorf_evidence` the plugin's
-    file of the upstream reading frames that were seen translated. The chromosomes are shared among `workers`
-    processes. The table's rows are sorted by variant id and transcript id, so that two runs of the same inputs write
-    the same table. The log gets a line for each chromosome that is done, with the alleles read and the seconds since
-    the start, beside the lines of each process (_chromosome).
+    file of the upstream reading frames that were seen translated. `branch_points` is the prepared catalogue of
+    branch points, with which the rule of the gained `AG`s is applied as well. The chromosomes are shared among
+    `workers` processes. The table's rows are sorted by variant id and transcript id, so that two runs of the same
+    inputs write the same table. The log gets a line for each chromosome that is done, with the alleles read and the
+    seconds since the start, beside the lines of each process (_chromosome).
 
     Raises:
-        ValueError: if an input is not what its role needs (read_given, transcript_models.read, utr5.uorf_evidence),
-            a prepared gene model file is not the one that the folder's record describes, a control fails
-            (check_control), or the gene model files give a transcript twice, in one file or in both.
+        ValueError: if an input is not what its role needs (read_given, read_exons, transcript_models.read,
+            utr5.uorf_evidence, ag_gain.read_catalogue), a prepared gene model file is not the one that the folder's
+            record describes, a control fails (check_control), or the gene model files give a transcript twice, in
+            one file or in both.
     """
     record = gene_models.read_record(prepared)
     files: dict[gene_models.Source, FileRecord] = {}
@@ -458,6 +531,8 @@ def annotate(
     with uorf_evidence.open(encoding='utf-8') as lines:
         evidence = utr5.uorf_evidence(lines)
     names = transcript_models.sequence_names(prepared / gene_models.SYNONYMS_NAME)
+    catalogued = None if branch_points is None else ag_gain.read_catalogue(branch_points)
+    exons = read_exons(prepared / gene_models.EXONS_NAME)
     tasks = [
         _Task(
             chrom=chrom,
@@ -466,6 +541,8 @@ def annotate(
             models={described.source: prepared / described.file for described in record.gene_models},
             reference=reference,
             evidence=frozenset(position for listed, position in evidence if listed == chrom),
+            exons=exons.get(chrom, ()),
+            branch_points=None if catalogued is None else catalogued[chrom],
         )
         for chrom in gene_models.CHROMOSOMES
     ]
@@ -518,6 +595,7 @@ def annotate(
             GeneModelAnnotated(source=file.source, file=files[file.source], prepared_from=file.prepared_from)
             for file in record.gene_models
         ),
+        branch_points=None if branch_points is None else _recorded(branch_points),
     )
     (output / INFO_NAME).write_text(info.model_dump_json(indent=2) + '\n')
     print(f'{len(alleles)} alleles read, {table.num_rows} rows of an allele and transcript that a rule evaluated')

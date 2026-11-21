@@ -1,7 +1,8 @@
 // The steps of the family tables (family_tables.nf, docs/annotation.md) other than the Annotator's own: checking a
 // family's inputs, normalising its VCF and the sequences of its structural variants, taking the union of the families'
 // sites, reading the union's values from echtvar archives, joining public files to the union's alleles, applying the
-// rules of two plugins of Ensembl VEP to the union's alleles in exons, converting the union's annotation, finding each
+// rules of two plugins of Ensembl VEP and the rule of the gained AG to the union's alleles in and beside exons,
+// converting the union's annotation, finding each
 // family's runs of homozygosity and regions of uniparental disomy, and writing each family's tables. The structural
 // variants and copy-number segments of a group have a union of their own, which SV_SITES cuts from each family's VCFs,
 // SV_UNION joins and SV_ANNOTATION_TABLES converts the annotation of.
@@ -332,16 +333,23 @@ process JOINED_VALUES {
 // What the rules of VEP's UTRannotator and NMD plugins say of the union's alleles, as a table by allele and
 // transcript, with a record of what the values come from. case-annotation applies the rules to the transcripts of the
 // prepared gene models (case-annotation gene-models) and to the reference, and the step runs no VEP.
-// bcftools first cuts the union to the alleles that a rule can evaluate: those that overlap an exon of a gene model
-// file, each under its variant id, with the positive controls of the prepared gene models among them. A variant in a
-// 5' UTR and one that ends a reading frame lie in an exon, so the cut leaves out no allele that a rule would evaluate,
-// and the command reads a few alleles in a hundred. The regions do not overlap one another, and an allele that the cut
-// still writes twice stops the step, since an allele's id is the key of its rows in the table.
+// A run that names the prepared catalogue of branch points gets a third rule from the same step, which reads the same
+// transcripts and the reference: the AG dinucleotides that an allele creates between the first branch point of an
+// intron and its acceptor. A run without the catalogue gives an empty list for it, and its table has no such value.
+// bcftools first cuts the union to the alleles that a rule can evaluate, each under its variant id, with the positive
+// controls of the prepared gene models among them. For the plugins' rules those are the alleles that overlap an exon
+// of a gene model file: a variant in a 5' UTR and one that ends a reading frame lie in an exon, so the cut leaves out
+// no allele that a rule would evaluate, and the command reads a few alleles in a hundred. A branch point counts up to
+// 99 bases before an exon, so with the catalogue awk first widens each region of the exons by 100 bases on either
+// side, since the regions do not say which side an exon's acceptor is on, and joins the regions that then meet. The
+// regions do not overlap one another, and an allele that the cut still writes twice stops the step, since an allele's
+// id is the key of its rows in the table.
 // The command fails unless each positive control holds what its rule gives it: gene models and a reference that do
 // not fit one another would otherwise leave every row empty, like a union without a variant in a 5' UTR.
 // A staged input can be a link into a bucket mount, as on Google Batch, and reading the reference and the gene models
 // through such a mount, in many small reads, is slow. The step copies both into a folder of the task's own on the
 // VM's disk, once, in one sequential read each, and the commands are given the copies and read nothing else of the two.
+// The catalogue is read once from its first byte to its last, where it is staged.
 // The command writes a line to the log for every 20,000 alleles of a chromosome that it has read with a gene model
 // file and for every chromosome that is done, with the seconds since its start, so a running task shows where it is.
 // The time limit ends a task that has stalled: on eight CPUs the command reads 800,000 alleles in about a minute, and
@@ -360,11 +368,15 @@ process TRANSCRIPT_RULES {
     tuple val(group), path(sites), path(sites_index)
     tuple path(reference), path(reference_index)
     path gene_models, stageAs: 'gene-models'
+    path branch_points, stageAs: 'branch_points/*'
 
     output:
     path 'transcript_rules'
 
     script:
+    // How far beside an exon an allele is still read: as far as a branch point counts, and one base for an insertion.
+    def beside = branch_points ? 100 : 0
+    def catalogue = branch_points ? "--branch-points ${branch_points}" : ''
     """
     set -o pipefail
     copies=\$(mktemp -d /tmp/transcript-rules.XXXXXX)
@@ -372,9 +384,15 @@ process TRANSCRIPT_RULES {
     mkdir "\${copies}/gene-models"
     cp -L ${reference} ${reference_index} "\${copies}/"
     cp -L gene-models/* "\${copies}/gene-models/"
-    bcftools view --no-version -R "\${copies}/gene-models/exons.bed" -Ou ${sites} \\
+    awk -v beside=${beside} 'BEGIN { OFS = "\\t" }
+        { start = \$2 > beside ? \$2 - beside : 0; end = \$3 + beside }
+        \$1 == chrom && start <= last { if (end > last) last = end; next }
+        chrom != "" { print chrom, first, last }
+        { chrom = \$1; first = start; last = end }
+        END { if (chrom != "") print chrom, first, last }' "\${copies}/gene-models/exons.bed" > "\${copies}/regions.bed"
+    bcftools view --no-version -R "\${copies}/regions.bed" -Ou ${sites} \\
         | bcftools annotate --no-version --set-id '%CHROM-%POS-%REF-%ALT' -Ov -o exons.vcf
-    echo "\$(grep -vc '^#' exons.vcf) alleles of the union overlap an exon"
+    echo "\$(grep -vc '^#' exons.vcf) alleles of the union lie in the regions that the rules read"
     grep -v '^#' "\${copies}/gene-models/controls.vcf" >> exons.vcf
     bcftools sort -Oz -o ${group}.exons.vcf.gz exons.vcf
     bcftools index -t ${group}.exons.vcf.gz
@@ -385,7 +403,7 @@ process TRANSCRIPT_RULES {
     fi
     case-annotation transcript-rules --given ${group}.exons.vcf.gz --gene-models "\${copies}/gene-models" \\
         --reference "\${copies}/${reference.name}" --uorf-evidence "\${UORF_EVIDENCE}" --workers ${task.cpus} \\
-        --output transcript_rules
+        ${catalogue} --output transcript_rules
     """
 
     stub:

@@ -800,6 +800,16 @@
           },
           "title": "Gene Models",
           "type": "array"
+        },
+        "branch_points": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FileRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -807,7 +817,8 @@
         "nmd_plugin_commit",
         "vep_release",
         "uorf_evidence",
-        "gene_models"
+        "gene_models",
+        "branch_points"
       ],
       "title": "TranscriptRulesInfo",
       "type": "object"

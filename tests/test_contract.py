@@ -828,13 +828,15 @@ def test_the_columns_of_each_table_are_the_ones_its_file_declares(tmp_path: path
         expected = [] if source is echtvar_values.REQUIRED else list(source.columns)
         assert by_source.get(source.name, []) == expected
     # A joined file's columns are those of its source, in variants and in transcripts, and a run can leave each file
-    # out.
+    # out. The transcript rules read the catalogue of branch points as well, and their columns of the gained `AG`s are
+    # left out with it.
     by_transcript: dict[str, list[str]] = {}
     for column in TABLES['transcripts']['columns']:
         by_transcript.setdefault(column.get('source', ''), []).append(column['name'])
     for file in joined_values.SOURCES.values():
-        assert by_source[file.name] == list(file.columns)
-        assert by_transcript.get(file.name, []) == list(file.transcript_columns)
+        gained = file is joined_values.BRANCH_POINTS
+        assert by_source[file.name] == [*file.columns, *(['ag_gain_high_risk'] if gained else [])]
+        assert by_transcript.get(file.name, []) == [*file.transcript_columns, *(['ag_gains'] if gained else [])]
 
 
 def test_a_table_with_the_members_columns_reserves_the_names_of_its_other_columns() -> None:
