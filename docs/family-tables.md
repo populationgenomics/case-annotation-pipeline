@@ -3268,9 +3268,10 @@ column name, or of the manifest as plain JSON, finds what it knew as before: `va
 in a folder with and without the others. A reader that checks the manifest against a fixed set of keys has to allow for
 a key that is added under the same version.
 
-The `utr5_` columns and `nmd_escaping` have other values for some insertions and deletions than Ensembl VEP's plugins
-gave them ([Where the values are not the plugin's](annotation.md#where-the-values-are-not-the-plugins)). No table with
-the plugins' own values has been written, so this keeps the tables' version at `0.5.0`.
+The `utr5_` columns and `nmd_escaping` have other values for some alleles, most of them insertions and deletions, than
+Ensembl VEP's plugins gave them
+([Where the values are not the plugin's](annotation.md#where-the-values-are-not-the-plugins)). No table with the
+plugins' own values has been written, so this keeps the tables' version at `0.5.0`.
 
 The tables share these properties:
 

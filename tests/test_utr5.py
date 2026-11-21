@@ -548,6 +548,13 @@ def test_the_frames_of_a_changed_utr_are_those_of_reading_it_through() -> None:
         )
 
 
+def test_a_start_codon_before_the_first_place_of_a_movable_deletion_is_met() -> None:
+    """One `ATGTAA` fewer of two can be written at either, and the first start codon is the one that is lost."""
+    lost = records('ATGTAAATGTAAC', 0, 6, '')
+    assert [(record['consequence'], record['cap_distance_to_start']) for record in lost] == [('uAUG_lost', 0)]
+    assert records('ATGTAAATGTAAC', 6, 6, '') == lost
+
+
 def test_the_start_codons_that_are_passed_over_have_no_record(monkeypatch: pytest.MonkeyPatch) -> None:
     """Only the start codons whose frame the change can meet are looked at, and looking at every one finds no more."""
     found = [
