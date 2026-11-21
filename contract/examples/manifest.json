@@ -1,6 +1,6 @@
 {
   "schema_version": "0.5.0",
-  "pipeline_version": "0.4.0",
+  "pipeline_version": "0.5.0",
   "family": "family-a",
   "members": [
     {
@@ -261,30 +261,14 @@
   ],
   "vep_plugins": {
     "run": {
-      "vep_version": "116.3",
       "utrannotator_commit": "0000000000000000000000000000000000000000",
+      "nmd_plugin_commit": "1111111111111111111111111111111111111111",
+      "vep_release": "116.3",
       "uorf_evidence": {
         "name": "invented-uorfs.txt",
         "bytes": 2000000,
         "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
       },
-      "nmd_plugin": {
-        "name": "NMD.pm",
-        "bytes": 5000,
-        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-      },
-      "options": [
-        "--gff",
-        "--fasta",
-        "--synonyms",
-        "--json",
-        "--safe",
-        "--transcript_version"
-      ],
-      "environment": [
-        "PERL_HASH_SEED=0",
-        "PERL_PERTURB_KEYS=0"
-      ],
       "gene_models": [
         {
           "source": "Ensembl",

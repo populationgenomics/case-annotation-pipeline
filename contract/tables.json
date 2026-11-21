@@ -1958,6 +1958,31 @@
           "name": "nmd_escaping",
           "type": "bool",
           "nullable": true
+        },
+        {
+          "name": "utr5_cds_kozak_context",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "utr5_cds_kozak_strength",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "utr5_cds_kozak_context_alt",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "utr5_cds_kozak_strength_alt",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "nmd_escape_reason",
+          "type": "string",
+          "nullable": true
         }
       ]
     },

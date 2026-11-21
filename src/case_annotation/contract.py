@@ -162,7 +162,6 @@ def _family_tables_workflow() -> dict[str, Any]:
             _param(release, 'String', pattern=NAME),
             _param(release_date, 'String', pattern=DATE),
             _param('gene_models', 'Path', required=True),
-            _param('vep_container', 'String', required=True),
             _param('tools_container', 'String', required=True),
             _param('output_dir', 'String'),
             _param('arGuid', 'String'),
@@ -403,7 +402,7 @@ def _example_annotation() -> annotation_tables.AnnotationInfo:
 
 
 def _example_plugins() -> family_tables.VepPlugins:
-    """The run of VEP's plugins of the example manifest: invented files, checksums and counts."""
+    """What the plugins' columns come from in the example manifest: invented files, checksums and counts."""
 
     def recorded(name: str, size: int, digit: str) -> vep_plugins.FileRecord:
         return vep_plugins.FileRecord(name=name, bytes=size, sha256=digit * 64)
@@ -420,12 +419,10 @@ def _example_plugins() -> family_tables.VepPlugins:
         for number, source in enumerate(gene_models.FILES, start=1)
     )
     run = vep_plugins.VepPluginsInfo(
-        vep_version='116.3',
         utrannotator_commit='0' * 40,
+        nmd_plugin_commit='1' * 40,
+        vep_release='116.3',
         uorf_evidence=recorded('invented-uorfs.txt', 2_000_000, 'e'),
-        nmd_plugin=recorded('NMD.pm', 5_000, 'b'),
-        options=('--gff', '--fasta', '--synonyms', '--json', '--safe', '--transcript_version'),
-        environment=('PERL_HASH_SEED=0', 'PERL_PERTURB_KEYS=0'),
         gene_models=models,
     )
     matching = tuple(

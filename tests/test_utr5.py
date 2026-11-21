@@ -1,0 +1,459 @@
+"""The rules of UTRannotator as utr5 restates them, on invented sequences.
+
+Every sequence here is invented. `UTR` holds two upstream ORFs, and `CODING` is a coding sequence that begins with
+its start codon and has a stop codon in each reading frame.
+"""
+
+from __future__ import annotations
+
+import json
+import pathlib
+from collections.abc import Callable
+from typing import Any
+
+import pytest
+
+from case_annotation import utr5
+
+#      0         1         2         3         4
+#      01234567890123456789012345678901234567890
+UTR = 'GGCACCATGGCTCCGTAAGCGCCATGCCTTGAGCGGTCACC'
+# An upstream ORF from the start codon at 6 to the stop codon at 15, and one from 23 to 29.
+CODING = 'ATGGCTGAGCTGTAAGTAGC'
+
+
+def records(utr: str, position: int, removed: int, inserted: str, coding: str = CODING) -> list[dict[str, Any]]:
+    """The records of a change, each without its empty fields, in the order of their start codons."""
+    found = utr5.effects(
+        utr5.ReadingFrames(utr, coding), utr5.Change(position, removed, inserted), lambda _start: False
+    )
+    brief = [{key: value for key, value in record.items() if value is not None} for record in found]
+    return sorted(brief, key=lambda record: (record['consequence'], str(record)))
+
+
+def kinds(utr: str, position: int, removed: int, inserted: str) -> list[str]:
+    return [record['consequence'] for record in records(utr, position, removed, inserted)]
+
+
+LOST_FIRST_START = {
+    'consequence': 'uAUG_lost',
+    'type': 'uORF',
+    'cap_distance_to_start': 6,
+    'distance_to_cds': 35,
+    'distance_to_stop': 9,
+    'kozak_context': 'ACCATGG',
+    'kozak_strength': 'Strong',
+    'evidence': False,
+}
+FIRST_FRAME_SHIFTED = {
+    'consequence': 'uFrameShift',
+    'ref_type': 'uORF',
+    'ref_type_length': 12,
+    'ref_start_distance_to_cds': 35,
+    'alt_type': 'uORF',
+    'alt_type_length': 27,
+    'kozak_context': 'ACCATGG',
+    'kozak_strength': 'Strong',
+    'evidence': False,
+}
+
+
+@pytest.mark.parametrize(
+    ('sequence', 'start', 'expected'),
+    [
+        ('GCCATGG', 3, ('GCCATGG', 'Strong')),
+        ('ACCATGG', 3, ('ACCATGG', 'Strong')),
+        ('GCCATGC', 3, ('GCCATGC', 'Moderate')),
+        ('TCCATGG', 3, ('TCCATGG', 'Moderate')),
+        ('TCCATGC', 3, ('TCCATGC', 'Weak')),
+        ('CCATGG', 2, (None, None)),
+        ('GCCATG', 3, (None, None)),
+    ],
+)
+def test_a_kozak_context_is_strong_with_a_purine_before_and_a_g_after(
+    sequence: str, start: int, expected: tuple[str | None, str | None]
+) -> None:
+    assert utr5.kozak(sequence, start) == expected
+
+
+def test_a_reading_frame_ends_at_the_first_stop_codon_in_its_frame() -> None:
+    frames = utr5.ReadingFrames(UTR, CODING)
+    assert frames.starts == [6, 23]
+    assert (frames.stop_in_utr(6), frames.stop_in_utr(23)) == (15, 29)
+    assert (frames.type(6), frames.type(23)) == ('uORF', 'uORF')
+    assert frames.existing() == {
+        'utr5_existing_uorfs': 2,
+        'utr5_existing_oorfs_out_of_frame': 0,
+        'utr5_existing_oorfs_in_frame': 0,
+    }
+
+
+def test_a_frame_without_a_stop_in_the_utr_ends_in_the_coding_sequence() -> None:
+    in_frame = utr5.ReadingFrames('CCATGGCC', CODING)
+    assert (in_frame.type(2), in_frame.stop_in_utr(2), in_frame.stop(2)) == ('InFrame_oORF', None, 8 + 12)
+    out_of_frame = utr5.ReadingFrames('CCATGGC', CODING)
+    assert (out_of_frame.type(2), out_of_frame.stop(2)) == ('OutOfFrame_oORF', 7 + 16)
+    # A stop codon whose first two bases end the UTR and whose last begins the coding sequence.
+    across = utr5.ReadingFrames('CCATGGCCTA', CODING)
+    assert (across.type(2), across.stop(2)) == ('OutOfFrame_oORF', 8)
+    assert in_frame.existing()['utr5_existing_oorfs_in_frame'] == 1
+    assert out_of_frame.existing()['utr5_existing_oorfs_out_of_frame'] == 1
+
+
+def test_a_frame_without_any_stop_has_no_end() -> None:
+    assert utr5.ReadingFrames('CCATGGCC', 'ATGGCC').stop(2) is None
+
+
+def test_a_substitution_that_makes_a_start_codon_is_a_gain() -> None:
+    assert records(UTR, 28, 1, 'A') == [
+        {
+            'consequence': 'uAUG_gained',
+            'type': 'OutOfFrame_oORF',
+            'kozak_context': 'GCCATGA',
+            'kozak_strength': 'Moderate',
+            'cap_distance_to_start': 28,
+            'distance_to_cds': 13,
+            'distance_to_stop': 18,
+        }
+    ]
+
+
+def test_a_substitution_in_a_start_codon_is_its_loss() -> None:
+    assert records(UTR, 7, 1, 'C') == [LOST_FIRST_START]
+
+
+def test_a_substitution_in_a_stop_codon_is_its_loss_and_names_the_next_stop() -> None:
+    assert records(UTR, 16, 1, 'C') == [
+        {
+            'consequence': 'uSTOP_lost',
+            'alt_stop': False,
+            'frame_with_cds': 'outOfFrame',
+            'kozak_context': 'ACCATGG',
+            'kozak_strength': 'Strong',
+            'evidence': False,
+        }
+    ]
+    # With a later stop codon in the frame, the record says where it is.
+    longer = 'GGCACCATGGCTCCGTAAGCGTGACC'
+    (lost,) = records(longer, 16, 1, 'C')
+    assert (lost['alt_stop'], lost['alt_stop_distance_to_cds'], lost['frame_with_cds']) == (True, 5, 'outOfFrame')
+
+
+def test_a_substitution_that_leaves_another_stop_codon_at_the_place_is_no_loss() -> None:
+    assert records(UTR, 17, 1, 'G') == []
+
+
+def test_a_substitution_that_makes_a_stop_codon_in_a_frame_is_a_gained_stop() -> None:
+    longer = 'GGCACCATGGCTCAGCCGTAAGCG'
+    assert records(longer, 12, 1, 'T') == [
+        {
+            'consequence': 'uSTOP_gained',
+            'ref_type': 'uORF',
+            'ref_start_distance_to_cds': 18,
+            'new_stop_distance_to_cds': 12,
+            'kozak_context': 'ACCATGG',
+            'kozak_strength': 'Strong',
+            'evidence': False,
+        }
+    ]
+
+
+def test_an_insertion_or_deletion_in_a_frame_shifts_it_unless_it_is_of_whole_codons() -> None:
+    assert records(UTR, 10, 0, 'A') == [FIRST_FRAME_SHIFTED]
+    assert records(UTR, 10, 2, '') == [FIRST_FRAME_SHIFTED | {'alt_type_length': 24}]
+    assert records(UTR, 10, 0, 'AAA') == []
+    assert records(UTR, 9, 3, '') == []
+
+
+def test_a_shifted_frame_that_loses_its_stop_runs_into_the_coding_sequence() -> None:
+    (shifted,) = records('CCATGGCTTAACC', 6, 0, 'G')
+    assert (shifted['ref_type'], shifted['ref_type_length']) == ('uORF', 9)
+    assert (shifted['alt_type'], shifted['alt_type_length']) == ('InFrame_oORF', 27)
+
+
+def test_a_record_says_whether_its_start_codon_was_seen_translated() -> None:
+    frames = utr5.ReadingFrames(UTR, CODING)
+    (lost,) = utr5.effects(frames, utr5.Change(7, 1, 'C'), lambda start: start == 6)
+    assert lost['evidence'] is True
+
+
+def test_an_allele_that_changes_nothing_has_no_record() -> None:
+    assert records(UTR, 7, 1, 'T') == []
+
+
+# Where the records are not the plugin's. Each test says what the plugin gives for the same change.
+
+
+def test_an_insertion_directly_before_a_start_codon_does_not_remove_it() -> None:
+    """The plugin reads the codon at its old place, finds the inserted bases there and reports the start lost."""
+    assert records(UTR, 6, 0, 'CC') == []
+
+
+def test_an_insertion_that_can_be_written_before_a_start_codon_does_not_remove_it() -> None:
+    """`CA` after the codon's `A` gives the sequence that `AC` before the codon gives.
+
+    The plugin reports the start lost for both ways of writing it, and for the first one a start gained as well.
+    """
+    assert records(UTR, 7, 0, 'CA') == records(UTR, 6, 0, 'AC') == []
+
+
+def test_an_insertion_that_leaves_a_start_codon_where_it_stood_does_not_make_it() -> None:
+    """`G` between the codon's `T` and `G` gives the sequence that `G` after the codon gives.
+
+    The plugin reports the codon gained. It is the reference's own, and what the insertion does is shift its frame.
+    """
+    assert records(UTR, 8, 0, 'G') == records(UTR, 9, 0, 'G') == [FIRST_FRAME_SHIFTED]
+
+
+def test_a_substitution_that_leaves_a_start_codon_where_it_stood_does_not_make_it() -> None:
+    """The plugin reports a gain for any start codon that the changed bases reach, the reference's own too."""
+    assert records(UTR, 5, 5, 'TATGA') == []
+
+
+def test_every_start_codon_that_an_allele_makes_is_a_gain() -> None:
+    """The plugin reports the first one alone."""
+    gained = records(UTR, 3, 0, 'ATGCATGC')
+    assert [(g['consequence'], g['cap_distance_to_start'], g['type']) for g in gained] == [
+        ('uAUG_gained', 3, 'OutOfFrame_oORF'),
+        ('uAUG_gained', 7, 'uORF'),
+    ]
+
+
+def test_an_allele_at_the_first_bases_of_the_utr_is_not_read_with_its_last_bases() -> None:
+    """The plugin looks for a new start codon from two bases before the allele.
+
+    At the UTR's first two bases that reaches its last two, by Perl's negative index. Here the UTR ends with `A` and
+    the changed UTR begins `TG`, and the plugin reports a start codon one base before the UTR.
+    """
+    assert records('CGCCGGCACCCGGA', 0, 1, 'T') == []
+
+
+def test_a_repeated_start_codon_is_gained_or_lost_once_and_leaves_the_other_frame_alone() -> None:
+    """One more or one fewer copy of `ATGC` can be written at either copy.
+
+    The reading frame of a start codon is what follows it, so the copy with the unchanged bases behind it stays and
+    the first copy is the one gained or lost. The plugin, given the insertion behind the first copy, reports the
+    second copy gained and the first copy's frame shifted.
+    """
+    repeated = 'GGCACCATGCATGCCGTAAGCG'
+    for position in (6, 10, 14):
+        assert [(r['consequence'], r['cap_distance_to_start']) for r in records(repeated, position, 0, 'ATGC')] == [
+            ('uAUG_gained', 6)
+        ]
+    for position in (6, 10):
+        assert [(r['consequence'], r['cap_distance_to_start']) for r in records(repeated, position, 4, '')] == [
+            ('uAUG_lost', 6)
+        ]
+
+
+def test_an_insertion_directly_before_a_stop_codon_shifts_the_frame_or_does_nothing() -> None:
+    """The plugin reports the stop lost for both, and names the same stop codon as the next one."""
+    assert records(UTR, 15, 0, 'C') == [FIRST_FRAME_SHIFTED]
+    assert records(UTR, 15, 0, 'CCC') == []
+
+
+def test_an_insertion_in_a_stop_codon_is_its_loss() -> None:
+    (lost,) = records(UTR, 16, 0, 'C')
+    assert (lost['consequence'], lost['alt_stop'], lost['alt_stop_distance_to_cds']) == ('uSTOP_lost', True, 12)
+
+
+def test_a_deletion_that_leaves_a_stop_codon_at_the_place_is_no_loss() -> None:
+    """`TAGAA` without `AG` reads `TAA` where `TAG` stood. The plugin reports every deletion at a stop codon lost."""
+    assert records('GGCACCATGGCTCCGTAGAAGCGCC', 16, 2, '') == []
+
+
+#           0         1         2
+#           012345678901234567890123
+STOP_RUN = 'CATGCCCCTTTGACCGGCCTAGCC'
+# The frame of the start codon at 1 ends at the stop codon `TGA` at 10, behind three `T`.
+
+
+def test_a_deletion_that_can_be_written_into_a_stop_codon_is_its_loss_however_it_is_written() -> None:
+    """Two `T` fewer can be written before the stop codon or with its first base.
+
+    The plugin reports a shifted frame for the first way and a lost stop for the second.
+    """
+    written = [records(STOP_RUN, position, 2, '') for position in (8, 9)]
+    assert written[0] == written[1]
+    assert [record['consequence'] for record in written[0]] == ['uSTOP_lost']
+
+
+def test_a_deletion_of_whole_codons_before_a_stop_codon_keeps_the_stop() -> None:
+    assert kinds(STOP_RUN, 7, 3, '') == []
+
+
+def test_the_strength_of_a_start_codon_without_a_context_is_empty() -> None:
+    """A start codon at the UTR's last three bases has no base behind it in the UTR.
+
+    The plugin then leaves the strength of the start codon that it looked at before, here `Strong`, in the record.
+    """
+    lost = records('GGCACCATGGCCGCCATG', 5, 13, '')
+    assert [(record['cap_distance_to_start'], record.get('kozak_strength')) for record in lost] == [
+        (15, None),
+        (6, 'Strong'),
+    ]
+
+
+@pytest.mark.parametrize(
+    ('utr', 'unit'),
+    [(UTR, 'C'), (UTR, 'CA'), ('GGCACCATGCATGCCGTAAGCG', 'ATGC'), (STOP_RUN, 'T'), (STOP_RUN, 'TT'), (UTR, 'GT')],
+)
+def test_one_changed_sequence_has_one_set_of_records(utr: str, unit: str) -> None:
+    """Every way of writing an insertion or a deletion that gives the same sequence gives the same records."""
+    by_changed: dict[str, list[list[dict[str, Any]]]] = {}
+    for position in range(len(utr) + 1):
+        by_changed.setdefault(utr[:position] + unit + utr[position:], []).append(records(utr, position, 0, unit))
+        if utr[position : position + len(unit)] == unit:
+            deleted = utr[:position] + utr[position + len(unit) :]
+            by_changed.setdefault(deleted, []).append(records(utr, position, len(unit), ''))
+    assert any(len(written) > 1 for written in by_changed.values())
+    for written in by_changed.values():
+        assert all(found == written[0] for found in written)
+
+
+# The transcript's own start codon
+
+#          0         1
+#          0123456789012345678
+SPLICED = 'GGCGCCGCCATGGCTGAGC'
+OWN_START = 9
+
+
+def test_the_own_start_codon_has_the_context_that_an_upstream_one_would_have() -> None:
+    assert utr5.kozak(SPLICED, OWN_START) == ('GCCATGG', 'Strong')
+
+
+@pytest.mark.parametrize(
+    ('first', 'removed', 'inserted', 'expected'),
+    [
+        (6, 1, 'T', ('TCCATGG', 'Moderate')),  # the base three before the codon
+        (12, 1, 'C', ('GCCATGC', 'Moderate')),  # the base after it
+        (7, 1, 'T', ('GTCATGG', 'Strong')),  # a base of the context that the strength does not read
+        (9, 0, 'T', ('CCTATGG', 'Moderate')),  # an insertion directly before the codon
+        (12, 0, 'A', ('GCCATGA', 'Moderate')),  # an insertion directly after it
+        (7, 2, '', ('CCGATGG', 'Moderate')),  # a deletion of the two bases before it
+    ],
+)
+def test_an_allele_that_changes_the_context_of_the_own_start_codon_gives_both(
+    first: int, removed: int, inserted: str, expected: tuple[str, str]
+) -> None:
+    assert utr5.own_start_change(SPLICED, OWN_START, first, removed, inserted) == expected
+
+
+@pytest.mark.parametrize(
+    ('first', 'removed', 'inserted'),
+    [
+        (5, 1, 'T'),  # before the context
+        (13, 1, 'A'),  # behind it
+        (10, 1, 'C'),  # in the start codon
+        (8, 2, 'TT'),  # across the context and the start codon
+        (6, 0, 'GCC'),  # a copy of the three bases before the codon, which leaves the same three before it
+        (6, 3, ''),  # one of the two `GCC` before the codon
+    ],
+)
+def test_an_allele_that_leaves_the_context_or_touches_the_start_codon_gives_none(
+    first: int, removed: int, inserted: str
+) -> None:
+    assert utr5.own_start_change(SPLICED, OWN_START, first, removed, inserted) is None
+
+
+def test_a_change_that_leaves_no_three_bases_before_the_own_start_codon_gives_none() -> None:
+    assert utr5.own_start_change('GCCATGGCT', 3, 0, 2, '') is None
+
+
+# The file of translated upstream ORFs
+
+EVIDENCE = [
+    'chr\tpos\tgene\tstrand\ttype\tstop_pos\n',
+    'chr1\t100\tINVENTED\t+\tuORF\t130\n',
+    'chr2\t7\tOTHER\t-\tuORF\t1\n',
+]
+
+
+def test_the_file_of_translated_upstream_orfs_gives_their_start_codons() -> None:
+    assert utr5.uorf_evidence(EVIDENCE) == {('chr1', 100), ('chr2', 7)}
+
+
+@pytest.mark.parametrize(
+    ('lines', 'message'),
+    [
+        (EVIDENCE[1:], 'not with its header'),
+        ([EVIDENCE[0], '1\t100\tINVENTED\n'], 'line 2'),
+        ([EVIDENCE[0], 'chr1\tabout 100\n'], 'line 2'),
+        ([EVIDENCE[0], 'chr1\n'], 'line 2'),
+        (EVIDENCE[:1], 'lists none'),
+    ],
+)
+def test_a_file_that_is_not_the_list_of_translated_upstream_orfs_fails(lines: list[str], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        utr5.uorf_evidence(lines)
+
+
+# The plugin's own test rows
+
+PUBLIC_ROWS = json.loads((pathlib.Path(__file__).parent / 'utrannotator_public_rows.json').read_text('utf-8'))['rows']
+_TYPES = {
+    'uORF': 'uORF',
+    'OutOfFrame_oORF': 'OutOfFrame_oORF',
+    'InFrame_oORF': 'InFrame_oORF',
+    'inFrame_oORF': 'InFrame_oORF',
+}
+# Each key of a record of the plugin, after the kind that begins it: the field that holds its value, and how the
+# plugin's text is read. The plugin writes `NA` for a distance that it has none of and `-` for a missing context.
+_FIELDS: dict[str, tuple[str, Callable[[str], Any]]] = {
+    'type': ('type', _TYPES.__getitem__),
+    'ref_type': ('ref_type', _TYPES.__getitem__),
+    'alt_type': ('alt_type', _TYPES.__getitem__),
+    'KozakContext': ('kozak_context', lambda text: None if text == '-' else text),
+    'KozakStrength': ('kozak_strength', lambda text: text or None),
+    'CapDistanceToStart': ('cap_distance_to_start', int),
+    'DistanceToCDS': ('distance_to_cds', int),
+    'DistanceToStop': ('distance_to_stop', lambda text: None if text == 'NA' else int(text)),
+    'ref_StartDistanceToCDS': ('ref_start_distance_to_cds', int),
+    'newSTOPDistanceToCDS': ('new_stop_distance_to_cds', int),
+    'AltStop': ('alt_stop', {'True': True, 'False': False}.__getitem__),
+    'AltStopDistanceToCDS': ('alt_stop_distance_to_cds', lambda text: None if text == 'NA' else int(text)),
+    'FrameWithCDS': ('frame_with_cds', str),
+    'ref_type_length': ('ref_type_length', lambda text: None if text == 'NA' else int(text)),
+    'alt_type_length': ('alt_type_length', lambda text: None if text == 'NA' else int(text)),
+    'Evidence': ('evidence', {'True': True, 'False': False}.__getitem__),
+}
+
+
+def _plugin_records(consequence: str, annotation: str) -> list[dict[str, Any]]:
+    """The records of a row of the plugin's output: the kinds, joined with `&`, and a text of each in the same order."""
+    found: list[dict[str, Any]] = []
+    if consequence == '-':  # no effect
+        return found
+    for kind, text in zip(consequence.split('&'), annotation.split('&'), strict=True):
+        record: dict[str, Any] = {'consequence': kind}
+        for pair in text.split(','):
+            key, _, value = pair.partition(':')
+            field, read = _FIELDS[key.removeprefix(f'{kind}_')]
+            record[field] = read(value)
+        found.append(record)
+    return found
+
+
+def _in_order(found: list[dict[str, Any]]) -> list[str]:
+    return sorted(json.dumps(record, sort_keys=True) for record in found)
+
+
+@pytest.mark.parametrize('row', PUBLIC_ROWS, ids=[f'{row["variant"]} on {row["transcript"]}' for row in PUBLIC_ROWS])
+def test_the_rows_that_the_plugin_ships_as_its_test_are_reproduced(row: dict[str, Any]) -> None:
+    """The alleles and rows of the plugin's own test (tests/utrannotator_public_rows.json says where they are from)."""
+    frames = utr5.ReadingFrames(row['utr5'], row['coding'])
+    assert frames.existing() == {
+        'utr5_existing_uorfs': row['existing_uORFs'],
+        'utr5_existing_oorfs_out_of_frame': row['existing_OutOfFrame_oORFs'],
+        'utr5_existing_oorfs_in_frame': row['existing_InFrame_oORFs'],
+    }
+    change = utr5.Change(row['position'], row['removed'], row['inserted'])
+    found = utr5.effects(frames, change, lambda start: start in row['translated_starts'])
+    shipped = _plugin_records(row['five_prime_UTR_variant_consequence'], row['five_prime_UTR_variant_annotation'])
+    assert _in_order(found) == _in_order(shipped)
+
+
+def test_the_plugin_s_test_rows_cover_its_kinds_of_effect() -> None:
+    kinds = {kind for row in PUBLIC_ROWS for kind in row['five_prime_UTR_variant_consequence'].split('&')}
+    assert kinds == {'-', 'uAUG_gained', 'uAUG_lost', 'uSTOP_lost', 'uFrameShift'}

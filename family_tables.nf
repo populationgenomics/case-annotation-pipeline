@@ -1,11 +1,11 @@
 // Writes the family tables (docs/annotation.md) of the families that share one source selection: each family's VCF is
 // normalised, the union of their sites is annotated once with Illumina's Annotator and converted into tables, the
 // union's values from echtvar archives are read (gnomAD's joint values, and AlphaGenome's scores where the run names
-// their archives), the public files that the run names are joined to the union's alleles, two plugins of Ensembl VEP
-// annotate the union's alleles in exons, and each family's tables are cut from all four. Each family's runs of
-// homozygosity and regions of uniparental disomy come from its own VCF, which two published tools read with gnomAD's
-// frequencies from the same archive. The union and what annotates it reveal every family's alleles, so they are
-// published under annotation-unions/<group>/ and never beside a family's tables, which go to
+// their archives), the public files that the run names are joined to the union's alleles, the rules of two plugins of
+// Ensembl VEP are applied to the union's alleles in exons, and each family's tables are cut from all four. Each
+// family's runs of homozygosity and regions of uniparental disomy come from its own VCF, which two published tools read
+// with gnomAD's frequencies from the same archive. The union and what annotates it reveal every family's alleles, so
+// they are published under annotation-unions/<group>/ and never beside a family's tables, which go to
 // annotations/<family>/. The Annotator's output has a folder of its own there,
 // which a later run can reuse in place of annotating again. A family whose row also names VCFs of its larger variants
 // (its structural variants, its copy-number segments or its members' repeats) gets tables of those too. The structural
@@ -19,7 +19,7 @@
 // Including the workflow in another pipeline). The entry workflow reads the families from a sheet and the settings
 // from params, and publishes what ANNOTATE_FAMILIES emits.
 
-include { FAMILY_CHECK ; NORMALISE_FAMILY ; NORMALISE_SV ; UNION_SITES ; SV_SITES ; SV_UNION ; ECHTVAR_VALUES ; JOINED_VALUES ; VEP_SITES ; VEP_PLUGINS ; VEP_PLUGIN_TABLE ; ANNOTATION_TABLES ; SV_ANNOTATION_TABLES ; ROH_UPD ; FAMILY_TABLES ; groupAnnotation ; svName ; svGroup } from './modules/family_tables'
+include { FAMILY_CHECK ; NORMALISE_FAMILY ; NORMALISE_SV ; UNION_SITES ; SV_SITES ; SV_UNION ; ECHTVAR_VALUES ; JOINED_VALUES ; VEP_PLUGIN_TABLE ; ANNOTATION_TABLES ; SV_ANNOTATION_TABLES ; ROH_UPD ; FAMILY_TABLES ; groupAnnotation ; svName ; svGroup } from './modules/family_tables'
 include { ILLUMINA_ANNOTATE } from './modules/annotator'
 include { ILLUMINA_ANNOTATE as ILLUMINA_ANNOTATE_SV } from './modules/annotator'
 
@@ -87,10 +87,9 @@ params {
     strchive_release: String?
     strchive_release_date: String?
     // The folder of gene models that `case-annotation gene-models` prepared from Ensembl's and NCBI's public files
-    // (docs/annotation.md): VEP builds its transcripts from them, and reads them afresh in every run. The image that
-    // holds VEP with the UTRannotator plugin (containers/vep) runs that one step.
+    // (docs/annotation.md): the step that applies the rules of VEP's two plugins builds its transcripts from them,
+    // and reads them afresh in every run.
     gene_models: Path
-    vep_container: String
     tools_container: String
     output_dir: String?
     arGuid: String?
@@ -217,8 +216,8 @@ workflow ANNOTATE_FAMILIES {
     if (!reference_index.exists()) {
         error("${settings.reference}: no .fai beside it")
     }
-    // The files of the prepared gene models are looked for before any task runs: without one of them the steps of
-    // VEP would fail beside an Annotator run that is billed.
+    // The files of the prepared gene models are looked for before any task runs: without one of them the step that
+    // reads them would fail beside an Annotator run that is billed.
     geneModelFiles().each { name ->
         if (!settings.gene_models.resolve(name).exists()) {
             error("${settings.gene_models}: no ${name}, so it is no folder that case-annotation gene-models prepared")
@@ -274,10 +273,8 @@ workflow ANNOTATE_FAMILIES {
         settings.mpc ?: [],
         settings.branch_points ?: [],
     )
-    // VEP reads the union's alleles in the exons of the prepared gene models, with their positive controls.
-    vep_sites = VEP_SITES(union, settings.gene_models.resolve('exons.bed'), settings.gene_models.resolve('controls.vcf'))
-    vep = VEP_PLUGINS(vep_sites, reference, settings.gene_models)
-    vep_plugins = VEP_PLUGIN_TABLE(vep_sites, vep, settings.gene_models.resolve('gene-models.json'))
+    // The rules of VEP's two plugins, applied to the union's alleles in the exons of the prepared gene models.
+    vep_plugins = VEP_PLUGIN_TABLE(union, reference, settings.gene_models)
 
     if (settings.annotated != null) {
         def reused = settings.annotated.resolve("out/${settings.group}.json.gz")
@@ -429,7 +426,7 @@ def settingNames() {
 }
 
 // The files of a folder of prepared gene models (docs/annotation.md): the two gene model files with their indexes,
-// and what the steps of VEP read beside them.
+// and what the step that applies the plugins' rules reads beside them.
 def geneModelFiles() {
     return ['ensembl.gff3.gz', 'ensembl.gff3.gz.tbi', 'refseq.gff.gz', 'refseq.gff.gz.tbi', 'chromosome-synonyms.txt', 'exons.bed', 'controls.vcf', 'gene-models.json']
 }

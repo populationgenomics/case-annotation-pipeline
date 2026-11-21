@@ -499,12 +499,10 @@ def _write_joined(path: pathlib.Path, alleles: Sequence[str], sources: Sequence[
 
 
 _PLUGINS_INFO = vep_plugins.VepPluginsInfo(
-    vep_version='0.0',
     utrannotator_commit='0' * 40,
+    nmd_plugin_commit='2' * 40,
+    vep_release='0.0',
     uorf_evidence=vep_plugins.FileRecord(name='invented-uorfs.txt', bytes=1, sha256='1' * 64),
-    nmd_plugin=vep_plugins.FileRecord(name='NMD.pm', bytes=1, sha256='2' * 64),
-    options=('--json',),
-    environment=('PERL_HASH_SEED=0',),
     gene_models=tuple(
         vep_plugins.GeneModelAnnotated(
             source=source,

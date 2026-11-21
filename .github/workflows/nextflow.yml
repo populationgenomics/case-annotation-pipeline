@@ -164,7 +164,6 @@ jobs:
                 --annotation_data /src/stub/illumina-bundle \
                 --gnomad_joint /src/stub/gnomad-joint.zip \
                 --gene_models /src/stub/gene-models \
-                --vep_container stub \
                 --tools_container stub \
                 "$@"
           }
@@ -225,12 +224,12 @@ jobs:
             exit 1
           fi
           # Reusing an earlier run's annotation, from the folder that the run published it in, runs no Annotator, and
-          # reads the values from the echtvar archives and runs VEP afresh. Its outputs go to a folder of their own: the
-          # first run's belong to the container's user, which the runner cannot remove.
+          # reads the values from the echtvar archives and applies the rules of VEP's plugins afresh. Its outputs go to
+          # a folder of their own: the first run's belong to the container's user, which the runner cannot remove.
           family_run --families /src/stub/families.csv --annotated "/src/${results}/${annotation}" \
             --output_dir /src/stub/reuse > reuse.log
           if grep -q ILLUMINA_ANNOTATE reuse.log || ! grep -q ECHTVAR_VALUES reuse.log ||
-            ! grep -qF 'ANNOTATE_FAMILIES:VEP_PLUGINS (stub-group)' reuse.log; then
+            ! grep -qF 'ANNOTATE_FAMILIES:VEP_PLUGIN_TABLE (stub-group)' reuse.log; then
             cat reuse.log
             exit 1
           fi
@@ -479,8 +478,7 @@ jobs:
 
   family-tables:
     # Runs the family tables' processes for real on invented families, wired as family_tables.nf wires them, and checks
-    # their output (tests/workflows/family_tables.nf). The case-annotation, echtvar and upd steps run in the tools
-    # image, and the step that runs Ensembl VEP in the VEP image, both built from this commit.
+    # their output (tests/workflows/family_tables.nf). The steps run in the tools image, built from this commit.
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -489,7 +487,6 @@ jobs:
       - name: The family tables' processes on invented families
         run: |
           docker build -f containers/tools/Dockerfile -t case-annotation-tools-test .
-          docker build -t case-annotation-vep-test containers/vep
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "${PWD}:${PWD}" -w "${PWD}" \
             nextflow/nextflow:26.04.7@sha256:08a3a53e8fd317b22711b6fbabb268678b91b023b39099da2b902261515f438e \
             nextflow -C tests/workflows/nextflow.config run tests/workflows/family_tables.nf

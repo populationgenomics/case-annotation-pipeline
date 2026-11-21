@@ -1,0 +1,28 @@
+The modules nmd, plugin_gates and transcript_models of this package restate in Python, with the changes that each
+module states in its opening lines, rules of the following works. This is the notice that the files of those works
+carry:
+
+Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
+Copyright [2016-2026] EMBL-European Bioinformatics Institute
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+The works:
+
+- NMD.pm of https://github.com/Ensembl/VEP_plugins, branch release/116, commit
+  2341cdc2c173caeae043e60de412fa185efe00bc
+- Bio::EnsEMBL::VEP::AnnotationSource::File::BaseGXF and GFF of https://github.com/Ensembl/ensembl-vep, release 116.3
+- Bio::EnsEMBL::Variation::Utils::VariationEffect, BaseVariationFeatureOverlapAllele, BaseTranscriptVariation,
+  BaseTranscriptVariationAllele and TranscriptVariationAllele of https://github.com/Ensembl/ensembl-variation,
+  release 116
+- Bio::EnsEMBL::Transcript, TranscriptMapper and Mapper of https://github.com/Ensembl/ensembl, release 116

@@ -1,34 +1,37 @@
-"""What two plugins of Ensembl VEP say of a union's alleles, as a Parquet table (docs/annotation.md).
+"""What the rules of two plugins of Ensembl VEP say of a union's alleles, as a Parquet table (docs/annotation.md).
 
 The Annotator gives a variant in a 5' untranslated region the consequence `5_prime_UTR_variant` and no more. The
-UTRannotator plugin of Zhang, Wakeling, Ware and Whiffin (https://github.com/ImperialCardioGenetics/UTRannotator, MIT)
-says which upstream open reading frames such a variant creates, removes or changes, and the NMD plugin of Ensembl's
-collection says whether a variant that ends a reading frame early is predicted to escape nonsense-mediated decay. VEP
-runs once for each gene model file (gene_models), on the union's alleles that overlap an exon, and writes one JSON
-document per allele. This module turns those documents into one row per allele and transcript that a plugin evaluated,
-keyed as `transcripts` is, with a record of what ran beside it. The record holds nothing of the union's own, such as a
-count of its alleles, so that it is the same for every union that the same image and gene models annotate.
+UTRannotator plugin says which upstream open reading frames such a variant creates, removes or changes, and the NMD
+plugin of Ensembl's collection says whether a variant that ends a reading frame early is predicted to escape
+nonsense-mediated decay. This module does not run VEP. It applies the plugins' rules, restated in Python (utr5, nmd),
+to the transcripts of the prepared gene model files (gene_models, transcript_models), for the alleles and transcripts
+that VEP would give to each plugin (plugin_gates), and writes one row per allele and transcript that a rule
+evaluated, keyed as `transcripts` is, with a record of what the values come from beside it. The record holds nothing
+of the union's own, such as a count of its alleles, so that it is the same for every union that the same image and
+gene models annotate.
 
-The plugins are run as they are, and nothing here classifies a variant. A value is the plugin's, under a name in snake
-case and with the type that the value has: UTRannotator writes its records as text, a number or `NA` for a distance and
-`True` or `False` for a flag. The one value that is respelled is the type of a reading frame, which the plugin writes
-in two spellings and the table in one (_TYPES). The one thing read beside the plugins' own keys is how VEP placed the
-variant: the NMD plugin writes a key only where it predicts an escape, so a row that it evaluated and did not flag is
-told by the consequence terms and coding positions that make the plugin evaluate a row (_NMD_TERMS). No other value of
-VEP's is kept.
+A row has the plugins' values under names in snake case, each with the type that the value has. Beside them it has
+three things that no plugin gives: the Kozak context and strength of the transcript's own start codon, the same two
+with the allele where the allele changes them, and the reason for a predicted escape, which only a later edition of
+the NMD plugin writes.
 
-A run is refused unless its positive controls come back annotated (gene_models.Control), which is how a plugin that
-did not run is told from one that found nothing.
+The alleles are those of the union that overlap an exon, with the positive controls of the prepared gene models
+among them (gene_models.Control). A run is refused unless each control comes back with the value that its rule gives
+it, which is how gene models, a reference or chromosome names that do not fit one another are told from a union
+without such variants.
 """
 
 from __future__ import annotations
 
-import gzip
+import concurrent.futures
+import dataclasses
+import hashlib
 import itertools
 import json
+import multiprocessing
 import pathlib
 import re
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import pyarrow as pa
@@ -36,21 +39,22 @@ import pyarrow.parquet as pq
 import pydantic
 import pysam
 
-from case_annotation import annotation_tables, gene_models
+from case_annotation import annotation_tables, gene_models, nmd, plugin_gates, transcript_models, utr5
 
 TABLE_NAME = 'vep_plugins.parquet'
 INFO_NAME = 'vep_plugins.json'
-# What the step that runs VEP writes into its folder: the record of its run, and VEP's output for each source.
-RUN_NAME = 'vep.json'
-OUTPUTS: Mapping[gene_models.Source, str] = {'Ensembl': 'ensembl.json.gz', 'RefSeq': 'refseq.json.gz'}
+
+# The release of Ensembl VEP whose reading of a gene model file and whose consequence terms the step follows
+# (transcript_models, plugin_gates): the one that computed these columns before the rules were restated.
+VEP_RELEASE = '116.3'
 
 _STRING = pa.string()
 _INT = pa.int32()
 _BOOL = pa.bool_()
 
-# One record of UTRannotator: one upstream start codon that the allele gains or loses, or whose reading frame it
-# changes. `consequence` is the kind of effect, and every other field is a key of the plugin's record of that kind,
-# which a record of another kind does not have.
+# One record of UTRannotator's rules: one upstream start codon that the allele gains or loses, or whose reading frame
+# it changes. `consequence` is the kind of effect, and every other field is a key of the plugin's record of that
+# kind, which a record of another kind does not have.
 UORF = pa.struct(
     [
         pa.field('consequence', _STRING, nullable=False),
@@ -81,6 +85,11 @@ COLUMNS = pa.schema(
         pa.field('utr5_existing_oorfs_out_of_frame', _INT),
         pa.field('utr5_existing_oorfs_in_frame', _INT),
         pa.field('nmd_escaping', _BOOL),
+        pa.field('utr5_cds_kozak_context', _STRING),
+        pa.field('utr5_cds_kozak_strength', _STRING),
+        pa.field('utr5_cds_kozak_context_alt', _STRING),
+        pa.field('utr5_cds_kozak_strength_alt', _STRING),
+        pa.field('nmd_escape_reason', _STRING),
     ]
 )
 TABLE = pa.schema(
@@ -97,98 +106,35 @@ TABLE = pa.schema(
 # match one.
 TRANSCRIPT_ID = re.compile(r'(ENST|NM_|NR_|XM_|XR_)\d+\.\d+')
 
-# The type of a reading frame: each spelling that the plugin writes, and the one label that the table holds for it. The
-# plugin writes the in-frame type with a small `i` in a uAUG_gained record and with a capital in every other record.
-# The table holds the capital for both, so that a condition on one label finds every record of the type.
-_TYPES: Mapping[str, str] = {
-    'uORF': 'uORF',
-    'OutOfFrame_oORF': 'OutOfFrame_oORF',
-    'InFrame_oORF': 'InFrame_oORF',
-    'inFrame_oORF': 'InFrame_oORF',
-}
-_STRENGTHS = frozenset({'Weak', 'Moderate', 'Strong'})
-_FRAMES = frozenset({'inFrame', 'outOfFrame'})
-
-
-def _whole(value: str) -> int:
-    if not re.fullmatch(r'-?\d+', value):
-        raise ValueError(f'{value!r} is not a whole number')
-    return int(value)
-
-
-def _whole_or_na(value: str) -> int | None:
-    return None if value == 'NA' else _whole(value)
-
-
-def _flag(value: str) -> bool:
-    if value not in ('True', 'False'):
-        raise ValueError(f'{value!r} is neither True nor False')
-    return value == 'True'
-
-
-def _one_of(known: frozenset[str]) -> Callable[[str], str]:
-    def read(value: str) -> str:
-        if value not in known:
-            raise ValueError(f'{value!r} is none of {sorted(known)}')
-        return value
-
-    return read
-
-
-def _type(value: str) -> str:
-    """The type of a reading frame, under the table's one label for it."""
-    if value not in _TYPES:
-        raise ValueError(f'{value!r} is none of {sorted(_TYPES)}')
-    return _TYPES[value]
-
-
-def _context(value: str) -> str | None:
-    """A Kozak context, which the plugin writes as `-` for a start codon within three bases of an end of the UTR."""
-    if value == '-':
-        return None
-    if not value:
-        raise ValueError('an empty Kozak context')
-    return value
-
-
-def _strength(value: str) -> str | None:
-    """A Kozak strength, which the plugin leaves empty where it gives no context."""
-    return _one_of(_STRENGTHS)(value) if value else None
-
-
-# Each key of a record of UTRannotator, after the kind that prefixes it: the field of UORF that holds its value, and
-# how the plugin's text is read. `NA` is read only where the plugin's documentation says that it writes it.
-_KEYS: Mapping[str, tuple[str, Callable[[str], Any]]] = {
-    'type': ('type', _type),
-    'ref_type': ('ref_type', _type),
-    'alt_type': ('alt_type', _type),
-    'KozakContext': ('kozak_context', _context),
-    'KozakStrength': ('kozak_strength', _strength),
-    'CapDistanceToStart': ('cap_distance_to_start', _whole),
-    'DistanceToCDS': ('distance_to_cds', _whole),
-    'DistanceToStop': ('distance_to_stop', _whole_or_na),
-    'ref_StartDistanceToCDS': ('ref_start_distance_to_cds', _whole),
-    'newSTOPDistanceToCDS': ('new_stop_distance_to_cds', _whole),
-    'AltStop': ('alt_stop', _flag),
-    'AltStopDistanceToCDS': ('alt_stop_distance_to_cds', _whole_or_na),
-    'FrameWithCDS': ('frame_with_cds', _one_of(_FRAMES)),
-    'ref_type_length': ('ref_type_length', _whole_or_na),
-    'alt_type_length': ('alt_type_length', _whole_or_na),
-    'Evidence': ('evidence', _flag),
-}
-# The kinds of effect, and the keys that a record of each kind has: all of them, and no other.
+# The kinds of effect, and the fields of UORF that a record of each kind has beside `consequence`: all of them, and
+# no other.
 KINDS: Mapping[str, frozenset[str]] = {
     'uAUG_gained': frozenset(
-        {'type', 'KozakContext', 'KozakStrength', 'CapDistanceToStart', 'DistanceToCDS', 'DistanceToStop'}
+        {'type', 'kozak_context', 'kozak_strength', 'cap_distance_to_start', 'distance_to_cds', 'distance_to_stop'}
     ),
     'uAUG_lost': frozenset(
-        {'type', 'KozakContext', 'KozakStrength', 'CapDistanceToStart', 'DistanceToCDS', 'DistanceToStop', 'Evidence'}
+        {
+            'type',
+            'kozak_context',
+            'kozak_strength',
+            'cap_distance_to_start',
+            'distance_to_cds',
+            'distance_to_stop',
+            'evidence',
+        }
     ),
     'uSTOP_gained': frozenset(
-        {'ref_type', 'KozakContext', 'KozakStrength', 'ref_StartDistanceToCDS', 'newSTOPDistanceToCDS', 'Evidence'}
+        {
+            'ref_type',
+            'kozak_context',
+            'kozak_strength',
+            'ref_start_distance_to_cds',
+            'new_stop_distance_to_cds',
+            'evidence',
+        }
     ),
     'uSTOP_lost': frozenset(
-        {'AltStop', 'AltStopDistanceToCDS', 'FrameWithCDS', 'KozakContext', 'KozakStrength', 'Evidence'}
+        {'alt_stop', 'alt_stop_distance_to_cds', 'frame_with_cds', 'kozak_context', 'kozak_strength', 'evidence'}
     ),
     'uFrameShift': frozenset(
         {
@@ -196,28 +142,16 @@ KINDS: Mapping[str, frozenset[str]] = {
             'ref_type_length',
             'alt_type',
             'alt_type_length',
-            'ref_StartDistanceToCDS',
-            'KozakContext',
-            'KozakStrength',
-            'Evidence',
+            'ref_start_distance_to_cds',
+            'kozak_context',
+            'kozak_strength',
+            'evidence',
         }
     ),
 }
 
-# The keys of a transcript in VEP's JSON that UTRannotator writes: the kinds of effect and their records, each as one
-# text, and the three counts of the reading frames that the transcript's 5' UTR already has.
-_CONSEQUENCE = 'five_prime_utr_variant_consequence'
-_ANNOTATION = 'five_prime_utr_variant_annotation'
-_COUNTS: Mapping[str, str] = {
-    'existing_uorfs': 'utr5_existing_uorfs',
-    'existing_outofframe_oorfs': 'utr5_existing_oorfs_out_of_frame',
-    'existing_inframe_oorfs': 'utr5_existing_oorfs_in_frame',
-}
-# The NMD plugin's key and the one value it writes, and what makes the plugin evaluate a row: one of these consequence
-# terms, on a variant with a start and an end in the coding sequence (the plugin's own two conditions).
-_NMD = 'nmd'
-_NMD_ESCAPING = 'NMD_escaping_variant'
-_NMD_TERMS = frozenset({'stop_gained', 'frameshift_variant', 'splice_donor_variant', 'splice_acceptor_variant'})
+_ALLELE = re.compile(r'[ACGT]+')
+_START_CODON = 'ATG'
 
 
 class FileRecord(pydantic.BaseModel, frozen=True, extra='forbid'):
@@ -226,26 +160,6 @@ class FileRecord(pydantic.BaseModel, frozen=True, extra='forbid'):
     name: str
     bytes: int
     sha256: str = pydantic.Field(pattern=r'^[0-9a-f]{64}$')
-
-
-class GeneModelRead(pydantic.BaseModel, frozen=True, extra='forbid'):
-    source: gene_models.Source
-    file: FileRecord
-
-
-class VepRun(pydantic.BaseModel, frozen=True, extra='forbid'):
-    """What the step that runs VEP records of its run (RUN_NAME)."""
-
-    vep_version: str = pydantic.Field(min_length=1)
-    # The commit of https://github.com/ImperialCardioGenetics/UTRannotator that the image holds the plugin at.
-    utrannotator_commit: str = pydantic.Field(pattern=r'^[0-9a-f]{40}$')
-    # The plugin's file of upstream reading frames that were seen translated, which gives a record its `evidence`.
-    uorf_evidence: FileRecord
-    nmd_plugin: FileRecord  # NMD.pm as the image holds it
-    # VEP's options as the step gave them, without the paths of a run, and the variables of its environment.
-    options: tuple[str, ...]
-    environment: tuple[str, ...]
-    gene_models: tuple[GeneModelRead, ...]
 
 
 class GeneModelAnnotated(pydantic.BaseModel, frozen=True, extra='forbid'):
@@ -257,52 +171,26 @@ class GeneModelAnnotated(pydantic.BaseModel, frozen=True, extra='forbid'):
 
 
 class VepPluginsInfo(pydantic.BaseModel, frozen=True, extra='forbid'):
-    """The VEP run that the columns of the two plugins come from (INFO_NAME)."""
+    """What the columns of the two plugins' rules come from (INFO_NAME)."""
 
-    vep_version: str
-    utrannotator_commit: str
+    # The commit of https://github.com/ImperialCardioGenetics/UTRannotator that the rules of the utr5_ columns were
+    # restated from (utr5), and the commit of https://github.com/Ensembl/VEP_plugins for the rule of the nmd_ columns
+    # (nmd).
+    utrannotator_commit: str = pydantic.Field(pattern=r'^[0-9a-f]{40}$')
+    nmd_plugin_commit: str = pydantic.Field(pattern=r'^[0-9a-f]{40}$')
+    # The release of Ensembl VEP that the step follows in reading the gene models and in choosing the alleles that a
+    # rule evaluates.
+    vep_release: str = pydantic.Field(min_length=1)
+    # The plugin's file of upstream reading frames that were seen translated, which gives a record its `evidence`.
     uorf_evidence: FileRecord
-    nmd_plugin: FileRecord
-    options: tuple[str, ...]
-    environment: tuple[str, ...]
     gene_models: tuple[GeneModelAnnotated, ...]
 
 
-def uorf_records(consequence: str, annotation: str) -> list[dict[str, Any]]:
-    """UTRannotator's records of one allele and transcript, each as an entry of UORF, in a fixed order.
-
-    The plugin joins the kinds of its records with `&`, and the records in the same order with `&` as well. A record
-    is its keys and values as `key:value`, joined with commas, and each key begins with the record's kind.
-
-    Raises:
-        ValueError: if the two texts hold different numbers of records, a kind is none of KINDS, a record's keys are
-            not exactly its kind's, or a value is not what its key holds.
-    """
-    kinds, texts = consequence.split('&'), annotation.split('&')
-    if len(kinds) != len(texts):
-        raise ValueError(f'{len(kinds)} kinds in {consequence!r} and {len(texts)} records in {annotation!r}')
-    records = []
-    for kind, text in zip(kinds, texts, strict=True):
-        if kind not in KINDS:
-            raise ValueError(f'{kind!r} is no kind of effect that UTRannotator is known to write')
-        values: dict[str, str] = {}
-        for pair in text.split(','):
-            prefixed, separator, value = pair.partition(':')
-            key = prefixed.removeprefix(f'{kind}_')
-            if not separator or key == prefixed or key in values:
-                raise ValueError(f'{pair!r} is no key and value of a {kind} record, or repeats one: {text!r}')
-            values[key] = value
-        if values.keys() != KINDS[kind]:
-            raise ValueError(f'a {kind} record has the keys {sorted(KINDS[kind])}, and this one {sorted(values)}')
-        record: dict[str, Any] = {'consequence': kind}
-        for key, value in values.items():
-            field, read = _KEYS[key]
-            try:
-                record[field] = read(value)
-            except ValueError as malformed:
-                raise ValueError(f'{kind}_{key}: {malformed}') from malformed
-        records.append(record)
-    return sorted(records, key=_record_order)
+def _recorded(path: pathlib.Path) -> FileRecord:
+    with path.open('rb') as f:
+        return FileRecord(
+            name=path.name, bytes=path.stat().st_size, sha256=hashlib.file_digest(f, 'sha256').hexdigest()
+        )
 
 
 def _record_order(record: Mapping[str, Any]) -> tuple[str, int, str]:
@@ -312,56 +200,157 @@ def _record_order(record: Mapping[str, Any]) -> tuple[str, int, str]:
     return (record['consequence'], 0 if start is None else -start, json.dumps(record, sort_keys=True))
 
 
-def _utr5(transcript: Mapping[str, Any]) -> dict[str, Any] | None:
-    """The UTRannotator columns of one transcript of VEP's JSON, or None where the plugin did not evaluate it.
+def utr_change(transcript: transcript_models.Transcript, allele: plugin_gates.Allele) -> utr5.Change | None:
+    """An allele as a change of a transcript's 5' UTR, or None for one that the plugin's rules do not read.
 
-    The plugin evaluates a transcript whose 5' UTR the allele lies in, and writes its three counts for each such
-    transcript, with or without an effect.
+    The plugin reads an allele whose bases all lie in the 5' UTR, and an insertion whose following base on the
+    transcript does. It also reads a deletion that begins in one exon of the UTR and ends in another, as if the
+    intron between them were not there. That is not read here.
     """
-    written = [key for key in (*_COUNTS, _CONSEQUENCE, _ANNOTATION) if key in transcript]
-    if not written:
+    coding = transcript.coding
+    if coding is None:
         return None
-    if missing := [key for key in _COUNTS if key not in transcript]:
-        raise ValueError(f'UTRannotator wrote {written} without {missing}')
+
+    def place(position: int) -> int | None:
+        cdna = transcript.cdna(position)
+        return cdna - 1 if cdna is not None and cdna < coding.cdna_start else None
+
+    removed = len(allele.ref)
+    low, high = allele.start, allele.start + removed - 1
+    first = place(low if transcript.strand == 1 else high)
+    last = first if not removed else place(high if transcript.strand == 1 else low)
+    if first is None or last is None or (removed and last - first != removed - 1):
+        return None
+    inserted = allele.alt if transcript.strand == 1 else transcript_models.reverse_complement(allele.alt)
+    return utr5.Change(position=first, removed=removed, inserted=inserted)
+
+
+class Annotated:
+    """A transcript with what the rules read of it, each read once."""
+
+    def __init__(self, transcript: transcript_models.Transcript, reference: pysam.FastaFile) -> None:
+        if transcript.coding is None:
+            raise ValueError(f'{transcript.transcript_id} has no coding sequence')
+        self.transcript = transcript
+        self.sequences = transcript_models.sequences(transcript, reference)
+        self._coding = transcript.coding
+        self._frames: utr5.ReadingFrames | None = None
+        self._existing: dict[str, Any] | None = None
+
+    @property
+    def frames(self) -> utr5.ReadingFrames:
+        if self._frames is None:
+            self._frames = utr5.ReadingFrames(self.sequences.utr5, self.sequences.coding)
+        return self._frames
+
+    @property
+    def own_start(self) -> int | None:
+        """Where the transcript's start codon begins in its spliced sequence, counted from 0.
+
+        None for a transcript whose coding sequence does not begin with a whole `ATG`.
+        """
+        start = self._coding.cdna_start - 1
+        whole = self._coding.phase == 0 and self.sequences.spliced[start : start + 3] == _START_CODON
+        return start if whole else None
+
+    @property
+    def of_utr(self) -> dict[str, Any]:
+        """The columns that every allele in the transcript's 5' UTR has: the counts and the own start codon."""
+        if self._existing is None:
+            context, strength = (None, None)
+            if self.own_start is not None:
+                context, strength = utr5.kozak(self.sequences.spliced, self.own_start)
+            self._existing = self.frames.existing() | {
+                'utr5_cds_kozak_context': context,
+                'utr5_cds_kozak_strength': strength,
+            }
+        return self._existing
+
+
+def transcript_columns(
+    annotated: Annotated, allele: plugin_gates.Allele, evidence: frozenset[int]
+) -> dict[str, Any] | None:
+    """The columns of one allele on one transcript, or None where no rule evaluates the two.
+
+    `evidence` holds the places on the transcript's chromosome of the start codons that were seen translated.
+    """
+    transcript = annotated.transcript
+    placed = plugin_gates.Placed(transcript, allele, annotated.sequences)
+    if not placed.within_transcript:
+        return None
     columns: dict[str, Any] = {}
-    for key, column in _COUNTS.items():
-        count = transcript[key]
-        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
-            raise ValueError(f'{key} is {count!r}, not a count')
-        columns[column] = count
-    consequence, annotation = transcript.get(_CONSEQUENCE), transcript.get(_ANNOTATION)
-    if consequence is None and annotation is None:
-        return columns
-    if not isinstance(consequence, str) or not isinstance(annotation, str):
-        raise ValueError(f'{_CONSEQUENCE} is {consequence!r} and {_ANNOTATION} {annotation!r}, not two texts')
-    records = uorf_records(consequence, annotation)
-    return columns | {'utr5_consequences': sorted({r['consequence'] for r in records}), 'utr5_uorfs': records}
+    if placed.five_prime_utr_variant:
+        columns |= annotated.of_utr
+        change = utr_change(transcript, allele)
+        if change is not None:
+            records = utr5.effects(annotated.frames, change, lambda start: transcript.genomic(start + 1) in evidence)
+            if records:
+                columns['utr5_consequences'] = sorted({record['consequence'] for record in records})
+                columns['utr5_uorfs'] = sorted(records, key=_record_order)
+    own_start = annotated.own_start
+    if own_start is not None and len(placed.segments) == 1 and placed.segments[0].mapped:
+        piece = placed.segments[0]
+        changed = utr5.own_start_change(
+            annotated.sequences.spliced,
+            own_start,
+            piece.start - 1,
+            len(allele.ref),
+            allele.alt if transcript.strand == 1 else transcript_models.reverse_complement(allele.alt),
+        )
+        if changed is not None:
+            columns |= {key: annotated.of_utr[key] for key in ('utr5_cds_kozak_context', 'utr5_cds_kozak_strength')}
+            columns |= {'utr5_cds_kozak_context_alt': changed[0], 'utr5_cds_kozak_strength_alt': changed[1]}
+    ends_frame = placed.stop_gained or placed.frameshift_variant or placed.splice_site_variant
+    if ends_frame and placed.cds_start is not None and placed.cds_end is not None:
+        reason = nmd.escape_reason(transcript, allele.end, placed.cds_end)
+        columns |= {'nmd_escaping': reason is not None, 'nmd_escape_reason': reason}
+    return columns or None
 
 
-def _nmd(transcript: Mapping[str, Any]) -> bool | None:
-    """Whether the NMD plugin predicts an escape on one transcript of VEP's JSON; None where it did not evaluate it."""
-    flag = transcript.get(_NMD)
-    if flag is not None:
-        if flag != _NMD_ESCAPING:
-            raise ValueError(f'{_NMD} is {flag!r}, and the NMD plugin is known to write {_NMD_ESCAPING} alone')
-        return True
-    terms = transcript.get('consequence_terms')
-    if not isinstance(terms, list):
-        raise ValueError(f'consequence_terms is {terms!r}, not a list of terms')
-    evaluated = bool(_NMD_TERMS & set(terms)) and 'cds_start' in transcript and 'cds_end' in transcript
-    return False if evaluated else None
+@dataclasses.dataclass(frozen=True)
+class _Task:
+    """One chromosome of a run."""
+
+    chrom: str
+    names: Mapping[str, str]
+    sites: pathlib.Path
+    models: Mapping[gene_models.Source, pathlib.Path]
+    reference: pathlib.Path
+    evidence: frozenset[int]
 
 
-def transcript_columns(transcript: Mapping[str, Any]) -> dict[str, Any] | None:
-    """The plugins' columns of one transcript of VEP's JSON, or None where neither plugin evaluated it."""
-    utr5, nmd = _utr5(transcript), _nmd(transcript)
-    if utr5 is None and nmd is None:
-        return None
-    return (utr5 or {}) | {'nmd_escaping': nmd}
+def _chromosome(task: _Task) -> pa.Table:
+    """The rows of one chromosome's alleles, for the transcripts of every gene model file."""
+    rows: list[dict[str, Any]] = []
+    with pysam.FastaFile(str(task.reference)) as reference, pysam.VariantFile(str(task.sites)) as sites:
+        if task.chrom not in sites.header.contigs:
+            return TABLE.empty_table()
+        alleles = []
+        for record in sites.fetch(task.chrom):
+            if record.ref is None or record.alts is None or len(record.alts) != 1 or record.id is None:
+                raise ValueError(f'{task.sites}: {record.chrom}:{record.pos} is no record of one allele under its id')
+            if _ALLELE.fullmatch(record.ref) and _ALLELE.fullmatch(record.alts[0]):
+                alleles.append((record.id, plugin_gates.Allele.of_record(record.pos, record.ref, record.alts[0])))
+        if not alleles:
+            return TABLE.empty_table()
+        for source, path in task.models.items():
+            transcripts = transcript_models.read(path, task.chrom, task.names)
+            overlapping = transcript_models.Overlapping(transcripts)
+            annotated: dict[int, Annotated] = {}
+            for variant_id, allele in alleles:
+                for transcript in overlapping.of(allele.low, allele.high):
+                    held = annotated.get(id(transcript))
+                    if held is None:
+                        held = annotated[id(transcript)] = Annotated(transcript, reference)
+                    columns = transcript_columns(held, allele, task.evidence)
+                    if columns is not None:
+                        key = {'variant_id': variant_id, 'transcript_id': transcript.transcript_id, 'source': source}
+                        rows.append(key | columns)
+    return pa.Table.from_pylist(rows, schema=TABLE)
 
 
 def read_given(path: pathlib.Path, controls: Sequence[gene_models.Control]) -> list[str]:
-    """The ids of the records that VEP was given: the union's alleles that overlap an exon, without the controls.
+    """The ids of the records that the step was given: the union's alleles that overlap an exon, without the controls.
 
     Raises:
         ValueError: if a record that is no control has an ID that is not the variant id of its allele, an ID is
@@ -382,148 +371,113 @@ def read_given(path: pathlib.Path, controls: Sequence[gene_models.Control]) -> l
     return sorted(seen - expected)
 
 
-def _documents(path: pathlib.Path) -> Iterator[dict[str, Any]]:
-    """VEP's JSON documents, one a line and one for each record it was given."""
-    with gzip.open(path, 'rt', encoding='utf-8') as lines:
-        for number, line in enumerate(lines, start=1):
-            try:
-                document = json.loads(line)
-            except json.JSONDecodeError as malformed:
-                raise ValueError(f'{path}: line {number} is no JSON document') from malformed
-            if not isinstance(document, dict) or not isinstance(document.get('id'), str):
-                raise ValueError(f'{path}: line {number} is no document of a record with an id')
-            yield document
+def check_control(control: gene_models.Control, rows: Sequence[Mapping[str, Any]], where: str) -> None:
+    """Fails unless the rows of a positive control hold what the control's rule must give it on its transcript.
 
-
-def check_control(control: gene_models.Control, document: Mapping[str, Any], where: str) -> None:
-    """Fails unless VEP's document of a positive control holds what the control's plugin must write for it.
-
-    A plugin that did not load, a gene model file that VEP could not read or a reference under other names leaves the
-    control without its keys, where an allele of the union would only have empty columns.
+    Gene models that were not read as prepared, a reference with other sequences or chromosome names that do not
+    meet leave the control without its value, where an allele of the union would only have empty columns.
     """
-    listed = [t for t in document.get('transcript_consequences', ()) if t['transcript_id'] == control.transcript_id]
+    listed = [row for row in rows if row['transcript_id'] == control.transcript_id]
     if len(listed) != 1:
         raise ValueError(
-            f'{where}: VEP lists the transcript {control.transcript_id} {len(listed)} times for the positive control '
-            f'{control.id}, so it did not read the gene models, the reference or the chromosome synonyms as prepared'
+            f'{where}: the positive control {control.id} has {len(listed)} rows on the transcript '
+            f'{control.transcript_id}, so the gene models, the reference or the chromosome synonyms are not as prepared'
         )
-    columns = transcript_columns(listed[0]) or {}
     passed = (
-        'uAUG_gained' in (columns.get('utr5_consequences') or ())
+        'uAUG_gained' in (listed[0].get('utr5_consequences') or ())
         if control.plugin == 'UTRannotator'
-        else columns.get('nmd_escaping') is True
+        else listed[0].get('nmd_escaping') is True
     )
     if not passed:
         raise ValueError(
-            f'{where}: the positive control {control.id} lacks what {control.plugin} writes for it on '
-            f'{control.transcript_id}, so the plugin did not run: {dict(listed[0])}'
+            f'{where}: the positive control {control.id} lacks what the rules of {control.plugin} give it on '
+            f'{control.transcript_id}: {dict(listed[0])}'
         )
 
 
-def _source_rows(
-    path: pathlib.Path,
-    source: gene_models.Source,
-    given: frozenset[str],
-    controls: Sequence[gene_models.Control],
-    passed_over: frozenset[str],
-) -> list[dict[str, Any]]:
-    """The rows of one VEP output.
-
-    `given` are the ids of the union's alleles that VEP read, and `controls` the positive controls of the output's own
-    gene model file. Each run also reads the controls of the other file, whose ids are `passed_over`: this file's
-    transcripts are not theirs.
-
-    Raises:
-        ValueError: if the documents are not exactly those of the records given, each once, a control fails
-            (check_control), a plugin's keys are malformed, or a transcript is listed twice for an allele.
-    """
-    own = {control.id: control for control in controls}
-    rows: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for document in _documents(path):
-        record_id = document['id']
-        if record_id in seen:
-            raise ValueError(f'{path}: two documents of {record_id}')
-        seen.add(record_id)
-        if record_id in own:
-            check_control(own[record_id], document, str(path))
-            continue
-        if record_id in passed_over:
-            continue
-        if record_id not in given:
-            raise ValueError(f'{path}: a document of {record_id}, which VEP was not given')
-        listed: set[str] = set()
-        for transcript in document.get('transcript_consequences', ()):
-            try:
-                columns = transcript_columns(transcript)
-            except ValueError as malformed:
-                raise ValueError(f'{path}: {record_id}, {transcript.get("transcript_id")}: {malformed}') from malformed
-            if columns is None:
-                continue
-            transcript_id = transcript['transcript_id']
-            if transcript_id in listed:
-                raise ValueError(f'{path}: {record_id}: a plugin evaluated the transcript {transcript_id} twice')
-            listed.add(transcript_id)
-            rows.append({'variant_id': record_id, 'transcript_id': transcript_id, 'source': source} | columns)
-    if missing := sorted((given | own.keys() | passed_over) - seen)[:5]:
-        raise ValueError(f'{path}: no document of records that VEP was given, such as {missing}')
-    return rows
-
-
-def convert(
-    given: pathlib.Path, vep: pathlib.Path, prepared: gene_models.GeneModels, output: pathlib.Path
+def annotate(
+    given: pathlib.Path,
+    prepared: pathlib.Path,
+    reference: pathlib.Path,
+    uorf_evidence: pathlib.Path,
+    output: pathlib.Path,
+    workers: int = 1,
 ) -> VepPluginsInfo:
-    """Writes the plugins' table of a union and the record of the run into the output folder.
+    """Writes the table of a union's alleles and the record of what its values come from into the output folder.
 
-    `given` is the VCF that VEP read: the union's alleles that overlap an exon, each under its variant id, and the
-    positive controls. `vep` is the folder of the step that ran VEP, with its record and one output for each gene
-    model file, and `prepared` the record of the gene models that the run read. The table's rows are sorted by variant
-    id and transcript id, so that two runs of the same inputs write the same table.
+    `given` is the union's alleles that overlap an exon, each under its variant id, with the positive controls: a
+    VCF compressed with bgzip, with its index beside it. `prepared` is the folder of the prepared gene models,
+    `reference` the FASTA that the alleles are called against, with its `.fai`, and `uorf_evidence` the plugin's
+    file of the upstream reading frames that were seen translated. The chromosomes are shared among `workers`
+    processes. The table's rows are sorted by variant id and transcript id, so that two runs of the same inputs write
+    the same table.
 
     Raises:
-        ValueError: if an input is not what the step before wrote (read_given, _source_rows), the run read other gene
-            model files than the record describes, or two sources give a row for the same allele and transcript.
+        ValueError: if an input is not what its role needs (read_given, transcript_models.read, utr5.uorf_evidence),
+            a prepared gene model file is not the one that the folder's record describes, a control fails
+            (check_control), or two gene model files give a row for the same allele and transcript.
     """
-    run = VepRun.model_validate_json((vep / RUN_NAME).read_text())
-    files: dict[gene_models.Source, FileRecord] = {read.source: read.file for read in run.gene_models}
-    described: dict[gene_models.Source, gene_models.GeneModelFile] = {f.source: f for f in prepared.gene_models}
-    if files.keys() != described.keys() or len(run.gene_models) != len(files):
-        raise ValueError(f'VEP read the gene models of {sorted(files)}, and the record names {sorted(described)}')
-    for source, file in described.items():
-        if files[source] != FileRecord(name=file.file, bytes=file.bytes, sha256=file.sha256):
+    record = gene_models.read_record(prepared)
+    files: dict[gene_models.Source, FileRecord] = {}
+    for described in record.gene_models:
+        files[described.source] = read = _recorded(prepared / described.file)
+        if (read.bytes, read.sha256) != (described.bytes, described.sha256):
             raise ValueError(
-                f'VEP read {files[source].name} of {files[source].bytes} bytes for {source}, which is not the file '
-                f'{file.file} of {file.bytes} bytes that the record of the prepared gene models describes'
+                f'{prepared / described.file} has {read.bytes} bytes and the SHA-256 {read.sha256}, which is not the '
+                f'file that {gene_models.RECORD_NAME} describes'
             )
-    controls = [control for file in prepared.gene_models for control in file.controls]
+    controls = [control for file in record.gene_models for control in file.controls]
     alleles = read_given(given, controls)
-    rows: list[dict[str, Any]] = []
-    for source, file in described.items():
-        others = frozenset(control.id for control in controls) - {control.id for control in file.controls}
-        rows.extend(_source_rows(vep / OUTPUTS[source], source, frozenset(alleles), file.controls, others))
-    rows.sort(key=lambda row: (row['variant_id'], row['transcript_id']))
-    for row, following in itertools.pairwise(rows):
-        if (row['variant_id'], row['transcript_id']) == (following['variant_id'], following['transcript_id']):
-            raise ValueError(f'two sources give a row for {row["variant_id"]} and {row["transcript_id"]}')
+    with uorf_evidence.open(encoding='utf-8') as lines:
+        evidence = utr5.uorf_evidence(lines)
+    names = transcript_models.sequence_names(prepared / gene_models.SYNONYMS_NAME)
+    tasks = [
+        _Task(
+            chrom=chrom,
+            names=names[chrom],
+            sites=given,
+            models={described.source: prepared / described.file for described in record.gene_models},
+            reference=reference,
+            evidence=frozenset(position for listed, position in evidence if listed == chrom),
+        )
+        for chrom in gene_models.CHROMOSOMES
+    ]
+    if workers > 1:
+        context = multiprocessing.get_context('spawn')
+        with concurrent.futures.ProcessPoolExecutor(max_workers=workers, mp_context=context) as pool:
+            parts = list(pool.map(_chromosome, tasks))
+    else:
+        parts = [_chromosome(task) for task in tasks]
+    table = pa.concat_tables(parts).sort_by([('variant_id', 'ascending'), ('transcript_id', 'ascending')])
+    control_ids = {control.id for control in controls}
+    of_controls = [variant_id in control_ids for variant_id in table['variant_id'].to_pylist()]
+    control_rows = table.filter(pa.array(of_controls)).to_pylist()
+    for control in controls:
+        source = next(file.source for file in record.gene_models if control in file.controls)
+        own = [row for row in control_rows if row['variant_id'] == control.id and row['source'] == source]
+        check_control(control, own, str(given))
+    table = table.filter(pa.array([not of_control for of_control in of_controls]))
+    keys = zip(table['variant_id'].to_pylist(), table['transcript_id'].to_pylist(), strict=True)
+    for row, following in itertools.pairwise(keys):
+        if row == following:
+            raise ValueError(f'two gene model files give a row for {row[0]} and {row[1]}')
     output.mkdir(parents=True)
-    pq.write_table(pa.Table.from_pylist(rows, schema=TABLE), output / TABLE_NAME, compression='zstd')
+    pq.write_table(table, output / TABLE_NAME, compression='zstd')
     info = VepPluginsInfo(
-        vep_version=run.vep_version,
-        utrannotator_commit=run.utrannotator_commit,
-        uorf_evidence=run.uorf_evidence,
-        nmd_plugin=run.nmd_plugin,
-        options=run.options,
-        environment=run.environment,
+        utrannotator_commit=utr5.SOURCE_COMMIT,
+        nmd_plugin_commit=nmd.SOURCE_COMMIT,
+        vep_release=VEP_RELEASE,
+        uorf_evidence=_recorded(uorf_evidence),
         gene_models=tuple(
-            GeneModelAnnotated(source=source, file=files[source], prepared_from=file.prepared_from)
-            for source, file in described.items()
+            GeneModelAnnotated(source=file.source, file=files[file.source], prepared_from=file.prepared_from)
+            for file in record.gene_models
         ),
     )
     (output / INFO_NAME).write_text(info.model_dump_json(indent=2) + '\n')
-    print(f'{len(alleles)} alleles read by VEP, {len(rows)} rows of an allele and transcript that a plugin evaluated')
+    print(f'{len(alleles)} alleles read, {table.num_rows} rows of an allele and transcript that a rule evaluated')
     return info
 
 
 def read_info(folder: pathlib.Path) -> VepPluginsInfo:
-    """The run's record in a folder that `convert` wrote."""
+    """The record in a folder that `annotate` wrote."""
     return VepPluginsInfo.model_validate_json((folder / INFO_NAME).read_text())

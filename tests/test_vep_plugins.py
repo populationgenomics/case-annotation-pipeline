@@ -1,722 +1,455 @@
-"""The table of VEP's two plugins, from invented documents in the layout of VEP's JSON.
+"""The table of the plugins' rules: one allele on one transcript, and a whole run on the invented gene models.
 
-Every allele, transcript and value here is invented. The texts of UTRannotator's records are written as the plugin
-writes them: the kinds joined with `&`, and each record as `kind_key:value` pairs joined with commas.
+The transcripts of invented_transcripts and the gene models of tests/workflows/family_tables/gene-models/ are
+invented, and so is every allele here.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import gzip
 import json
 import pathlib
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import Any
 
+import invented_transcripts
 import pyarrow.parquet as pq
+import pydantic
+import pysam
 import pytest
 
-from case_annotation import cli, contract, gene_models, vep_plugins
+from case_annotation import cli, gene_models, nmd, plugin_gates, utr5, vep_plugins
 
-REPOSITORY = pathlib.Path(__file__).parent.parent
-MODULES = (REPOSITORY / 'modules' / 'family_tables.nf').read_text('utf-8')
-WORKFLOW = (REPOSITORY / 'family_tables.nf').read_text('utf-8')
-
-# One record of each kind, with every key that the plugin writes for the kind.
-_RECORDS: Mapping[str, Mapping[str, str]] = {
-    'uAUG_gained': {
-        'CapDistanceToStart': '40',
-        'DistanceToCDS': '82',
-        'DistanceToStop': '27',
-        'KozakContext': 'GCCATGG',
-        'KozakStrength': 'Strong',
-        'type': 'uORF',
-    },
-    'uAUG_lost': {
-        'CapDistanceToStart': '12',
-        'DistanceToCDS': '110',
-        'DistanceToStop': 'NA',
-        'Evidence': 'True',
-        'KozakContext': 'TTTATGC',
-        'KozakStrength': 'Weak',
-        'type': 'OutOfFrame_oORF',
-    },
-    'uSTOP_gained': {
-        'Evidence': 'False',
-        'KozakContext': 'ACCATGA',
-        'KozakStrength': 'Moderate',
-        'newSTOPDistanceToCDS': '31',
-        'ref_StartDistanceToCDS': '70',
-        'ref_type': 'InFrame_oORF',
-    },
-    'uSTOP_lost': {
-        'AltStop': 'False',
-        'AltStopDistanceToCDS': 'NA',
-        'Evidence': 'True',
-        'FrameWithCDS': 'outOfFrame',
-        'KozakContext': '-',
-        'KozakStrength': '',
-    },
-    'uFrameShift': {
-        'Evidence': 'False',
-        'KozakContext': 'GTTATGT',
-        'KozakStrength': 'Moderate',
-        'alt_type': 'OutOfFrame_oORF',
-        'alt_type_length': 'NA',
-        'ref_StartDistanceToCDS': '95',
-        'ref_type': 'uORF',
-        'ref_type_length': '36',
-    },
-}
-_COUNTS = {'existing_uorfs': 2, 'existing_outofframe_oorfs': 1, 'existing_inframe_oorfs': 0}
+FIXTURE = pathlib.Path(__file__).parent / 'workflows' / 'family_tables'
+REFERENCE = FIXTURE / 'reference.fa'
+STRANDS = pytest.mark.parametrize('strand', [1, -1])
+UTR = len(invented_transcripts.UTR5)
+COUNTS = {'utr5_existing_uorfs': 1, 'utr5_existing_oorfs_out_of_frame': 0, 'utr5_existing_oorfs_in_frame': 0}
+OWN_START = {'utr5_cds_kozak_context': 'GCCATGG', 'utr5_cds_kozak_strength': 'Strong'}
 
 
-def _text(kind: str, **changed: str | None) -> str:
-    """One record of a kind as the plugin writes it, with the values given in place of the invented ones."""
-    values = {**_RECORDS[kind], **changed}
-    return ','.join(f'{kind}_{key}:{value}' for key, value in values.items() if value is not None)
+def _annotated(tmp_path: pathlib.Path, invented: invented_transcripts.Invented) -> vep_plugins.Annotated:
+    with pysam.FastaFile(str(invented_transcripts.reference(tmp_path, invented.genome))) as reference:
+        return vep_plugins.Annotated(invented.transcript, reference)
 
 
-def _utr(*records: tuple[str, str], counts: Mapping[str, Any] = _COUNTS) -> dict[str, Any]:
-    """The keys that UTRannotator adds to a transcript of VEP's JSON, for records as (kind, text)."""
-    written: dict[str, Any] = dict(counts)
-    if records:
-        written['five_prime_utr_variant_consequence'] = '&'.join(kind for kind, _text in records)
-        written['five_prime_utr_variant_annotation'] = '&'.join(text for _kind, text in records)
-    return written
+def _columns(
+    tmp_path: pathlib.Path, invented: invented_transcripts.Invented, allele: plugin_gates.Allele
+) -> dict[str, Any] | None:
+    return vep_plugins.transcript_columns(_annotated(tmp_path, invented), allele, frozenset())
 
 
-def _transcript(transcript_id: str, terms: Sequence[str] = ('5_prime_UTR_variant',), **keys: object) -> dict[str, Any]:
-    return {'transcript_id': transcript_id, 'consequence_terms': list(terms), 'impact': 'MODIFIER', **keys}
-
-
-# ---- one transcript ----
-
-
-@pytest.mark.parametrize('kind', _RECORDS)
-def test_a_record_of_each_kind_has_the_plugins_values_under_its_fields(kind: str) -> None:
-    (record,) = vep_plugins.uorf_records(kind, _text(kind))
-    assert record['consequence'] == kind
-    assert set(record) - {'consequence'} == {vep_plugins._KEYS[key][0] for key in vep_plugins.KINDS[kind]}
-    # A field has the type of its column, and a value that the plugin leaves open is null.
-    types = {field.name: str(field.type) for field in vep_plugins.UORF}
-    expected = {'int32': int, 'bool': bool, 'string': str}
-    assert all(value is None or type(value) is expected[types[field]] for field, value in record.items())
-    written = _RECORDS[kind]
-    for key, value in written.items():
-        field = vep_plugins._KEYS[key][0]
-        if value in ('NA', '-', ''):
-            assert record[field] is None
-        elif value in ('True', 'False'):
-            assert record[field] is (value == 'True')
-        else:
-            assert str(record[field]) == value
-
-
-def test_every_key_of_a_kind_has_a_field_and_every_field_a_key() -> None:
-    keys = set().union(*vep_plugins.KINDS.values())
-    assert keys == set(vep_plugins._KEYS)
-    assert {field for field, _read in vep_plugins._KEYS.values()} | {'consequence'} == set(vep_plugins.UORF.names)
-    assert set(_RECORDS) == set(vep_plugins.KINDS)
-    assert all(set(_RECORDS[kind]) == vep_plugins.KINDS[kind] for kind in _RECORDS)
-
-
-# Each key of a kind that holds the type of a reading frame.
-_TYPE_KEYS = [
-    ('uAUG_gained', 'type'),
-    ('uAUG_lost', 'type'),
-    ('uSTOP_gained', 'ref_type'),
-    ('uFrameShift', 'ref_type'),
-    ('uFrameShift', 'alt_type'),
-]
-
-
-def test_the_in_frame_type_has_one_spelling_where_the_plugin_writes_two() -> None:
-    # The plugin writes the in-frame type with a small i for a gained start and with a capital for every other kind.
-    (gained,) = vep_plugins.uorf_records('uAUG_gained', _text('uAUG_gained', type='inFrame_oORF'))
-    (lost,) = vep_plugins.uorf_records('uAUG_lost', _text('uAUG_lost', type='InFrame_oORF'))
-    assert gained['type'] == lost['type'] == 'InFrame_oORF'
-
-
-@pytest.mark.parametrize(('kind', 'key'), _TYPE_KEYS)
-def test_no_two_labels_of_a_type_differ_in_their_case_alone(kind: str, key: str) -> None:
-    labels = {
-        written: vep_plugins.uorf_records(kind, _text(kind, **{key: written}))[0][key] for written in vep_plugins._TYPES
-    }
-    # A label is a spelling that the plugin writes, changed in its case at most.
-    assert all(label in labels and label.lower() == written.lower() for written, label in labels.items())
-    assert len({label.lower() for label in labels.values()}) == len(set(labels.values()))
-
-
-def test_every_key_that_holds_a_type_is_read_as_one() -> None:
-    typed = {key for key, (_field, read) in vep_plugins._KEYS.items() if read is vep_plugins._type}
-    assert typed == {key for key in vep_plugins._KEYS if key == 'type' or key.endswith('_type')}
-    assert {(kind, key) for kind, keys in vep_plugins.KINDS.items() for key in keys & typed} == set(_TYPE_KEYS)
-
-
-@pytest.mark.parametrize(('kind', 'key'), _TYPE_KEYS)
-@pytest.mark.parametrize('written', ['inframe_oORF', 'Inframe_oORF', 'INFRAME_OORF', 'outOfFrame_oORF', 'UORF', ''])
-def test_a_type_in_a_spelling_that_the_plugin_is_not_known_to_write_is_refused(
-    kind: str, key: str, written: str
+@STRANDS
+def test_an_allele_in_the_5_prime_utr_has_the_counts_and_the_own_start_codon(
+    tmp_path: pathlib.Path, strand: int
 ) -> None:
-    with pytest.raises(ValueError, match=rf"{kind}_{key}: '{written}' is none of"):
-        vep_plugins.uorf_records(kind, _text(kind, **{key: written}))
+    gene = invented_transcripts.gene(strand)
+    assert _columns(tmp_path, gene, gene.allele(3, 1, 'T')) == COUNTS | OWN_START
 
 
-def test_several_kinds_and_several_records_of_one_kind_each_have_an_entry() -> None:
-    near, far = _text('uFrameShift', ref_StartDistanceToCDS='20'), _text('uFrameShift', ref_StartDistanceToCDS='300')
-    records = [('uFrameShift', near), ('uAUG_gained', _text('uAUG_gained')), ('uFrameShift', far)]
-    columns = vep_plugins.transcript_columns(_transcript('ENST09.1', **_utr(*records)))
+@STRANDS
+def test_an_allele_with_an_effect_has_its_records_and_their_kinds(tmp_path: pathlib.Path, strand: int) -> None:
+    gene = invented_transcripts.gene(strand)
+    columns = _columns(tmp_path, gene, gene.allele(8, 1, 'C'))
+    assert columns is not None
+    assert columns['utr5_consequences'] == ['uAUG_lost']
+    (record,) = columns['utr5_uorfs']
+    assert (record['consequence'], record['cap_distance_to_start'], record['distance_to_cds']) == ('uAUG_lost', 6, 19)
+    assert set(record) == {'consequence'} | vep_plugins.KINDS['uAUG_lost']
+    assert 'nmd_escaping' not in columns
+
+
+@STRANDS
+def test_a_record_has_the_evidence_of_its_start_codon_s_place_on_the_genome(
+    tmp_path: pathlib.Path, strand: int
+) -> None:
+    gene = invented_transcripts.gene(strand)
+    seen = frozenset({gene.transcript.genomic(7)})
+    columns = vep_plugins.transcript_columns(_annotated(tmp_path, gene), gene.allele(8, 1, 'C'), seen)
+    assert columns is not None
+    assert columns['utr5_uorfs'][0]['evidence'] is True
+
+
+@STRANDS
+def test_the_records_of_a_row_are_sorted_by_kind_and_from_the_cap(tmp_path: pathlib.Path, strand: int) -> None:
+    two_frames = invented_transcripts.laid_out(('GGCACCATGGCCATGGCTCCGTAAGC' + 'ATGGCTTAA',), (27, 35), strand=strand)
+    columns = _columns(tmp_path, two_frames, two_frames.allele(18, 0, 'ATGC'))
     assert columns is not None
     assert columns['utr5_consequences'] == ['uAUG_gained', 'uFrameShift']
-    starts = ('distance_to_cds', 'ref_start_distance_to_cds')
-    listed = [(r['consequence'], *(r.get(start) for start in starts)) for r in columns['utr5_uorfs']]
-    # By kind, and within a kind from the 5' end.
-    assert listed == [('uAUG_gained', 82, None), ('uFrameShift', None, 300), ('uFrameShift', None, 20)]
-    # The order of the plugin's text, which follows Perl's hashes, does not reach the columns.
-    again = vep_plugins.transcript_columns(_transcript('ENST09.1', **_utr(*reversed(records))))
-    assert again == columns
+    kinds = [(record['consequence'], record.get('ref_start_distance_to_cds')) for record in columns['utr5_uorfs']]
+    assert kinds == [('uAUG_gained', None), ('uFrameShift', 20), ('uFrameShift', 14)]
 
 
-def test_a_transcript_that_the_plugin_evaluated_without_an_effect_has_its_counts_alone() -> None:
-    columns = vep_plugins.transcript_columns(_transcript('ENST09.1', **_utr()))
-    assert columns == {
-        'utr5_existing_uorfs': 2,
-        'utr5_existing_oorfs_out_of_frame': 1,
-        'utr5_existing_oorfs_in_frame': 0,
-        'nmd_escaping': None,
+@STRANDS
+def test_an_allele_that_no_rule_evaluates_has_no_row(tmp_path: pathlib.Path, strand: int) -> None:
+    gene = invented_transcripts.gene(strand)
+    intron_start, _end = gene.transcript.introns[1]
+    in_intron = plugin_gates.Allele(intron_start + 12, intron_start + 12, 'C', 'A')
+    assert _columns(tmp_path, gene, in_intron) is None
+    assert _columns(tmp_path, gene, gene.coding_allele(40, 1, 'A')) is None  # a missense change
+    beyond = plugin_gates.Allele(gene.transcript.end + 20, gene.transcript.end + 20, 'N', 'A')
+    assert _columns(tmp_path, gene, beyond) is None
+
+
+@STRANDS
+def test_an_allele_that_ends_the_reading_frame_has_the_prediction_and_its_reason(
+    tmp_path: pathlib.Path, strand: int
+) -> None:
+    gene = invented_transcripts.gene(strand)
+    expected = {'first': 'cds_start+100', 'middle': None, 'penultimate': 'E-2_end-50', 'last': 'E-1'}
+    for where, codon in invented_transcripts.CAG_CODONS.items():
+        columns = _columns(tmp_path, gene, gene.coding_allele(codon * 3 + 1, 1, 'T'))
+        assert columns == {'nmd_escaping': expected[where] is not None, 'nmd_escape_reason': expected[where]}
+    shifted = _columns(tmp_path, gene, gene.coding_allele(150, 0, 'G'))
+    assert shifted == {'nmd_escaping': False, 'nmd_escape_reason': None}
+    assert expected.keys() == invented_transcripts.CAG_CODONS.keys()
+    assert {reason for reason in expected.values() if reason} <= set(nmd.REASONS)
+
+
+@STRANDS
+def test_a_splice_site_allele_without_both_coding_ends_is_not_evaluated(tmp_path: pathlib.Path, strand: int) -> None:
+    gene = invented_transcripts.gene(strand)
+    start, end = gene.transcript.introns[1]
+    at_site = plugin_gates.Allele(start, start, gene.genome[start - 1], 'A' if gene.genome[start - 1] != 'A' else 'C')
+    assert _columns(tmp_path, gene, at_site) is None
+    whole = plugin_gates.Allele(start - 2, end + 2, gene.genome[start - 3 : end + 2], '')
+    assert _columns(tmp_path, gene, whole) == {'nmd_escaping': True, 'nmd_escape_reason': 'cds_start+100'}
+
+
+@STRANDS
+def test_an_allele_across_the_end_of_the_utr_has_the_counts_and_no_record(tmp_path: pathlib.Path, strand: int) -> None:
+    gene = invented_transcripts.gene(strand)
+    assert _columns(tmp_path, gene, gene.allele(UTR - 1, 4, '')) == COUNTS | OWN_START
+    # An insertion directly before the first coding base is in the UTR for VEP, and the plugin's rules do not read
+    # it. It changes the context of the own start codon.
+    assert _columns(tmp_path, gene, gene.allele(UTR + 1, 0, 'T')) == COUNTS | OWN_START | {
+        'utr5_cds_kozak_context_alt': 'CCTATGG',
+        'utr5_cds_kozak_strength_alt': 'Moderate',
     }
 
 
-def test_a_transcript_that_no_plugin_evaluated_has_no_row() -> None:
-    assert vep_plugins.transcript_columns(_transcript('ENST09.1', ('intron_variant',))) is None
-    assert (
-        vep_plugins.transcript_columns(_transcript('ENST09.1', ('missense_variant',), cds_start=4, cds_end=4)) is None
-    )
+@STRANDS
+def test_a_deletion_from_one_exon_of_the_utr_into_the_next_has_no_record(tmp_path: pathlib.Path, strand: int) -> None:
+    """The plugin takes as many bases from the spliced UTR as the deletion has on the genome, the intron's included."""
+    gene = invented_transcripts.gene(strand)
+    start, end = gene.transcript.introns[0]
+    across = plugin_gates.Allele(start - 3, end + 2, gene.genome[start - 4 : end + 2], '')
+    assert vep_plugins.utr_change(gene.transcript, across) is None
+    assert _columns(tmp_path, gene, across) == COUNTS | OWN_START
 
 
-@pytest.mark.parametrize('term', sorted(vep_plugins._NMD_TERMS))
-def test_the_nmd_flag_is_true_where_written_false_where_evaluated_and_null_elsewhere(term: str) -> None:
-    def escaping(**keys: object) -> bool | None:
-        columns = vep_plugins.transcript_columns(_transcript('NM_09.1', (term, 'splice_region_variant'), **keys))
-        return None if columns is None else columns['nmd_escaping']
-
-    assert escaping(cds_start=40, cds_end=40, nmd='NMD_escaping_variant') is True
-    # The plugin evaluates a variant of these terms that has a start and an end in the coding sequence.
-    assert escaping(cds_start=400, cds_end=401) is False
-    assert escaping() is None
-    assert escaping(cds_start=400) is None
-    assert escaping(cds_end=400) is None
+@STRANDS
+def test_an_allele_as_a_change_of_the_utr_is_on_the_transcript_s_strand(strand: int) -> None:
+    gene = invented_transcripts.gene(strand)
+    assert vep_plugins.utr_change(gene.transcript, gene.allele(8, 1, 'C')) == utr5.Change(7, 1, 'C')
+    assert vep_plugins.utr_change(gene.transcript, gene.allele(8, 0, 'CA')) == utr5.Change(7, 0, 'CA')
+    assert vep_plugins.utr_change(gene.transcript, gene.allele(8, 3, '')) == utr5.Change(7, 3, '')
+    # The UTR's last five bases are in the second exon.
+    assert vep_plugins.utr_change(gene.transcript, gene.allele(22, 2, 'TT')) == utr5.Change(21, 2, 'TT')
+    assert vep_plugins.utr_change(gene.transcript, gene.coding_allele(5, 1, 'A')) is None
 
 
-def test_a_row_can_hold_both_plugins_values() -> None:
-    transcript = _transcript('ENST09.1', ('5_prime_UTR_variant', 'frameshift_variant'), cds_start=1, cds_end=3)
-    columns = vep_plugins.transcript_columns(transcript | _utr(('uAUG_lost', _text('uAUG_lost'))))
-    assert columns is not None
-    assert (columns['utr5_consequences'], columns['nmd_escaping']) == (['uAUG_lost'], False)
-
-
-@pytest.mark.parametrize(
-    ('consequence', 'annotation', 'message'),
-    [
-        ('uAUG_gained&uAUG_lost', _text('uAUG_gained'), '2 kinds in .* and 1 records'),
-        ('uORF_gained', _text('uAUG_gained'), "'uORF_gained' is no kind of effect"),
-        ('-', '-', "'-' is no kind of effect"),
-        ('uAUG_gained', _text('uAUG_gained', Evidence='True'), 'a uAUG_gained record has the keys'),
-        ('uAUG_lost', _text('uAUG_lost', Evidence=None), 'a uAUG_lost record has the keys'),
-        ('uAUG_gained', _text('uAUG_lost', Evidence=None), 'is no key and value of a uAUG_gained record'),
-        ('uAUG_gained', _text('uAUG_gained') + ',uAUG_gained_type:uORF', 'or repeats one'),
-        ('uAUG_gained', _text('uAUG_gained').replace('type:uORF', 'type'), 'is no key and value'),
-        ('uAUG_gained', _text('uAUG_gained', DistanceToCDS='near'), "uAUG_gained_DistanceToCDS: 'near' is not a whole"),
-        ('uAUG_gained', _text('uAUG_gained', DistanceToCDS='NA'), "uAUG_gained_DistanceToCDS: 'NA' is not a whole"),
-        ('uAUG_gained', _text('uAUG_gained', CapDistanceToStart='4.5'), "'4.5' is not a whole number"),
-        ('uAUG_lost', _text('uAUG_lost', Evidence='NA'), "uAUG_lost_Evidence: 'NA' is neither True nor False"),
-        ('uSTOP_lost', _text('uSTOP_lost', AltStop='yes'), "uSTOP_lost_AltStop: 'yes' is neither True nor False"),
-        ('uAUG_gained', _text('uAUG_gained', type='oORF'), "uAUG_gained_type: 'oORF' is none of"),
-        ('uFrameShift', _text('uFrameShift', alt_type='-'), "uFrameShift_alt_type: '-' is none of"),
-        ('uSTOP_gained', _text('uSTOP_gained', KozakStrength='strong'), "'strong' is none of"),
-        ('uSTOP_lost', _text('uSTOP_lost', FrameWithCDS='InFrame'), "uSTOP_lost_FrameWithCDS: 'InFrame' is none of"),
-        ('uAUG_gained', _text('uAUG_gained', KozakContext=''), 'uAUG_gained_KozakContext: an empty Kozak context'),
-    ],
-)
-def test_a_record_that_the_plugin_is_not_known_to_write_is_refused(
-    consequence: str, annotation: str, message: str
+@STRANDS
+def test_a_change_of_the_own_start_codon_s_context_gives_the_context_with_the_allele(
+    tmp_path: pathlib.Path, strand: int
 ) -> None:
-    with pytest.raises(ValueError, match=message):
-        vep_plugins.uorf_records(consequence, annotation)
+    gene = invented_transcripts.gene(strand)
+    before = _columns(tmp_path, gene, gene.allele(UTR - 2, 1, 'T'))
+    assert before == COUNTS | OWN_START | {
+        'utr5_cds_kozak_context_alt': 'TCCATGG',
+        'utr5_cds_kozak_strength_alt': 'Moderate',
+    }
+    # The base behind the start codon is a coding one: the row has the own start codon's columns and no count.
+    behind = _columns(tmp_path, gene, gene.coding_allele(4, 1, 'C'))
+    assert behind == OWN_START | {'utr5_cds_kozak_context_alt': 'GCCATGC', 'utr5_cds_kozak_strength_alt': 'Moderate'}
+    assert _columns(tmp_path, gene, gene.coding_allele(2, 1, 'C')) is None  # in the start codon
 
 
-@pytest.mark.parametrize(
-    ('keys', 'message'),
-    [
-        ({'existing_uorfs': 2}, r"UTRannotator wrote \['existing_uorfs'\] without"),
-        (
-            {'five_prime_utr_variant_consequence': 'uAUG_gained', 'five_prime_utr_variant_annotation': 'x'},
-            'UTRannotator wrote .* without',
-        ),
-        (_COUNTS | {'existing_uorfs': '2'}, "existing_uorfs is '2', not a count"),
-        (_COUNTS | {'existing_inframe_oorfs': True}, 'existing_inframe_oorfs is True, not a count'),
-        (_COUNTS | {'existing_outofframe_oorfs': -1}, 'existing_outofframe_oorfs is -1, not a count'),
-        (_COUNTS | {'five_prime_utr_variant_consequence': 'uAUG_gained'}, 'not two texts'),
-        (_COUNTS | {'five_prime_utr_variant_annotation': _text('uAUG_gained')}, 'not two texts'),
-        (_COUNTS | {'nmd': 'NMD_variant'}, "nmd is 'NMD_variant'"),
-    ],
-)
-def test_keys_that_a_plugin_is_not_known_to_write_are_refused(keys: Mapping[str, Any], message: str) -> None:
-    with pytest.raises(ValueError, match=message):
-        vep_plugins.transcript_columns(_transcript('ENST09.1', **keys))
+def test_a_transcript_without_a_whole_start_codon_has_no_context_of_one(tmp_path: pathlib.Path) -> None:
+    other_start = invented_transcripts.laid_out(('GGCACCGCC' + 'CTGGCTTAA' + 'GG',), (10, 18))
+    columns = _columns(tmp_path, other_start, other_start.allele(3, 1, 'T'))
+    assert columns is not None
+    assert (columns['utr5_cds_kozak_context'], columns['utr5_cds_kozak_strength']) == (None, None)
+    assert _annotated(tmp_path, other_start).own_start is None
+    padded = invented_transcripts.laid_out(('GGCACCGCC' + 'ATGGCTTAA' + 'GG',), (10, 18), phase=1)
+    assert _annotated(tmp_path, padded).own_start is None
 
 
-def test_a_transcript_without_its_consequence_terms_is_refused() -> None:
-    with pytest.raises(ValueError, match='consequence_terms is None'):
-        vep_plugins.transcript_columns({'transcript_id': 'ENST09.1'})
+# A whole run
 
 
-@pytest.mark.parametrize('transcript_id', ['ENST00000000009.4', 'NM_000009.12', 'NR_09.1', 'XM_9.1', 'XR_09.3'])
-def test_a_transcript_id_of_either_source_with_its_version_is_one(transcript_id: str) -> None:
-    assert vep_plugins.TRANSCRIPT_ID.fullmatch(transcript_id)
-
-
-@pytest.mark.parametrize('transcript_id', ['ENST00000000009', 'NM_000009', 'rna-INV-GTT27-1', 'id-INVG7', 'NP_09.1'])
-def test_an_id_without_a_version_or_of_another_kind_is_no_transcript_id(transcript_id: str) -> None:
-    assert not vep_plugins.TRANSCRIPT_ID.fullmatch(transcript_id)
-
-
-# ---- a run ----
-
-_ALLELES = (('chr1', 500, 'G', 'A'), ('chr1', 720, 'T', 'TA'), ('chr2', 90, 'CAT', 'C'), ('chr2', 300, 'A', 'G'))
-_IDS = tuple(f'{chrom}-{pos}-{ref}-{alt}' for chrom, pos, ref, alt in _ALLELES)
-
-
-def _prepared() -> gene_models.GeneModels:
-    def file(source: gene_models.Source, transcript: str) -> gene_models.GeneModelFile:
-        return gene_models.GeneModelFile(
-            source=source,
-            file=gene_models.FILES[source],
-            bytes=1000,
-            sha256='c' * 64,
-            prepared_from=gene_models.PublicFile(
-                name=f'invented.{source}.gff.gz', bytes=100, sha256='a' * 64, stated=(f'#!invented {source}',)
-            ),
-            controls=(
-                gene_models.Control(
-                    id=f'control-UTRannotator-{source}',
-                    plugin='UTRannotator',
-                    transcript_id=transcript,
-                    chrom='chr1',
-                    pos=100,
-                    ref='C',
-                    alt='CATG',
-                ),
-                gene_models.Control(
-                    id=f'control-NMD-{source}',
-                    plugin='NMD',
-                    transcript_id=transcript,
-                    chrom='chr1',
-                    pos=200,
-                    ref='T',
-                    alt='TA',
-                ),
-            ),
-        )
-
-    return gene_models.GeneModels(
-        gene_models=(file('Ensembl', 'ENST01.1'), file('RefSeq', 'NM_01.1')),
-        assembly_report=gene_models.PublicFile(name='report.txt', bytes=10, sha256='b' * 64, stated=()),
-    )
-
-
-def _controls(prepared: gene_models.GeneModels) -> list[gene_models.Control]:
-    return [control for file in prepared.gene_models for control in file.controls]
-
-
-def _given(tmp_path: pathlib.Path, records: Sequence[tuple[str, int, str, str, str]] | None = None) -> pathlib.Path:
-    """The VCF that VEP read: the invented alleles under their variant ids and the controls, or the records given."""
-    if records is None:
-        controls = [(c.chrom, c.pos, c.id, c.ref, c.alt) for c in _controls(_prepared())]
-        alleles = [(chrom, pos, f'{chrom}-{pos}-{ref}-{alt}', ref, alt) for chrom, pos, ref, alt in _ALLELES]
-        records = sorted(controls + alleles)
-    lines = ['##fileformat=VCFv4.2', '##contig=<ID=chr1,length=1000>', '##contig=<ID=chr2,length=1000>']
-    lines.append('#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO')
-    lines += [f'{chrom}\t{pos}\t{record_id}\t{ref}\t{alt}\t.\t.\t.' for chrom, pos, record_id, ref, alt in records]
-    path = tmp_path / 'given.vcf'
-    path.write_text('\n'.join(lines) + '\n')
+def _gzipped(path: pathlib.Path, text: str) -> pathlib.Path:
+    with gzip.open(path, 'wt', encoding='utf-8') as f:
+        f.write(text)
     return path
 
 
-def _control_documents(source: gene_models.Source) -> dict[str, list[dict[str, Any]]]:
-    """VEP's transcripts of the four controls in the run of one source: each control is annotated on its own file."""
-    documents: dict[str, list[dict[str, Any]]] = {}
-    for control in _controls(_prepared()):
-        if not control.id.endswith(source):
-            documents[control.id] = []
-        elif control.plugin == 'UTRannotator':
-            gained = ('uAUG_gained', _text('uAUG_gained'))
-            documents[control.id] = [_transcript(control.transcript_id, **_utr(gained))]
-        else:
-            keys = {'cds_start': 15, 'cds_end': 16, 'nmd': 'NMD_escaping_variant'}
-            documents[control.id] = [_transcript(control.transcript_id, ('frameshift_variant',), **keys)]
-    return documents
-
-
-# What VEP lists for each invented allele with each gene model file: an allele in a 5' UTR with two kinds of effect on
-# one transcript and none on another, one that ends a reading frame, one that neither plugin evaluates and one between
-# genes. RefSeq's file also has a feature whose id is no transcript id of `transcripts`, and its row is kept.
-_LISTED: Mapping[gene_models.Source, Mapping[str, list[dict[str, Any]]]] = {
-    'Ensembl': {
-        _IDS[0]: [
-            _transcript('ENST05.2', **_utr(('uSTOP_lost', _text('uSTOP_lost')), ('uAUG_gained', _text('uAUG_gained')))),
-            _transcript('ENST04.1', **_utr()),
-            _transcript('ENST03.1', ('upstream_gene_variant',)),
-        ],
-        _IDS[1]: [_transcript('ENST05.2', ('frameshift_variant',), cds_start=300, cds_end=301)],
-        _IDS[2]: [_transcript('ENST08.1', ('intron_variant',))],
-        _IDS[3]: [],
-    },
-    'RefSeq': {
-        _IDS[0]: [
-            _transcript('NM_05.3', **_utr(('uAUG_gained', _text('uAUG_gained')))),
-            _transcript('rna-INV-GTT27-1', **_utr()),
-        ],
-        _IDS[1]: [_transcript('NM_05.3', ('stop_gained',), cds_start=300, cds_end=300, nmd='NMD_escaping_variant')],
-        _IDS[2]: [],
-        _IDS[3]: [],
-    },
-}
-
-
-def _run(sha256: str = 'c' * 64) -> dict[str, Any]:
-    def recorded(name: str) -> dict[str, Any]:
-        return {'name': name, 'bytes': 1000, 'sha256': sha256}
-
-    return {
-        'vep_version': '116.3',
-        'utrannotator_commit': 'd' * 40,
-        'uorf_evidence': recorded('invented-uorfs.txt'),
-        'nmd_plugin': recorded('NMD.pm'),
-        'options': ['--json', '--safe'],
-        'environment': ['PERL_HASH_SEED=0'],
-        'gene_models': [{'source': s, 'file': recorded(gene_models.FILES[s])} for s in gene_models.FILES],
+def _prepared(tmp_path: pathlib.Path) -> pathlib.Path:
+    models = FIXTURE / 'gene-models'
+    public: dict[gene_models.Source, pathlib.Path] = {
+        'Ensembl': _gzipped(tmp_path / 'invented.gff3.gz', (models / 'ensembl.gff3').read_text('utf-8')),
+        'RefSeq': _gzipped(tmp_path / 'invented.gff.gz', (models / 'refseq.gff').read_text('utf-8')),
     }
+    gene_models.prepare(public, models / 'assembly-report.txt', REFERENCE, tmp_path / 'gene-models')
+    return tmp_path / 'gene-models'
 
 
-def _vep(
+ALLELES = (
+    ('chr1', 100, 'G', 'A'),
+    ('chr1', 100, 'G', 'C'),
+    ('chr1', 200, 'G', 'A'),
+    ('chr1', 300, 'T', 'A'),
+    ('chr1', 400, 'TCA', 'T'),
+)
+
+
+def _given(
     tmp_path: pathlib.Path,
-    listed: Mapping[gene_models.Source, Mapping[str, list[dict[str, Any]]]] = _LISTED,
-    run: Mapping[str, Any] | None = None,
-    reverse: bool = False,
+    prepared: pathlib.Path,
+    alleles: Sequence[tuple[str, int, str, str]] = ALLELES,
+    controls: bool = True,
 ) -> pathlib.Path:
-    """The folder of the step that ran VEP: its record, and one document per record of each source."""
-    folder = tmp_path / 'vep'
-    folder.mkdir()
-    (folder / vep_plugins.RUN_NAME).write_text(json.dumps(_run() if run is None else run))
-    for source, name in vep_plugins.OUTPUTS.items():
-        documents = _control_documents(source) | dict(listed[source])
-        lines = [
-            json.dumps(
-                {'id': record_id, 'input': 'invented', 'most_severe_consequence': 'invented'}
-                | ({'transcript_consequences': transcripts} if transcripts else {'intergenic_consequences': [{}]})
-            )
-            for record_id, transcripts in documents.items()
-        ]
-        with gzip.open(folder / name, 'wt', encoding='utf-8') as f:
-            f.write(''.join(line + '\n' for line in (reversed(lines) if reverse else lines)))
-    return folder
+    """The alleles, each under its variant id, and the controls of the prepared gene models, sorted and indexed."""
+    records = [(chrom, pos, f'{chrom}-{pos}-{ref}-{alt}', ref, alt) for chrom, pos, ref, alt in alleles]
+    if controls:
+        for line in (prepared / gene_models.CONTROLS_NAME).read_text().splitlines():
+            if not line.startswith('#'):
+                chrom, pos, name, ref, alt = line.split('\t')[:5]
+                records.append((chrom, int(pos), name, ref, alt))
+    plain = tmp_path / 'given.vcf'
+    head = '##fileformat=VCFv4.2\n##contig=<ID=chr1,length=600>\n##contig=<ID=chr2,length=600>\n'
+    lines = [f'{chrom}\t{pos}\t{name}\t{ref}\t{alt}\t.\t.\t.\n' for chrom, pos, name, ref, alt in sorted(records)]
+    plain.write_text(head + '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n' + ''.join(lines))
+    pysam.tabix_index(str(plain), preset='vcf', force=True)
+    return pathlib.Path(f'{plain}.gz')
 
 
-def _convert(tmp_path: pathlib.Path, **vep: Any) -> vep_plugins.VepPluginsInfo:  # noqa: ANN401 (what _vep takes)
-    return vep_plugins.convert(_given(tmp_path), _vep(tmp_path, **vep), _prepared(), tmp_path / 'out')
+def _evidence(
+    tmp_path: pathlib.Path, text: str = 'chr\tpos\tgene\tstrand\ttype\tstop_pos\nchr1\t82\tGENEA\t+\tuORF\t0\n'
+) -> pathlib.Path:
+    path = tmp_path / 'invented-uorfs.txt'
+    path.write_text(text)
+    return path
 
 
-def test_the_table_holds_a_row_for_each_allele_and_transcript_that_a_plugin_evaluated(tmp_path: pathlib.Path) -> None:
-    _convert(tmp_path)
-    table = pq.read_table(tmp_path / 'out' / vep_plugins.TABLE_NAME)
+@pytest.mark.parametrize('workers', [1, 2])
+def test_a_run_writes_a_row_for_each_allele_and_transcript_that_a_rule_evaluated(
+    tmp_path: pathlib.Path, workers: int
+) -> None:
+    prepared = _prepared(tmp_path)
+    output = tmp_path / 'out'
+    info = vep_plugins.annotate(_given(tmp_path, prepared), prepared, REFERENCE, _evidence(tmp_path), output, workers)
+    table = pq.read_table(output / vep_plugins.TABLE_NAME)
     assert table.schema.equals(vep_plugins.TABLE)
     rows = table.to_pylist()
-    keys = [(r['variant_id'], r['transcript_id'], r['source']) for r in rows]
-    assert keys == [
-        (_IDS[0], 'ENST04.1', 'Ensembl'),
-        (_IDS[0], 'ENST05.2', 'Ensembl'),
-        (_IDS[0], 'NM_05.3', 'RefSeq'),
-        (_IDS[0], 'rna-INV-GTT27-1', 'RefSeq'),
-        (_IDS[1], 'ENST05.2', 'Ensembl'),
-        (_IDS[1], 'NM_05.3', 'RefSeq'),
-    ]
-    by_key = {key[:2]: row for key, row in zip(keys, rows, strict=True)}
-    both = by_key[(_IDS[0], 'ENST05.2')]
-    assert both['utr5_consequences'] == ['uAUG_gained', 'uSTOP_lost']
-    assert [r['consequence'] for r in both['utr5_uorfs']] == ['uAUG_gained', 'uSTOP_lost']
-    assert (both['utr5_existing_uorfs'], both['nmd_escaping']) == (2, None)
-    # Evaluated, with no effect: the counts, and no list.
-    none = by_key[(_IDS[0], 'ENST04.1')]
-    assert (none['utr5_consequences'], none['utr5_uorfs'], none['utr5_existing_oorfs_out_of_frame']) == (None, None, 1)
-    assert [by_key[(_IDS[1], t)]['nmd_escaping'] for t in ('ENST05.2', 'NM_05.3')] == [False, True]
-    assert by_key[(_IDS[1], 'NM_05.3')]['utr5_existing_uorfs'] is None
-    # No row of a control or of an allele that no plugin evaluated.
-    assert {r['variant_id'] for r in rows} == {_IDS[0], _IDS[1]}
-    # A feature of RefSeq's file whose id is no transcript id has its row, which no row of `transcripts` matches.
-    assert [vep_plugins.TRANSCRIPT_ID.fullmatch(key[1]) is None for key in keys] == [
-        False,
-        False,
-        False,
-        True,
-        False,
-        False,
-    ]
-
-
-def test_two_runs_whose_documents_come_in_another_order_write_the_same_table(tmp_path: pathlib.Path) -> None:
-    first, second = tmp_path / 'first', tmp_path / 'second'
-    first.mkdir()
-    second.mkdir()
-    _convert(first)
-    _convert(second, reverse=True)
-    name = pathlib.Path('out') / vep_plugins.TABLE_NAME
-    assert (first / name).read_bytes() == (second / name).read_bytes()
-
-
-def test_the_record_holds_the_run_and_each_gene_model_file(tmp_path: pathlib.Path) -> None:
-    info = _convert(tmp_path)
-    assert info == vep_plugins.read_info(tmp_path / 'out')
-    run = _run()
-    assert (info.vep_version, info.utrannotator_commit) == (run['vep_version'], run['utrannotator_commit'])
-    assert (list(info.options), list(info.environment)) == (run['options'], run['environment'])
+    evaluated = ['chr1-100-G-A', 'chr1-100-G-C', 'chr1-200-G-A', 'chr1-400-TCA-T']
+    keys = [(row['variant_id'], row['transcript_id'], row['source']) for row in rows]
+    assert keys == [(a, t, s) for a in evaluated for t, s in (('ENST01.1', 'Ensembl'), ('NM_01.1', 'RefSeq'))]
+    for row in rows:
+        in_utr = row['variant_id'] != 'chr1-400-TCA-T'
+        counts = (
+            row['utr5_existing_uorfs'],
+            row['utr5_existing_oorfs_out_of_frame'],
+            row['utr5_existing_oorfs_in_frame'],
+        )
+        assert counts == ((0, 0, 1) if in_utr else (None, None, None))
+        assert (row['nmd_escaping'], row['nmd_escape_reason']) == ((None, None) if in_utr else (False, None))
+        assert (row['utr5_cds_kozak_context'] is not None) is in_utr
+        if row['variant_id'] != 'chr1-200-G-A':
+            assert (row['utr5_consequences'], row['utr5_uorfs']) == (None, None)
+            continue
+        assert row['utr5_consequences'] == ['uSTOP_gained']
+        (record,) = row['utr5_uorfs']
+        assert {field: value for field, value in record.items() if value is not None} == {
+            'consequence': 'uSTOP_gained',
+            'ref_type': 'InFrame_oORF',
+            'kozak_context': 'GTGATGC',
+            'kozak_strength': 'Moderate',
+            'ref_start_distance_to_cds': 117,
+            'new_stop_distance_to_cds': 12,
+            'evidence': True,
+        }
+    assert info == vep_plugins.read_info(output)
+    assert (info.utrannotator_commit, info.nmd_plugin_commit) == (utr5.SOURCE_COMMIT, nmd.SOURCE_COMMIT)
+    assert info.vep_release == vep_plugins.VEP_RELEASE
     assert info.uorf_evidence.name == 'invented-uorfs.txt'
-    described = {file.source: file for file in _prepared().gene_models}
-    assert [m.source for m in info.gene_models] == list(gene_models.FILES)
-    for model in info.gene_models:
-        assert model.file.name == gene_models.FILES[model.source]
-        assert model.prepared_from == described[model.source].prepared_from
+    assert [(m.source, m.file.name, m.prepared_from.name) for m in info.gene_models] == [
+        ('Ensembl', 'ensembl.gff3.gz', 'invented.gff3.gz'),
+        ('RefSeq', 'refseq.gff.gz', 'invented.gff.gz'),
+    ]
+    written = json.loads((output / vep_plugins.INFO_NAME).read_text())
+    assert sorted(written) == [
+        'gene_models',
+        'nmd_plugin_commit',
+        'uorf_evidence',
+        'utrannotator_commit',
+        'vep_release',
+    ]
 
 
-def test_the_record_is_the_same_whatever_alleles_the_union_holds(tmp_path: pathlib.Path) -> None:
-    # A family's tables carry the record, so it holds nothing that changes with the other families of a group.
-    first, second = tmp_path / 'first', tmp_path / 'second'
-    first.mkdir()
-    second.mkdir()
-    _convert(first)
-    fewer = {source: {**listed, _IDS[0]: []} for source, listed in _LISTED.items()}
-    _convert(second, listed=fewer)
-    name = pathlib.Path('out') / vep_plugins.INFO_NAME
-    assert (first / name).read_bytes() == (second / name).read_bytes()
-    assert pq.read_metadata(first / 'out' / vep_plugins.TABLE_NAME).num_rows == 6
-    assert pq.read_metadata(second / 'out' / vep_plugins.TABLE_NAME).num_rows == 2
+def test_two_runs_of_the_same_inputs_write_the_same_table(tmp_path: pathlib.Path) -> None:
+    prepared = _prepared(tmp_path)
+    given, evidence = _given(tmp_path, prepared), _evidence(tmp_path)
+    vep_plugins.annotate(given, prepared, REFERENCE, evidence, tmp_path / 'one')
+    vep_plugins.annotate(given, prepared, REFERENCE, evidence, tmp_path / 'two', workers=2)
+    one, two = (tmp_path / name / vep_plugins.TABLE_NAME for name in ('one', 'two'))
+    assert pq.read_table(one).equals(pq.read_table(two))
 
 
-def test_the_command_writes_the_table_and_the_record(tmp_path: pathlib.Path) -> None:
-    record = tmp_path / gene_models.RECORD_NAME
-    record.write_text(_prepared().model_dump_json())
-    arguments = ['--given', str(_given(tmp_path)), '--vep', str(_vep(tmp_path)), '--gene-models', str(record)]
-    cli.main(['vep-plugins', *arguments, '--output', str(tmp_path / 'out')])
-    assert {path.name for path in (tmp_path / 'out').iterdir()} == {vep_plugins.TABLE_NAME, vep_plugins.INFO_NAME}
-
-
-def _replaced(source: gene_models.Source, record_id: str, transcripts: list[dict[str, Any]]) -> dict[str, Any]:
-    return {**_LISTED, source: {**_LISTED[source], record_id: transcripts}}
-
-
-@pytest.mark.parametrize(
-    ('source', 'control', 'transcripts', 'message'),
-    [
-        # The plugin did not run: VEP lists the transcript in its 5' UTR, without the plugin's keys.
-        ('Ensembl', 'control-UTRannotator-Ensembl', [_transcript('ENST01.1')], 'lacks what UTRannotator writes'),
-        # It ran and found another kind of effect than the gained start.
-        (
-            'Ensembl',
-            'control-UTRannotator-Ensembl',
-            [_transcript('ENST01.1', **_utr(('uAUG_lost', _text('uAUG_lost'))))],
-            'lacks what UTRannotator writes',
-        ),
-        (
-            'RefSeq',
-            'control-NMD-RefSeq',
-            [_transcript('NM_01.1', ('frameshift_variant',), cds_start=15, cds_end=16)],
-            'lacks what NMD writes',
-        ),
-        # VEP did not read the gene models: the control's transcript is not among those it lists.
-        (
-            'RefSeq',
-            'control-NMD-RefSeq',
-            [_transcript('NM_02.1', ('intron_variant',))],
-            'lists the transcript NM_01.1 0',
-        ),
-        ('Ensembl', 'control-UTRannotator-Ensembl', [], 'lists the transcript ENST01.1 0 times'),
-    ],
-)
-def test_a_control_without_what_its_plugin_writes_stops_the_run(
-    tmp_path: pathlib.Path, source: gene_models.Source, control: str, transcripts: list[dict[str, Any]], message: str
-) -> None:
-    with pytest.raises(ValueError, match=f'{message}.*' if 'lists' in message else f'{control} {message}'):
-        _convert(tmp_path, listed=_replaced(source, control, transcripts))
-    assert not (tmp_path / 'out').exists()
-
-
-def test_a_document_of_a_record_that_vep_was_not_given_is_refused(tmp_path: pathlib.Path) -> None:
-    with pytest.raises(ValueError, match='a document of chr9-1-A-C, which VEP was not given'):
-        _convert(tmp_path, listed=_replaced('Ensembl', 'chr9-1-A-C', []))
-
-
-def test_a_record_without_a_document_is_refused(tmp_path: pathlib.Path) -> None:
-    without = {**_LISTED, 'RefSeq': {k: v for k, v in _LISTED['RefSeq'].items() if k != _IDS[3]}}
-    with pytest.raises(ValueError, match=rf'refseq\.json\.gz: no document of records .* such as \[{_IDS[3]!r}\]'):
-        _convert(tmp_path, listed=without)
-
-
-def test_two_documents_of_one_record_are_refused(tmp_path: pathlib.Path) -> None:
-    folder = _vep(tmp_path)
-    output = folder / vep_plugins.OUTPUTS['Ensembl']
-    with gzip.open(output, 'rt') as f:
-        lines = f.readlines()
-    with gzip.open(output, 'wt') as f:
-        f.writelines([*lines, lines[-1]])
-    with pytest.raises(ValueError, match='two documents of'):
-        vep_plugins.convert(_given(tmp_path), folder, _prepared(), tmp_path / 'out')
-
-
-def test_a_line_that_is_no_document_is_refused(tmp_path: pathlib.Path) -> None:
-    folder = _vep(tmp_path)
-    with gzip.open(folder / vep_plugins.OUTPUTS['Ensembl'], 'at') as f:
-        f.write('{"id": "cut sho\n')
-    with pytest.raises(ValueError, match=r'ensembl\.json\.gz: line 9 is no JSON document'):
-        vep_plugins.convert(_given(tmp_path), folder, _prepared(), tmp_path / 'out')
-
-
-def test_a_document_without_an_id_is_refused(tmp_path: pathlib.Path) -> None:
-    folder = _vep(tmp_path)
-    with gzip.open(folder / vep_plugins.OUTPUTS['RefSeq'], 'at') as f:
-        f.write('{"input": "invented"}\n')
-    with pytest.raises(ValueError, match=r'refseq\.json\.gz: line 9 is no document of a record with an id'):
-        vep_plugins.convert(_given(tmp_path), folder, _prepared(), tmp_path / 'out')
-
-
-def test_a_transcript_that_a_plugin_evaluated_twice_for_an_allele_is_refused(tmp_path: pathlib.Path) -> None:
-    twice = [_transcript('ENST04.1', **_utr()), _transcript('ENST04.1', **_utr())]
-    with pytest.raises(ValueError, match=f'{_IDS[3]}: a plugin evaluated the transcript ENST04.1 twice'):
-        _convert(tmp_path, listed=_replaced('Ensembl', _IDS[3], twice))
-
-
-def test_a_row_of_one_allele_and_transcript_from_both_sources_is_refused(tmp_path: pathlib.Path) -> None:
-    shared = [_transcript('ENST05.2', **_utr())]
-    with pytest.raises(ValueError, match=f'two sources give a row for {_IDS[0]} and ENST05.2'):
-        _convert(tmp_path, listed=_replaced('RefSeq', _IDS[0], shared))
-
-
-def test_malformed_keys_of_a_plugin_are_reported_with_their_allele_and_transcript(tmp_path: pathlib.Path) -> None:
-    malformed = [_transcript('NM_05.3', **_utr(('uAUG_gained', _text('uAUG_gained', type='oORF'))))]
-    with pytest.raises(ValueError, match=rf"refseq\.json\.gz: {_IDS[2]}, NM_05\.3: uAUG_gained_type: 'oORF'"):
-        _convert(tmp_path, listed=_replaced('RefSeq', _IDS[2], malformed))
-
-
-def test_a_run_that_read_other_gene_models_than_the_record_names_is_refused(tmp_path: pathlib.Path) -> None:
-    one = _run() | {'gene_models': _run()['gene_models'][:1]}
-    with pytest.raises(ValueError, match=re.escape("VEP read the gene models of ['Ensembl'], and the record names")):
-        _convert(tmp_path, run=one)
-
-
-def test_a_run_that_read_a_source_twice_is_refused(tmp_path: pathlib.Path) -> None:
-    models = _run()['gene_models']
-    with pytest.raises(ValueError, match='VEP read the gene models of'):
-        _convert(tmp_path, run=_run() | {'gene_models': [*models, models[0]]})
-
-
-@pytest.mark.parametrize(
-    'changed', [{'name': 'other.gff3.gz'}, {'bytes': 999}, {'sha256': 'e' * 64}], ids=['name', 'size', 'checksum']
-)
-def test_a_run_that_read_another_file_than_the_prepared_one_is_refused(
-    tmp_path: pathlib.Path, changed: Mapping[str, Any]
-) -> None:
-    models = _run()['gene_models']
-    other = [{'source': 'Ensembl', 'file': models[0]['file'] | changed}, models[1]]
-    with pytest.raises(ValueError, match=r'for Ensembl, which is not the file ensembl\.gff3\.gz of 1000 bytes'):
-        _convert(tmp_path, run=_run() | {'gene_models': other})
-
-
-@pytest.mark.parametrize(
-    'run',
-    [
-        _run(sha256='not a checksum'),
-        _run() | {'utrannotator_commit': '3d9d466'},
-        _run() | {'vep_version': ''},
-        _run() | {'unknown': 1},
-        {k: v for k, v in _run().items() if k != 'options'},
-    ],
-    ids=['a checksum', 'a short commit', 'no version', 'an unknown key', 'no options'],
-)
-def test_a_record_of_the_run_that_the_step_does_not_write_is_refused(tmp_path: pathlib.Path, run: Any) -> None:  # noqa: ANN401 (a JSON value)
-    with pytest.raises(ValueError, match='VepRun'):
-        _convert(tmp_path, run=run)
-
-
-def _records(changed: Mapping[str, tuple[str, int, str, str, str] | None]) -> list[tuple[str, int, str, str, str]]:
-    controls = {c.id: (c.chrom, c.pos, c.id, c.ref, c.alt) for c in _controls(_prepared())}
-    alleles = {
-        f'{chrom}-{pos}-{ref}-{alt}': (chrom, pos, f'{chrom}-{pos}-{ref}-{alt}', ref, alt)
-        for chrom, pos, ref, alt in _ALLELES
-    }
-    return sorted(record for record in ({**controls, **alleles} | dict(changed)).values() if record is not None)
-
-
-@pytest.mark.parametrize(
-    ('changed', 'message'),
-    [
-        ({_IDS[0]: ('chr1', 500, 'chr1-500-G-T', 'G', 'A')}, 'chr1:500 has the ID chr1-500-G-T, which is not'),
-        ({_IDS[0]: ('chr1', 500, '.', 'G', 'A')}, 'chr1:500 has no ID'),
-        ({'again': ('chr1', 720, _IDS[1], 'T', 'TA')}, 'chr1:720 has no ID, or the ID of another record'),
-        ({'control-NMD-RefSeq': None}, r"the positive controls \['control-NMD-RefSeq'\] are not among"),
-    ],
-    ids=['an id of another allele', 'no id', 'a repeated id', 'a missing control'],
-)
-def test_a_vcf_that_the_step_before_did_not_write_is_refused(
-    tmp_path: pathlib.Path, changed: Mapping[str, tuple[str, int, str, str, str] | None], message: str
-) -> None:
-    given = _given(tmp_path, _records(changed))
-    with pytest.raises(ValueError, match=message):
-        vep_plugins.read_given(given, _controls(_prepared()))
-
-
-def test_the_alleles_that_vep_read_are_the_records_without_the_controls(tmp_path: pathlib.Path) -> None:
-    assert vep_plugins.read_given(_given(tmp_path), _controls(_prepared())) == sorted(_IDS)
-
-
-# ---- the steps that give the command its inputs ----
-
-
-def test_the_workflow_names_the_files_as_the_tools_do() -> None:
-    # VEP_PLUGINS reads each prepared file by its name and writes its outputs and its record under theirs.
-    models = ' '.join(
-        f'{source}:{gene_models.FILES[source]}:{vep_plugins.OUTPUTS[source].removesuffix(".json.gz")}'
-        for source in gene_models.FILES
+def test_a_union_without_an_allele_in_an_exon_writes_an_empty_table(tmp_path: pathlib.Path) -> None:
+    prepared = _prepared(tmp_path)
+    vep_plugins.annotate(
+        _given(tmp_path, prepared, alleles=()), prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out'
     )
-    assert f'for model in {models}; do' in MODULES
-    assert '--output_file vep/\\${name}.json.gz' in MODULES
-    assert f'--synonyms gene-models/{gene_models.SYNONYMS_NAME}' in MODULES
-    for name in (gene_models.EXONS_NAME, gene_models.CONTROLS_NAME, gene_models.RECORD_NAME):
-        assert f"settings.gene_models.resolve('{name}')" in WORKFLOW
-    # The workflow looks for every file of the prepared folder before a task runs.
-    (listed,) = re.findall(r'\ndef geneModelFiles\(\) \{\n    return \[([^\]]+)\]\n\}', WORKFLOW)
-    prepared = [*gene_models.FILES.values(), *(f'{name}.tbi' for name in gene_models.FILES.values())]
-    prepared += [gene_models.SYNONYMS_NAME, gene_models.EXONS_NAME, gene_models.CONTROLS_NAME, gene_models.RECORD_NAME]
-    assert sorted(name.strip().strip("'") for name in listed.split(',')) == sorted(prepared)
-    assert 'geneModelFiles().each { name ->\n        if (!settings.gene_models.resolve(name).exists()) {' in WORKFLOW
-    stub = f'touch vep_plugins/{vep_plugins.TABLE_NAME} vep_plugins/{vep_plugins.INFO_NAME}'
-    assert stub in MODULES
-    # The record's keys are the model's.
-    (record,) = re.findall(r"\n    printf '(\{.*\})\\\\n' ", MODULES)
-    assert re.findall(r'"(\w+)": ', record) == list(vep_plugins.VepRun.model_fields)
-    assert f'> vep/{vep_plugins.RUN_NAME}\n' in MODULES
+    table = pq.read_table(tmp_path / 'out' / vep_plugins.TABLE_NAME)
+    assert (table.num_rows, table.schema.equals(vep_plugins.TABLE)) == (0, True)
 
 
-def test_the_step_fixes_perls_hash_order_and_fails_for_a_plugin_that_does_not_load() -> None:
-    (script,) = re.findall(r'\nprocess VEP_PLUGINS \{\n.*?\n    script:\n(.*?)\n    stub:\n', MODULES, flags=re.DOTALL)
-    assert 'export PERL_HASH_SEED=0 PERL_PERTURB_KEYS=0' in script
-    (options,) = re.findall(r'^    options=\((.*)\)$', script, flags=re.MULTILINE)
-    assert {'--json', '--safe', '--transcript_version'} <= set(options.split())
-    assert '--offline' not in script
-    assert '--dir_plugins "\\${UTRANNOTATOR_DIR}"' in script
-    assert "Plugin '[^']+' (went wrong|did not return)|Failed to (compile|instantiate) plugin" in script
+def test_sites_without_the_controls_are_refused(tmp_path: pathlib.Path) -> None:
+    prepared = _prepared(tmp_path)
+    given = _given(tmp_path, prepared, controls=False)
+    with pytest.raises(ValueError, match=r'positive controls .* are not among its records'):
+        vep_plugins.annotate(given, prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
 
 
-def test_every_column_of_the_table_has_a_type_that_the_contract_names() -> None:
-    described = [contract._column(field) for field in vep_plugins.COLUMNS]
-    assert [column['name'] for column in described] == vep_plugins.COLUMNS.names
-    assert set(vep_plugins.TABLE.names) - set(vep_plugins.COLUMNS.names) == {'variant_id', 'transcript_id', 'source'}
+def test_a_record_under_another_id_than_its_allele_s_is_refused(tmp_path: pathlib.Path) -> None:
+    prepared = _prepared(tmp_path)
+    given = _given(tmp_path, prepared)
+    with gzip.open(given, 'rt') as lines:
+        text = lines.read().replace('chr1-200-G-A', 'chr1-200-G-T')
+    (tmp_path / 'given.vcf').write_text(text)
+    pysam.tabix_index(str(tmp_path / 'given.vcf'), preset='vcf', force=True)
+    with pytest.raises(ValueError, match='not the variant id of its allele'):
+        vep_plugins.annotate(given, prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
+
+
+def test_a_repeated_id_is_refused(tmp_path: pathlib.Path) -> None:
+    prepared = _prepared(tmp_path)
+    given = _given(tmp_path, prepared, alleles=(*ALLELES, ALLELES[0]))
+    with pytest.raises(ValueError, match='the ID of another record'):
+        vep_plugins.annotate(given, prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
+
+
+def test_controls_on_a_transcript_that_the_gene_models_lack_are_refused(tmp_path: pathlib.Path) -> None:
+    prepared = _prepared(tmp_path)
+    record = prepared / gene_models.RECORD_NAME
+    record.write_text(record.read_text().replace('"ENST01.1"', '"ENST02.1"'))
+    with pytest.raises(ValueError, match=r'control-UTRannotator-Ensembl has 0 rows on the transcript ENST02\.1'):
+        vep_plugins.annotate(_given(tmp_path, prepared), prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
+
+
+def test_a_control_without_its_value_is_refused() -> None:
+    control = gene_models.Control(
+        id='control-NMD-Ensembl', plugin='NMD', transcript_id='ENST01.1', chrom='chr1', pos=5, ref='A', alt='AC'
+    )
+    row = {'transcript_id': 'ENST01.1', 'nmd_escaping': False}
+    with pytest.raises(ValueError, match='lacks what the rules of NMD give it'):
+        vep_plugins.check_control(control, [row], 'invented')
+    vep_plugins.check_control(control, [row | {'nmd_escaping': True}], 'invented')
+    gained = control.model_copy(update={'plugin': 'UTRannotator'})
+    with pytest.raises(ValueError, match='lacks what the rules of UTRannotator give it'):
+        vep_plugins.check_control(gained, [row | {'utr5_consequences': ['uAUG_lost']}], 'invented')
+    vep_plugins.check_control(gained, [row | {'utr5_consequences': ['uAUG_gained']}], 'invented')
+
+
+def test_a_gene_model_file_that_is_not_the_recorded_one_is_refused(tmp_path: pathlib.Path) -> None:
+    prepared = _prepared(tmp_path)
+    given = _given(tmp_path, prepared)
+    with (prepared / gene_models.FILES['RefSeq']).open('ab') as f:
+        f.write(b'\0')
+    with pytest.raises(ValueError, match=r'not the\s+file that gene-models\.json describes'):
+        vep_plugins.annotate(given, prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
+
+
+def test_a_file_that_is_not_the_plugin_s_list_of_upstream_orfs_is_refused(tmp_path: pathlib.Path) -> None:
+    prepared = _prepared(tmp_path)
+    evidence = _evidence(tmp_path, 'chr1\t82\n')
+    with pytest.raises(ValueError, match='not with its header'):
+        vep_plugins.annotate(_given(tmp_path, prepared), prepared, REFERENCE, evidence, tmp_path / 'out')
+
+
+def test_a_record_of_two_alleles_is_refused(tmp_path: pathlib.Path) -> None:
+    prepared = _prepared(tmp_path)
+    given = _given(tmp_path, prepared)
+    with gzip.open(given, 'rt') as lines:
+        text = re.sub(r'(control-NMD-Ensembl\t\w+\t\w+)', r'\1,T', lines.read())
+    assert ',T\t' in text
+    (tmp_path / 'given.vcf').write_text(text)
+    pysam.tabix_index(str(tmp_path / 'given.vcf'), preset='vcf', force=True)
+    with pytest.raises(ValueError, match='is no record of one allele under its id'):
+        vep_plugins.annotate(given, prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
+
+
+def test_a_transcript_that_both_gene_model_files_give_a_row_is_refused(tmp_path: pathlib.Path) -> None:
+    models = FIXTURE / 'gene-models'
+    refseq = (models / 'refseq.gff').read_text('utf-8').replace('transcript_id=NM_01.1', 'transcript_id=ENST01.1')
+    public: dict[gene_models.Source, pathlib.Path] = {
+        'Ensembl': _gzipped(tmp_path / 'invented.gff3.gz', (models / 'ensembl.gff3').read_text('utf-8')),
+        'RefSeq': _gzipped(tmp_path / 'invented.gff.gz', refseq),
+    }
+    prepared = tmp_path / 'gene-models'
+    gene_models.prepare(public, models / 'assembly-report.txt', REFERENCE, prepared)
+    with pytest.raises(ValueError, match=r'two gene model files give a row for chr1-100-G-A and ENST01\.1'):
+        vep_plugins.annotate(_given(tmp_path, prepared), prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
+
+
+def test_an_allele_with_a_base_that_is_not_one_of_four_has_no_row(tmp_path: pathlib.Path) -> None:
+    prepared = _prepared(tmp_path)
+    given = _given(tmp_path, prepared, alleles=(('chr1', 100, 'G', 'N'), ('chr1', 200, 'G', '*')))
+    vep_plugins.annotate(given, prepared, REFERENCE, _evidence(tmp_path), tmp_path / 'out')
+    assert pq.read_table(tmp_path / 'out' / vep_plugins.TABLE_NAME).num_rows == 0
+
+
+def test_a_transcript_without_a_coding_sequence_is_not_annotated(tmp_path: pathlib.Path) -> None:
+    gene = invented_transcripts.gene()
+    non_coding = dataclasses.replace(gene.transcript, coding=None)
+    with (
+        pysam.FastaFile(str(invented_transcripts.reference(tmp_path, gene.genome))) as reference,
+        pytest.raises(ValueError, match='has no coding sequence'),
+    ):
+        vep_plugins.Annotated(non_coding, reference)
+    with pytest.raises(ValueError, match='has no coding sequence'):
+        plugin_gates.Placed(non_coding, gene.allele(3, 1, 'T'), gene.sequences)
+    assert vep_plugins.utr_change(non_coding, gene.allele(3, 1, 'T')) is None
+
+
+def test_the_command_needs_at_least_one_process(tmp_path: pathlib.Path) -> None:
+    prepared = _prepared(tmp_path)
+    arguments = [
+        '--given',
+        str(_given(tmp_path, prepared)),
+        '--gene-models',
+        str(prepared),
+        '--reference',
+        str(REFERENCE),
+    ]
+    arguments += ['--uorf-evidence', str(_evidence(tmp_path)), '--output', str(tmp_path / 'out')]
+    with pytest.raises(ValueError, match='at least one process'):
+        cli.main(['vep-plugins', *arguments, '--workers', '0'])
+    cli.main(['vep-plugins', *arguments])
+    assert pq.read_table(tmp_path / 'out' / vep_plugins.TABLE_NAME).num_rows == 8
+
+
+@pytest.mark.parametrize(
+    'field',
+    [
+        {'utrannotator_commit': '3d9d466'},
+        {'nmd_plugin_commit': 'release/116'},
+        {'vep_release': ''},
+        {'uorf_evidence': {'name': 'invented-uorfs.txt', 'bytes': 1, 'sha256': 'e3b0'}},
+        {'vep_version': '116.3'},
+    ],
+)
+def test_a_record_with_a_malformed_value_or_another_key_is_refused(field: dict[str, Any]) -> None:
+    record = {
+        'utrannotator_commit': '0' * 40,
+        'nmd_plugin_commit': '1' * 40,
+        'vep_release': '116.3',
+        'uorf_evidence': {'name': 'invented-uorfs.txt', 'bytes': 1, 'sha256': '2' * 64},
+        'gene_models': [],
+    }
+    vep_plugins.VepPluginsInfo.model_validate(record)
+    with pytest.raises(pydantic.ValidationError):
+        vep_plugins.VepPluginsInfo.model_validate(record | field)

@@ -1,15 +1,17 @@
-"""The gene model files that Ensembl VEP reads without its cache, prepared from the public files (docs/annotation.md).
+"""The gene model files that the plugins' rules read, prepared from the public files (docs/annotation.md).
 
-VEP builds its transcripts from a GFF file that is sorted, compressed with bgzip and indexed with tabix, one file per
-run. `prepare` makes such a file from Ensembl's GFF3 and from NCBI's RefSeq GFF as they are published, and writes
-beside them what the step that runs VEP needs of both:
+The step that applies the rules of VEP's two plugins (vep_plugins) builds its transcripts from a GFF file as Ensembl
+VEP builds them without its cache (transcript_models). A prepared file is laid out as VEP needs one: sorted,
+compressed with bgzip and indexed with tabix, so that VEP itself can read the same folder, which is how the rules are
+compared with the plugins. `prepare` makes such a file from Ensembl's GFF3 and from NCBI's RefSeq GFF as they are
+published, and writes beside them what the step needs of both:
 
 - the chromosome synonyms, from NCBI's assembly report: Ensembl's file names a chromosome `1`, NCBI's `NC_000001.11`,
   and the pipeline's VCFs and reference `chr1`;
 - the regions of the exons of either file, under the names of the VCFs, to which the step cuts a union's alleles
-  before VEP reads them;
-- the positive controls, two invented alleles for each file, which the step gives to VEP with a union's alleles and
-  looks for in VEP's output before it drops them (vep_plugins);
+  before it reads them;
+- the positive controls, two invented alleles for each file, which the step reads with a union's alleles and looks
+  for among its rows before it drops them (vep_plugins);
 - a record of the public files that the folder was made from.
 
 Nothing is filtered: a prepared file holds every feature line of the public file. Its comment lines are left out, as
@@ -50,7 +52,7 @@ _OFFSET = 14
 _MARGIN = 30
 # An insertion that reads ATG on the transcript's strand, which is the forward one.
 _START_CODON = 'ATG'
-# An id that ends in a version, to which VEP adds none.
+# An id that ends in a version, to which none is added (transcript_models).
 _VERSIONED = re.compile(r'\.\d+$')
 
 type Plugin = Literal['UTRannotator', 'NMD']
@@ -77,7 +79,7 @@ class Control(pydantic.BaseModel, frozen=True, extra='forbid'):
 
     id: str
     plugin: Plugin
-    transcript_id: str  # with its version, as VEP writes it
+    transcript_id: str  # with its version, as the rules' table holds it
     chrom: str
     pos: int
     ref: str
@@ -163,7 +165,7 @@ def read_assembly_report(path: pathlib.Path) -> tuple[Chromosome, ...]:
 
 
 def synonyms(chromosomes: Sequence[Chromosome]) -> str:
-    """VEP's chromosome synonyms file: every pair among a chromosome's three names, since VEP does not chain them."""
+    """The chromosome synonyms in the layout of VEP's file: every pair among a chromosome's three names."""
     pairs = (pair for chromosome in chromosomes for pair in itertools.combinations(chromosome.names, 2))
     return ''.join(f'{left}\t{right}\n' for left, right in pairs)
 
@@ -204,9 +206,9 @@ def _blocks(lines: Iterator[str], where: str) -> Iterator[tuple[str, list[tuple[
 def _transcripts(block: Sequence[tuple[int, int, str]]) -> list[_Transcript]:
     """The mRNAs of the forward strand in a block, in the block's order, each with its exons and coding segments.
 
-    VEP names a transcript by the attribute `transcript_id` and, with --transcript_version, adds the attribute
-    `version` to an id that does not end in one. A transcript that the file marks as partial, as an exception to its
-    sequence or as without a start is left out, since a control needs a model that VEP reads plainly.
+    A transcript is named by the attribute `transcript_id`, with the attribute `version` added to an id that does not
+    end in one, as transcript_models names it. A transcript that the file marks as partial, as an exception to its
+    sequence or as without a start is left out, since a control needs a model that is read plainly.
     """
     found: dict[str, _Transcript] = {}
     for start, end, line in block:

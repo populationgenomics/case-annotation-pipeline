@@ -64,24 +64,24 @@
 // invented chrM of 120 bases (mito-reference.fa): gnomad_mito.vcf writes a deletion at the right end of a repeat,
 // which the union holds at the left end, as a family's normalised VCF would, and mitotip.tsv scores the changes of one
 // base of the union and the deletion of a base that the union's deletion removes.
-// The step that runs Ensembl VEP goes the way family_tables.nf sends it too. gene-models/ holds one invented gene of
-// four exons on chr1, on the forward strand, in the layout of Ensembl's GFF3 and in that of NCBI's RefSeq GFF, and an
-// invented assembly report. Its 5' UTR is the first exon and the start of the second, and holds one start codon, at
-// chr1:82, whose reading frame runs into the coding sequence in frame. INVENTED_GENE_MODELS prepares the folder that
-// a run is given, VEP_SITES cuts the union to the gene's exons and adds the positive controls, VEP_PLUGINS runs VEP
-// with both files in the VEP image, without a network, and VEP_PLUGIN_TABLE writes the plugins' table. Of the union's
-// alleles, the two at chr1:100 lie in the 5' UTR without an effect, chr1-200-G-A makes a stop codon in the upstream
-// reading frame, chr1-300-T-A is a missense variant, which neither plugin evaluates, and chr1-400-TCA-T is a
-// frameshift in the third exon, which the NMD plugin evaluates and does not flag. A record of the gene models whose
-// controls are on another transcript is refused, which is what a run meets whose VEP did not read the gene models.
-// Sites that hold an allele of the exons twice are refused before VEP reads them.
+// The step that applies the rules of VEP's two plugins goes the way family_tables.nf sends it too. gene-models/ holds
+// one invented gene of four exons on chr1, on the forward strand, in the layout of Ensembl's GFF3 and in that of
+// NCBI's RefSeq GFF, and an invented assembly report. Its 5' UTR is the first exon and the start of the second, and
+// holds one start codon, at chr1:82, whose reading frame runs into the coding sequence in frame. INVENTED_GENE_MODELS
+// prepares the folder that a run is given, and VEP_PLUGIN_TABLE cuts the union to the gene's exons, adds the positive
+// controls and writes the table of the plugins' rules for both files. Of the union's alleles, the two at chr1:100 lie
+// in the 5' UTR without an effect, chr1-200-G-A makes a stop codon in the upstream reading frame, chr1-300-T-A is a
+// missense variant, which neither plugin's rules evaluate, and chr1-400-TCA-T is a frameshift in the third exon, which
+// the NMD plugin's rule evaluates and does not flag. A folder of gene models whose record names the controls on
+// another transcript is refused, which is what a run meets whose gene models are not as their record describes them.
+// Sites that hold an allele of the exons twice are refused before the rules are applied to them.
 // Refused inputs must fail, and so must Annotator outputs without the group's annotation. The case-annotation and
 // echtvar steps run in the tools image, built first. Run with Docker from the repository's root, with this folder's
 // config alone (-C), because a run from the root would otherwise read the pipeline's nextflow.config over it:
 //   docker build -f containers/tools/Dockerfile -t case-annotation-tools-test .
 //   nextflow -C tests/workflows/nextflow.config run tests/workflows/family_tables.nf
 
-include { FAMILY_CHECK ; NORMALISE_FAMILY ; NORMALISE_SV ; UNION_SITES ; SV_SITES ; SV_UNION ; ECHTVAR_VALUES ; JOINED_VALUES ; VEP_SITES ; VEP_PLUGINS ; VEP_PLUGIN_TABLE ; ANNOTATION_TABLES ; SV_ANNOTATION_TABLES ; ROH_UPD ; FAMILY_TABLES ; groupAnnotation ; svName ; svGroup ; archivesDisk } from '../../modules/family_tables'
+include { FAMILY_CHECK ; NORMALISE_FAMILY ; NORMALISE_SV ; UNION_SITES ; SV_SITES ; SV_UNION ; ECHTVAR_VALUES ; JOINED_VALUES ; VEP_PLUGIN_TABLE ; ANNOTATION_TABLES ; SV_ANNOTATION_TABLES ; ROH_UPD ; FAMILY_TABLES ; groupAnnotation ; svName ; svGroup ; archivesDisk } from '../../modules/family_tables'
 include { ROH_UPD as ROH_UPD_TRIO } from '../../modules/family_tables'
 include { ROH_UPD as ROH_UPD_DUO } from '../../modules/family_tables'
 include { ROH_UPD as ROH_UPD_NO_GQ_REFUSED } from '../../modules/family_tables'
@@ -91,7 +91,7 @@ include { ROH_UPD as ROH_UPD_FAILING_UPD_REFUSED } from '../../modules/family_ta
 include { ECHTVAR_VALUES as ECHTVAR_VALUES_GNOMAD_ALONE } from '../../modules/family_tables'
 include { JOINED_VALUES as JOINED_VALUES_MITO } from '../../modules/family_tables'
 include { VEP_PLUGIN_TABLE as VEP_PLUGIN_TABLE_CONTROL_REFUSED } from '../../modules/family_tables'
-include { VEP_SITES as VEP_SITES_REPEATED_REFUSED } from '../../modules/family_tables'
+include { VEP_PLUGIN_TABLE as VEP_PLUGIN_TABLE_REPEATED_REFUSED } from '../../modules/family_tables'
 include { SV_SITES as SV_SITES_NO_END } from '../../modules/family_tables'
 include { SV_UNION as SV_UNION_NO_END_REFUSED } from '../../modules/family_tables'
 include { NORMALISE_SV as NORMALISE_SV_REF_MISMATCH_REFUSED } from '../../modules/family_tables'
@@ -132,7 +132,7 @@ workflow {
         }
     structural = larger.mix(channel.of(tuple('family-b', [], [], [])))
 
-    checked = FAMILY_CHECK(families.join(structural), '0.4.0')
+    checked = FAMILY_CHECK(families.join(structural), '0.5.0')
     normalised = NORMALISE_FAMILY(
         families.join(checked.map { f -> [f] }).map { f, vcf, _ped, _proband -> tuple(f, vcf) },
         reference,
@@ -208,12 +208,10 @@ workflow {
         mito,
         mitotip,
     )
-    // VEP's two plugins on the union's alleles in the exons of the invented gene.
+    // The rules of VEP's two plugins, applied to the union's alleles in the exons of the invented gene.
     gene_models = INVENTED_GENE_MODELS(file("${fixture}/gene-models"), reference)
-    vep_sites = VEP_SITES(union, gene_models.map { g -> g.resolve('exons.bed') }, gene_models.map { g -> g.resolve('controls.vcf') })
-    vep = VEP_PLUGINS(vep_sites, reference, gene_models)
-    vep_plugins = VEP_PLUGIN_TABLE(vep_sites, vep, gene_models.map { g -> g.resolve('gene-models.json') })
-    CHECK_VEP_PLUGINS(vep_sites.map { _group, vcf, index -> tuple(vcf, index) }, vep_plugins)
+    vep_plugins = VEP_PLUGIN_TABLE(union, reference, gene_models)
+    CHECK_VEP_PLUGINS(vep_plugins)
     // The union of the group's structural variants and copy-number segments, which are family A's, and its tables.
     sv_sites = SV_SITES(
         structural.join(checked.map { f -> [f] }).filter { _f, sv, cnv, _repeats -> sv || cnv }.map { f, sv, cnv, _repeats -> tuple(f, sv, cnv) }
@@ -246,7 +244,7 @@ workflow {
         'v0.0.0',
         '2099-01-01',
         '0.5.0',
-        '0.4.0',
+        '0.5.0',
     )
     // What FAMILY_TABLES gives of a family: its id, variants, transcripts, roh, the manifest, the notes, and the
     // tables that only some families have.
@@ -313,9 +311,9 @@ workflow {
     // repeat VCFs of two of the family's three members; a structural-variant VCF whose samples are another family's; a
     // structural variant written as a sequence whose REF is not the reference's; a union of sites with a deletion that
     // has no INFO END, which the Annotator would annotate as a single base; for ROH_UPD, a trio whose VCF has no GQ,
-    // and an upd that fails after it has written a region, which failing-upd stands in for (nextflow.config); a record
-    // of the gene models whose positive controls are of a transcript that VEP does not list; sites with an allele of
-    // the exons twice.
+    // and an upd that fails after it has written a region, which failing-upd stands in for (nextflow.config); a folder
+    // of gene models whose record names the positive controls on a transcript that the gene models do not hold; sites
+    // with an allele of the exons twice.
     unprefixed = NORMALISE_UNPREFIXED_REFUSED(channel.of(tuple('unprefixed', file("${fixture}/unprefixed.vcf"))), reference)
     mismatch = NORMALISE_REF_MISMATCH_REFUSED(channel.of(tuple('mismatch', file("${fixture}/ref-mismatch.vcf"))), reference)
     repeated = NORMALISE_REPEATED_REFUSED(channel.of(tuple('repeated', file("${fixture}/repeated.vcf"))), reference)
@@ -333,15 +331,15 @@ workflow {
     )
     other_proband = FAMILY_CHECK_PROBAND_REFUSED(
         channel.of(tuple('family-a', file("${fixture}/family-a.vcf"), file("${fixture}/family-a.ped"), 'B3', [], [], [])),
-        '0.4.0',
+        '0.5.0',
     )
     two_repeats = FAMILY_CHECK_REPEATS_REFUSED(
         channel.of(tuple('family-a', file("${fixture}/family-a.vcf"), file("${fixture}/family-a.ped"), 'A3', [], [], [file("${fixture}/A1.repeats.vcf"), file("${fixture}/A2.repeats.vcf")])),
-        '0.4.0',
+        '0.5.0',
     )
     other_samples = FAMILY_CHECK_SV_SAMPLES_REFUSED(
         channel.of(tuple('family-b', file("${fixture}/family-b.vcf"), file("${fixture}/family-b.ped"), '', [file("${fixture}/family-a.sv.vcf")], [], [])),
-        '0.4.0',
+        '0.5.0',
     )
     sv_mismatch = NORMALISE_SV_REF_MISMATCH_REFUSED(
         channel.of(tuple('sv-mismatch', [file("${fixture}/sv-ref-mismatch.vcf")])),
@@ -360,24 +358,16 @@ workflow {
         frequencies,
     )
     failing_upd = ROH_UPD_FAILING_UPD_REFUSED(channel.of(tuple('trio-t', trio, trio_ped)), frequencies)
-    other_control = VEP_PLUGIN_TABLE_CONTROL_REFUSED(
-        vep_sites,
-        vep,
-        INVENTED_OTHER_CONTROLS(gene_models.map { g -> g.resolve('gene-models.json') }),
-    )
-    repeated_sites = VEP_SITES_REPEATED_REFUSED(
-        INVENTED_REPEATED_SITES(),
-        gene_models.map { g -> g.resolve('exons.bed') },
-        gene_models.map { g -> g.resolve('controls.vcf') },
-    )
+    other_control = VEP_PLUGIN_TABLE_CONTROL_REFUSED(union, reference, INVENTED_OTHER_CONTROLS(gene_models))
+    repeated_sites = VEP_PLUGIN_TABLE_REPEATED_REFUSED(INVENTED_REPEATED_SITES(), reference, gene_models)
     unprefixed.sites
         .map { _s -> 'unprefixed contigs' }
         .mix(
             no_gq.map { _f, _folder -> 'a trio without GQ' },
             failing_upd.map { _f, _folder -> 'an upd that fails' },
             no_end_union.map.map { _m -> 'a deletion without END' },
-            other_control.map { _t -> "controls on a transcript that VEP does not list" },
-            repeated_sites.map { _s -> 'an allele twice among the sites that VEP reads' },
+            other_control.map { _t -> "controls on a transcript that the gene models do not hold" },
+            repeated_sites.map { _t -> 'an allele twice among the sites in the exons' },
             two_repeats.map { _f -> "repeat VCFs of two of three members" },
             other_samples.map { _f -> "a structural-variant VCF of another family's samples" },
             sv_mismatch.map { _a -> "a structural variant whose REF is not the reference's" },
@@ -431,18 +421,22 @@ process INVENTED_GENE_MODELS {
     """
 }
 
-// The record of the gene models with each control on a transcript that the invented gene models do not hold.
+// A copy of the folder of gene models whose record names each control on a transcript that the invented gene models do
+// not hold. Its other files are those of the prepared folder.
 process INVENTED_OTHER_CONTROLS {
     input:
-    path record, stageAs: 'prepared/*'
+    path prepared, stageAs: 'prepared'
 
     output:
-    path 'gene-models.json'
+    path 'gene-models'
 
     script:
     """
-    sed -e 's/"ENST01.1"/"ENST02.1"/' -e 's/"NM_01.1"/"NM_02.1"/' ${record} > gene-models.json
-    if cmp -s ${record} gene-models.json; then
+    mkdir gene-models
+    cp -L prepared/* gene-models/
+    sed -e 's/"ENST01.1"/"ENST02.1"/' -e 's/"NM_01.1"/"NM_02.1"/' prepared/gene-models.json \\
+        > gene-models/gene-models.json
+    if cmp -s prepared/gene-models.json gene-models/gene-models.json; then
         echo "the record has neither transcript of the invented gene models" >&2
         exit 1
     fi
@@ -465,34 +459,28 @@ process INVENTED_REPEATED_SITES {
     """
 }
 
-// What VEP read and the plugins' table of the union. VEP read the five alleles of the union in the gene's exons, each
-// under its variant id, and the four controls. The table has a row for an allele and transcript that a plugin
-// evaluated, for the transcript of each gene model file, and none for a control: the alleles in the 5' UTR have the
-// counts of the reading frames that the UTR holds, which is one that runs into the coding sequence in frame; the
+// The table of the plugins' rules for the union, and its record. The table has a row for an allele and transcript that
+// a rule evaluated, for the transcript of each gene model file, and none for a control: the alleles in the 5' UTR have
+// the counts of the reading frames that the UTR holds, which is one that runs into the coding sequence in frame; the
 // allele that makes a stop codon in that frame has one record of a gained stop, with the plugin's values; the
-// frameshift is evaluated by the NMD plugin and not flagged; the missense variant has no row. The record holds VEP's
-// version, the plugin's commit and its file of translated reading frames as the image holds them, and each gene model
-// file with the invented file that it was prepared from, and no count of the union's.
+// frameshift is evaluated by the NMD plugin's rule and not flagged; the missense variant has no row. The record holds
+// the release of VEP that the step follows, the commits that the rules are restated from, the plugin's file of
+// translated reading frames as the image holds it, and each gene model file with the invented file that it was
+// prepared from, and no count of the union's.
 process CHECK_VEP_PLUGINS {
     input:
-    tuple path(given), path(given_index)
     path vep_plugins
 
     script:
     """
     python3 - <<'EOF'
 import json
+import re
 
 import pyarrow.parquet as pq
-import pysam
 
 from case_annotation import vep_plugins
 
-ids = [record.id for record in pysam.VariantFile('${given}')]
-alleles = ['chr1-100-G-A', 'chr1-100-G-C', 'chr1-200-G-A', 'chr1-300-T-A', 'chr1-400-TCA-T']
-assert sorted(i for i in ids if i.startswith('chr')) == alleles, ids
-assert sorted(i for i in ids if not i.startswith('chr')) == [
-    'control-NMD-Ensembl', 'control-NMD-RefSeq', 'control-UTRannotator-Ensembl', 'control-UTRannotator-RefSeq'], ids
 table = pq.read_table('${vep_plugins}/vep_plugins.parquet')
 assert table.schema.equals(vep_plugins.TABLE), table.schema
 rows = table.to_pylist()
@@ -514,18 +502,15 @@ for row in rows:
         'kozak_strength': 'Moderate', 'ref_start_distance_to_cds': 117, 'new_stop_distance_to_cds': 12,
         'evidence': False}, record
 info = json.load(open('${vep_plugins}/vep_plugins.json'))
-assert info['vep_version'] == '116.3', info
-assert info['utrannotator_commit'] == '3d9d466e356752aa69d61b62da493edddf374363', info
+assert info['vep_release'] == '116.3', info
+commits = (info['utrannotator_commit'], info['nmd_plugin_commit'])
+assert all(re.fullmatch('[0-9a-f]{40}', commit) for commit in commits), info
 assert (info['uorf_evidence']['name'], info['uorf_evidence']['bytes']) == ('uORF_5UTR_GRCh38_PUBLIC.txt', 2376724), info
 assert info['uorf_evidence']['sha256'] == 'e220023a747465dcdf6725ce809511bccc20b7a9990288da91032a1a7f51ebce', info
-assert info['nmd_plugin']['name'] == 'NMD.pm', info
-assert {'--safe', '--transcript_version', '--json'} <= set(info['options']), info
-assert info['environment'] == ['PERL_HASH_SEED=0', 'PERL_PERTURB_KEYS=0'], info
 models = [(m['source'], m['file']['name'], m['prepared_from']['name']) for m in info['gene_models']]
 assert models == [('Ensembl', 'ensembl.gff3.gz', 'invented.gff3.gz'),
                   ('RefSeq', 'refseq.gff.gz', 'invented.gff.gz')], models
-assert sorted(info) == ['environment', 'gene_models', 'nmd_plugin', 'options', 'uorf_evidence',
-                        'utrannotator_commit', 'vep_version'], info
+assert sorted(info) == ['gene_models', 'nmd_plugin_commit', 'uorf_evidence', 'utrannotator_commit', 'vep_release'], info
 stated = [m['prepared_from']['stated'] for m in info['gene_models']]
 assert [len(lines) for lines in stated] == [2, 3] and all(line.startswith('#!') for lines in stated for line in lines), info
 EOF
@@ -775,12 +760,13 @@ process INVENTED_ALPHAGENOME_ARCHIVE {
 // raw score and 0.048, as the invented tables have them. The two deletions and the alleles at positions without a row
 // have none, and the alleles at chr1:200 and on chrX those of some archives. The manifest and the table's metadata
 // record each archive, the two that are not for permissive use with their notice.
-// Each row of transcripts has what VEP's plugins say of its allele on the invented transcript, which both the invented
-// annotation and Ensembl's layout of the invented gene models call ENST01.1: the counts of the 5' UTR's reading frames
-// for the three alleles in the UTR, the record of a gained stop for chr1-200-G-A, the NMD plugin's false for the
-// frameshift, and nothing for the alleles that no plugin evaluated. The allele's row of variants has the kind of the
-// effect. The manifest counts the plugins' four rows on the RefSeq transcript, which the invented annotation lacks, and
-// holds the record of the run.
+// Each row of transcripts has what the rules of VEP's plugins say of its allele on the invented transcript, which both
+// the invented annotation and Ensembl's layout of the invented gene models call ENST01.1: the counts of the 5' UTR's
+// reading frames for the three alleles in the UTR, the record of a gained stop for chr1-200-G-A, the false of the NMD
+// plugin's rule for the frameshift, and nothing for the alleles that no rule evaluated. The plugins' six columns end
+// with nmd_escaping, and the five columns that no plugin gives follow them and end the table. The allele's row of
+// variants has the kind of the effect. The manifest counts the four rows of the rules' table on the RefSeq transcript,
+// which the invented annotation lacks, and holds the record of the run.
 process CHECK_TABLES {
     input:
     tuple val(family), path(variants), path(transcripts), path(manifest), path(notes)
@@ -928,7 +914,9 @@ kinds = {r['variant_id']: r['utr5_consequences'] for r in variants.to_pylist() i
 assert kinds == {'chr1-200-G-A': ['uSTOP_gained']}, kinds
 plugins = ('utr5_consequences', 'utr5_uorfs', 'utr5_existing_uorfs', 'utr5_existing_oorfs_out_of_frame',
            'utr5_existing_oorfs_in_frame', 'nmd_escaping')
-assert transcripts.column_names[-6:] == list(plugins), transcripts.column_names
+beside = ('utr5_cds_kozak_context', 'utr5_cds_kozak_strength', 'utr5_cds_kozak_context_alt',
+          'utr5_cds_kozak_strength_alt', 'nmd_escape_reason')
+assert transcripts.column_names[-11:] == [*plugins, *beside], transcripts.column_names
 said = {r['variant_id']: tuple(r[c] for c in plugins) for r in transcripts.to_pylist()
         if any(r[c] is not None for c in plugins)}
 assert set(said) == {'chr1-100-G-A', 'chr1-100-G-C', 'chr1-200-G-A', 'chr1-400-TCA-T'}, said
@@ -941,7 +929,9 @@ assert (record['consequence'], record['ref_type'], record['new_stop_distance_to_
     'uSTOP_gained', 'InFrame_oORF', 12, False), record
 assert record['type'] is None and record['distance_to_cds'] is None, record
 ran = manifest['vep_plugins']
-assert ran['run']['vep_version'] == '116.3', ran
+assert ran['run']['vep_release'] == '116.3', ran
+assert sorted(ran['run']) == ['gene_models', 'nmd_plugin_commit', 'uorf_evidence', 'utrannotator_commit',
+                              'vep_release'], ran
 assert ran['matching'] == [
     {'source': 'Ensembl', 'rows_without_transcript': 0, 'rows_of_other_ids': 0, 'utr5_transcripts_without_values': 0},
     {'source': 'RefSeq', 'rows_without_transcript': 4, 'rows_of_other_ids': 0, 'utr5_transcripts_without_values': 0},

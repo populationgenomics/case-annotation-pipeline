@@ -1,5 +1,6 @@
 # The tools image for the pipeline's own steps: the case-annotation command (this repository's package, as locked),
-# upd (as locked, from the commit of its tag in its Git repository), bcftools and echtvar. It builds from the repository
+# upd (as locked, from the commit of its tag in its Git repository), bcftools, echtvar, and the one data file that a
+# step reads from the image, UTRannotator's list of translated upstream reading frames. It builds from the repository
 # root, which holds the lock:
 #
 #   docker build --platform linux/amd64 -f containers/tools/Dockerfile -t <registry>/case-annotation-tools:<commit> .
@@ -49,8 +50,24 @@ ADD --checksum=sha256:2c425bad9a4e6aeeade5eeec229e7f887d7385642a0aada3a03909b630
     https://github.com/brentp/echtvar/releases/download/v0.2.4/echtvar-v0.2.4-x86_64-unknown-linux-musl \
     /usr/local/bin/echtvar
 RUN chmod 0755 /usr/local/bin/echtvar
+# UTRannotator's list of the upstream reading frames that ribosome profiling has seen translated, which
+# `case-annotation vep-plugins` reads, with the plugin's MIT licence beside it (README.md). Both come from the commit of
+# the plugin's repository that the command's rules are restated from (utr5.SOURCE_COMMIT), each checked against its
+# SHA-256. The folder is made before the files: a folder that ADD makes for a file gets the file's mode, which no user
+# but root can enter. A file from a URL is readable by root alone unless its mode is given.
+ARG UTRANNOTATOR_COMMIT=3d9d466e356752aa69d61b62da493edddf374363
+RUN mkdir -p /opt/utrannotator
+ADD --chmod=0644 --checksum=sha256:e220023a747465dcdf6725ce809511bccc20b7a9990288da91032a1a7f51ebce \
+    https://raw.githubusercontent.com/ImperialCardioGenetics/UTRannotator/${UTRANNOTATOR_COMMIT}/uORF_5UTR_GRCh38_PUBLIC.txt \
+    /opt/utrannotator/uORF_5UTR_GRCh38_PUBLIC.txt
+ADD --chmod=0644 --checksum=sha256:dfcec4f825cb1811176fb8f50eb67e84dfc58c6a2fdd8849b214ca74036d5721 \
+    https://raw.githubusercontent.com/ImperialCardioGenetics/UTRannotator/${UTRANNOTATOR_COMMIT}/LICENSE \
+    /opt/utrannotator/LICENSE
+# The file's path, which the step gives the command.
+ENV UORF_EVIDENCE=/opt/utrannotator/uORF_5UTR_GRCh38_PUBLIC.txt
 COPY --from=python-packages /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 
-# An image whose tools do not start is never pushed.
-RUN case-annotation --help >/dev/null && bcftools version && echtvar --version && upd --version
+# An image whose tools do not start, or that lacks the file of reading frames, is never pushed.
+RUN case-annotation --help >/dev/null && bcftools version && echtvar --version && upd --version \
+    && test -s "${UORF_EVIDENCE}"
