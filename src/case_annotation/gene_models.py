@@ -1,7 +1,7 @@
 """The gene model files that the plugins' rules read, prepared from the public files (docs/annotation.md).
 
-The step that applies the rules of VEP's two plugins (vep_plugins) builds its transcripts from a GFF file as Ensembl
-VEP builds them without its cache (transcript_models). A prepared file is laid out as VEP needs one: sorted,
+The step that applies the rules of VEP's two plugins (transcript_rules) builds its transcripts from a GFF file as
+Ensembl VEP builds them without its cache (transcript_models). A prepared file is laid out as VEP needs one: sorted,
 compressed with bgzip and indexed with tabix, so that VEP itself can read the same folder, which is how the rules are
 compared with the plugins. `prepare` makes such a file from Ensembl's GFF3 and from NCBI's RefSeq GFF as they are
 published, and writes beside them what the step needs of both:
@@ -11,7 +11,7 @@ published, and writes beside them what the step needs of both:
 - the regions of the exons of either file, under the names of the VCFs, to which the step cuts a union's alleles
   before it reads them;
 - the positive controls, two invented alleles for each file, which the step reads with a union's alleles and looks
-  for among its rows before it drops them (vep_plugins);
+  for among its rows before it drops them (transcript_rules);
 - a record of the public files that the folder was made from.
 
 Nothing is filtered: a prepared file holds every feature line of the public file. Its comment lines are left out, as

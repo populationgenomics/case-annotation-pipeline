@@ -484,7 +484,7 @@
       "type": "object"
     },
     "PluginMatching": {
-      "description": "How the rows of VEP's plugins met the family's `transcripts` rows of one source of transcripts.\n\nThe rules read the prepared gene model files, as VEP did, and not the Annotator's own, so a transcript, or a\nversion of one, can be in a gene model file and not among the Annotator's, or the other way round, and the two can\nplace a variant differently at the edge of a 5' UTR. Neither stops a run.",
+      "description": "How the rows of the transcript rules met the family's `transcripts` rows of one source of transcripts.\n\nThe rules read the prepared gene model files, as VEP reads them, and not the Annotator's own, so a transcript, or a\nversion of one, can be in a gene model file and not among the Annotator's, or the other way round, and the two can\nplace a variant differently at the edge of a 5' UTR. Neither stops a run.",
       "properties": {
         "source": {
           "$ref": "#/$defs/Source"
@@ -752,35 +752,11 @@
       "title": "TableFile",
       "type": "object"
     },
-    "Trio": {
-      "description": "A child whose parents are both sequenced, by the three samples' names in the family's VCF.",
-      "properties": {
-        "child": {
-          "title": "Child",
-          "type": "string"
-        },
-        "mother": {
-          "title": "Mother",
-          "type": "string"
-        },
-        "father": {
-          "title": "Father",
-          "type": "string"
-        }
-      },
-      "required": [
-        "child",
-        "mother",
-        "father"
-      ],
-      "title": "Trio",
-      "type": "object"
-    },
-    "VepPlugins": {
+    "TranscriptRules": {
       "description": "What the columns of the rules of VEP's two plugins come from, and how its rows met the family's.\n\n`run` is the record of the rules and of the files that they read, which holds nothing of the union's alleles, and\n`matching` is of this family's tables.",
       "properties": {
         "run": {
-          "$ref": "#/$defs/VepPluginsInfo"
+          "$ref": "#/$defs/TranscriptRulesInfo"
         },
         "matching": {
           "items": {
@@ -794,10 +770,10 @@
         "run",
         "matching"
       ],
-      "title": "VepPlugins",
+      "title": "TranscriptRules",
       "type": "object"
     },
-    "VepPluginsInfo": {
+    "TranscriptRulesInfo": {
       "description": "What the columns of the two plugins' rules come from (INFO_NAME).",
       "properties": {
         "utrannotator_commit": {
@@ -833,7 +809,31 @@
         "uorf_evidence",
         "gene_models"
       ],
-      "title": "VepPluginsInfo",
+      "title": "TranscriptRulesInfo",
+      "type": "object"
+    },
+    "Trio": {
+      "description": "A child whose parents are both sequenced, by the three samples' names in the family's VCF.",
+      "properties": {
+        "child": {
+          "title": "Child",
+          "type": "string"
+        },
+        "mother": {
+          "title": "Mother",
+          "type": "string"
+        },
+        "father": {
+          "title": "Father",
+          "type": "string"
+        }
+      },
+      "required": [
+        "child",
+        "mother",
+        "father"
+      ],
+      "title": "Trio",
       "type": "object"
     }
   },
@@ -921,8 +921,8 @@
       "title": "Joined Files",
       "type": "array"
     },
-    "vep_plugins": {
-      "$ref": "#/$defs/VepPlugins"
+    "transcript_rules": {
+      "$ref": "#/$defs/TranscriptRules"
     },
     "omitted_columns": {
       "items": {
@@ -991,7 +991,7 @@
     "alphagenome_avi_breakdown",
     "alphagenome_splicing",
     "joined_files",
-    "vep_plugins",
+    "transcript_rules",
     "omitted_columns",
     "transcripts_omitted_columns",
     "sv_annotation",

@@ -6,7 +6,7 @@
 // variants and copy-number segments of a group have a union of their own, which SV_SITES cuts from each family's VCFs,
 // SV_UNION joins and SV_ANNOTATION_TABLES converts the annotation of.
 // NORMALISE_FAMILY, NORMALISE_SV, UNION_SITES and SV_SITES run bcftools alone, ECHTVAR_VALUES echtvar and
-// case-annotation, SV_UNION, JOINED_VALUES and VEP_PLUGIN_TABLE case-annotation and bcftools, ROH_UPD bcftools,
+// case-annotation, SV_UNION, JOINED_VALUES and TRANSCRIPT_RULES case-annotation and bcftools, ROH_UPD bcftools,
 // echtvar, upd and case-annotation, and the others case-annotation, all in the tools image (label 'tools').
 //
 // A family's structural-variant VCF, its copy-number VCF and its members' repeat VCFs are optional. A process takes
@@ -347,7 +347,7 @@ process JOINED_VALUES {
 // The time limit ends a task that has stalled: on eight CPUs the command reads 800,000 alleles in about a minute, and
 // the copy is of 3.5 GB for GRCh38 with both gene model files.
 // The stub gives its folder a fixed time, as the stub of ECHTVAR_VALUES does.
-process VEP_PLUGIN_TABLE {
+process TRANSCRIPT_RULES {
     tag "${group}"
     label 'tools'
     machineType 'n2d-standard-8'
@@ -362,12 +362,12 @@ process VEP_PLUGIN_TABLE {
     path gene_models, stageAs: 'gene-models'
 
     output:
-    path 'vep_plugins'
+    path 'transcript_rules'
 
     script:
     """
     set -o pipefail
-    copies=\$(mktemp -d /tmp/plugin-rules.XXXXXX)
+    copies=\$(mktemp -d /tmp/transcript-rules.XXXXXX)
     trap 'rm -rf "\${copies}"' EXIT
     mkdir "\${copies}/gene-models"
     cp -L ${reference} ${reference_index} "\${copies}/"
@@ -383,16 +383,16 @@ process VEP_PLUGIN_TABLE {
         echo "${group}: alleles that the cut to the exons wrote more than once: \${repeated}" >&2
         exit 1
     fi
-    case-annotation vep-plugins --given ${group}.exons.vcf.gz --gene-models "\${copies}/gene-models" \\
+    case-annotation transcript-rules --given ${group}.exons.vcf.gz --gene-models "\${copies}/gene-models" \\
         --reference "\${copies}/${reference.name}" --uorf-evidence "\${UORF_EVIDENCE}" --workers ${task.cpus} \\
-        --output vep_plugins
+        --output transcript_rules
     """
 
     stub:
     """
-    mkdir vep_plugins
-    touch vep_plugins/vep_plugins.parquet vep_plugins/vep_plugins.json
-    touch -t 200001010000 vep_plugins
+    mkdir transcript_rules
+    touch transcript_rules/transcript_rules.parquet transcript_rules/transcript_rules.json
+    touch -t 200001010000 transcript_rules
     """
 }
 
@@ -548,8 +548,8 @@ process ROH_UPD {
 
 // One family's variants table, which holds a column of each member's calls, its transcripts table, its manifest and
 // the notes on the tables (tables.md, a copy of the file in the tools' package), from the union's tables, its values
-// from the echtvar archives and from the joined files and its table of VEP's plugins. The manifest's roles are those of
-// the proband the sheet names
+// from the echtvar archives and from the joined files and its table of the transcript rules. The manifest's roles are
+// those of the proband the sheet names
 // and of its parents; nobody has one where the sheet names none. DuckDB sorts the union's tables down to the family's
 // alleles, spilling to the boot disk.
 // A family with a structural-variant or a copy-number VCF also gets sv, which holds a column of each member's calls
@@ -575,7 +575,7 @@ process FAMILY_TABLES {
     path tables
     path echtvar_values
     path joined_values
-    path vep_plugins
+    path transcript_rules
     path sv_annotation, stageAs: 'sv-union/*'
     path sv_map, stageAs: 'sv-union/*'
     path strchive, stageAs: 'strchive/*'
@@ -596,7 +596,7 @@ process FAMILY_TABLES {
         ${structuralOptions(sv, cnv, repeats)} ${vcfs(sv_alleles).collect { f -> "--sv-alleles ${f}" }.join(' ')} \\
         ${annotated} ${ranges} \\
         --annotation ${tables} --echtvar-values ${echtvar_values} --joined-values ${joined_values} \\
-        --vep-plugins ${vep_plugins} --roh-upd ${segments} \\
+        --transcript-rules ${transcript_rules} --roh-upd ${segments} \\
         --schema-version ${schema_version} --pipeline-version ${pipeline_version} --output out --scratch /tmp
     mv out/* .
     """

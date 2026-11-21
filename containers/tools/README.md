@@ -11,7 +11,7 @@ commit and the versions of upd's two dependencies. upd is in the dependency grou
 package, whose metadata would otherwise name a requirement that an index resolves to the other project. A newer upd is a
 new commit in `pyproject.toml` and a new lock (`uv lock`), under the same age gate as every other package.
 
-The data file belongs to UTRannotator, the plugin of Ensembl VEP whose rules `case-annotation vep-plugins` applies
+The data file belongs to UTRannotator, the plugin of Ensembl VEP whose rules `case-annotation transcript-rules` applies
 ([Upstream reading frames and nonsense-mediated decay](../../docs/annotation.md#upstream-reading-frames-and-nonsense-mediated-decay)).
 The step reads it for the `evidence` of an upstream reading frame.
 

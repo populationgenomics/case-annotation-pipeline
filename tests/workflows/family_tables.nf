@@ -68,7 +68,7 @@
 // one invented gene of four exons on chr1, on the forward strand, in the layout of Ensembl's GFF3 and in that of
 // NCBI's RefSeq GFF, and an invented assembly report. Its 5' UTR is the first exon and the start of the second, and
 // holds one start codon, at chr1:82, whose reading frame runs into the coding sequence in frame. INVENTED_GENE_MODELS
-// prepares the folder that a run is given, and VEP_PLUGIN_TABLE cuts the union to the gene's exons, adds the positive
+// prepares the folder that a run is given, and TRANSCRIPT_RULES cuts the union to the gene's exons, adds the positive
 // controls and writes the table of the plugins' rules for both files. Of the union's alleles, the two at chr1:100 lie
 // in the 5' UTR without an effect, chr1-200-G-A makes a stop codon in the upstream reading frame, chr1-300-T-A is a
 // missense variant, which neither plugin's rules evaluate, and chr1-400-TCA-T is a frameshift in the third exon, which
@@ -81,7 +81,7 @@
 //   docker build -f containers/tools/Dockerfile -t case-annotation-tools-test .
 //   nextflow -C tests/workflows/nextflow.config run tests/workflows/family_tables.nf
 
-include { FAMILY_CHECK ; NORMALISE_FAMILY ; NORMALISE_SV ; UNION_SITES ; SV_SITES ; SV_UNION ; ECHTVAR_VALUES ; JOINED_VALUES ; VEP_PLUGIN_TABLE ; ANNOTATION_TABLES ; SV_ANNOTATION_TABLES ; ROH_UPD ; FAMILY_TABLES ; groupAnnotation ; svName ; svGroup ; archivesDisk } from '../../modules/family_tables'
+include { FAMILY_CHECK ; NORMALISE_FAMILY ; NORMALISE_SV ; UNION_SITES ; SV_SITES ; SV_UNION ; ECHTVAR_VALUES ; JOINED_VALUES ; TRANSCRIPT_RULES ; ANNOTATION_TABLES ; SV_ANNOTATION_TABLES ; ROH_UPD ; FAMILY_TABLES ; groupAnnotation ; svName ; svGroup ; archivesDisk } from '../../modules/family_tables'
 include { ROH_UPD as ROH_UPD_TRIO } from '../../modules/family_tables'
 include { ROH_UPD as ROH_UPD_DUO } from '../../modules/family_tables'
 include { ROH_UPD as ROH_UPD_NO_GQ_REFUSED } from '../../modules/family_tables'
@@ -90,8 +90,8 @@ include { ROH_UPD as ROH_UPD_NO_KEPT_SITE } from '../../modules/family_tables'
 include { ROH_UPD as ROH_UPD_FAILING_UPD_REFUSED } from '../../modules/family_tables'
 include { ECHTVAR_VALUES as ECHTVAR_VALUES_GNOMAD_ALONE } from '../../modules/family_tables'
 include { JOINED_VALUES as JOINED_VALUES_MITO } from '../../modules/family_tables'
-include { VEP_PLUGIN_TABLE as VEP_PLUGIN_TABLE_CONTROL_REFUSED } from '../../modules/family_tables'
-include { VEP_PLUGIN_TABLE as VEP_PLUGIN_TABLE_REPEATED_REFUSED } from '../../modules/family_tables'
+include { TRANSCRIPT_RULES as TRANSCRIPT_RULES_CONTROL_REFUSED } from '../../modules/family_tables'
+include { TRANSCRIPT_RULES as TRANSCRIPT_RULES_REPEATED_REFUSED } from '../../modules/family_tables'
 include { SV_SITES as SV_SITES_NO_END } from '../../modules/family_tables'
 include { SV_UNION as SV_UNION_NO_END_REFUSED } from '../../modules/family_tables'
 include { NORMALISE_SV as NORMALISE_SV_REF_MISMATCH_REFUSED } from '../../modules/family_tables'
@@ -132,7 +132,7 @@ workflow {
         }
     structural = larger.mix(channel.of(tuple('family-b', [], [], [])))
 
-    checked = FAMILY_CHECK(families.join(structural), '0.5.0')
+    checked = FAMILY_CHECK(families.join(structural), '0.5.1')
     normalised = NORMALISE_FAMILY(
         families.join(checked.map { f -> [f] }).map { f, vcf, _ped, _proband -> tuple(f, vcf) },
         reference,
@@ -210,8 +210,8 @@ workflow {
     )
     // The rules of VEP's two plugins, applied to the union's alleles in the exons of the invented gene.
     gene_models = INVENTED_GENE_MODELS(file("${fixture}/gene-models"), reference)
-    vep_plugins = VEP_PLUGIN_TABLE(union, reference, gene_models)
-    CHECK_VEP_PLUGINS(vep_plugins)
+    transcript_rules = TRANSCRIPT_RULES(union, reference, gene_models)
+    CHECK_TRANSCRIPT_RULES(transcript_rules)
     // The union of the group's structural variants and copy-number segments, which are family A's, and its tables.
     sv_sites = SV_SITES(
         structural.join(checked.map { f -> [f] }).filter { _f, sv, cnv, _repeats -> sv || cnv }.map { f, sv, cnv, _repeats -> tuple(f, sv, cnv) }
@@ -237,14 +237,14 @@ workflow {
         tables,
         joint,
         joined,
-        vep_plugins,
+        transcript_rules,
         sv_tables,
         sv_union.map,
         file("${fixture}/strchive.json"),
         'v0.0.0',
         '2099-01-01',
         '0.5.0',
-        '0.5.0',
+        '0.5.1',
     )
     // What FAMILY_TABLES gives of a family: its id, variants, transcripts, roh, the manifest, the notes, and the
     // tables that only some families have.
@@ -331,15 +331,15 @@ workflow {
     )
     other_proband = FAMILY_CHECK_PROBAND_REFUSED(
         channel.of(tuple('family-a', file("${fixture}/family-a.vcf"), file("${fixture}/family-a.ped"), 'B3', [], [], [])),
-        '0.5.0',
+        '0.5.1',
     )
     two_repeats = FAMILY_CHECK_REPEATS_REFUSED(
         channel.of(tuple('family-a', file("${fixture}/family-a.vcf"), file("${fixture}/family-a.ped"), 'A3', [], [], [file("${fixture}/A1.repeats.vcf"), file("${fixture}/A2.repeats.vcf")])),
-        '0.5.0',
+        '0.5.1',
     )
     other_samples = FAMILY_CHECK_SV_SAMPLES_REFUSED(
         channel.of(tuple('family-b', file("${fixture}/family-b.vcf"), file("${fixture}/family-b.ped"), '', [file("${fixture}/family-a.sv.vcf")], [], [])),
-        '0.5.0',
+        '0.5.1',
     )
     sv_mismatch = NORMALISE_SV_REF_MISMATCH_REFUSED(
         channel.of(tuple('sv-mismatch', [file("${fixture}/sv-ref-mismatch.vcf")])),
@@ -358,8 +358,8 @@ workflow {
         frequencies,
     )
     failing_upd = ROH_UPD_FAILING_UPD_REFUSED(channel.of(tuple('trio-t', trio, trio_ped)), frequencies)
-    other_control = VEP_PLUGIN_TABLE_CONTROL_REFUSED(union, reference, INVENTED_OTHER_CONTROLS(gene_models))
-    repeated_sites = VEP_PLUGIN_TABLE_REPEATED_REFUSED(INVENTED_REPEATED_SITES(), reference, gene_models)
+    other_control = TRANSCRIPT_RULES_CONTROL_REFUSED(union, reference, INVENTED_OTHER_CONTROLS(gene_models))
+    repeated_sites = TRANSCRIPT_RULES_REPEATED_REFUSED(INVENTED_REPEATED_SITES(), reference, gene_models)
     unprefixed.sites
         .map { _s -> 'unprefixed contigs' }
         .mix(
@@ -467,9 +467,9 @@ process INVENTED_REPEATED_SITES {
 // the release of VEP that the step follows, the commits that the rules are restated from, the plugin's file of
 // translated reading frames as the image holds it, and each gene model file with the invented file that it was
 // prepared from, and no count of the union's.
-process CHECK_VEP_PLUGINS {
+process CHECK_TRANSCRIPT_RULES {
     input:
-    path vep_plugins
+    path transcript_rules
 
     script:
     """
@@ -479,10 +479,10 @@ import re
 
 import pyarrow.parquet as pq
 
-from case_annotation import vep_plugins
+from case_annotation import transcript_rules
 
-table = pq.read_table('${vep_plugins}/vep_plugins.parquet')
-assert table.schema.equals(vep_plugins.TABLE), table.schema
+table = pq.read_table('${transcript_rules}/transcript_rules.parquet')
+assert table.schema.equals(transcript_rules.TABLE), table.schema
 rows = table.to_pylist()
 keys = [(r['variant_id'], r['transcript_id'], r['source']) for r in rows]
 evaluated = ['chr1-100-G-A', 'chr1-100-G-C', 'chr1-200-G-A', 'chr1-400-TCA-T']
@@ -501,7 +501,7 @@ for row in rows:
         'consequence': 'uSTOP_gained', 'ref_type': 'InFrame_oORF', 'kozak_context': 'GTGATGC',
         'kozak_strength': 'Moderate', 'ref_start_distance_to_cds': 117, 'new_stop_distance_to_cds': 12,
         'evidence': False}, record
-info = json.load(open('${vep_plugins}/vep_plugins.json'))
+info = json.load(open('${transcript_rules}/transcript_rules.json'))
 assert info['vep_release'] == '116.3', info
 commits = (info['utrannotator_commit'], info['nmd_plugin_commit'])
 assert all(re.fullmatch('[0-9a-f]{40}', commit) for commit in commits), info
@@ -928,7 +928,7 @@ assert (gained[0], gained[2:]) == (['uSTOP_gained'], (0, 0, 1, None)), gained
 assert (record['consequence'], record['ref_type'], record['new_stop_distance_to_cds'], record['evidence']) == (
     'uSTOP_gained', 'InFrame_oORF', 12, False), record
 assert record['type'] is None and record['distance_to_cds'] is None, record
-ran = manifest['vep_plugins']
+ran = manifest['transcript_rules']
 assert ran['run']['vep_release'] == '116.3', ran
 assert sorted(ran['run']) == ['gene_models', 'nmd_plugin_commit', 'uorf_evidence', 'utrannotator_commit',
                               'vep_release'], ran
@@ -936,7 +936,7 @@ assert ran['matching'] == [
     {'source': 'Ensembl', 'rows_without_transcript': 0, 'rows_of_other_ids': 0, 'utr5_transcripts_without_values': 0},
     {'source': 'RefSeq', 'rows_without_transcript': 4, 'rows_of_other_ids': 0, 'utr5_transcripts_without_values': 0},
 ], ran
-assert json.loads(variants.schema.metadata[b'vep_plugins']) == ran['run'], variants.schema.metadata
+assert json.loads(variants.schema.metadata[b'transcript_rules']) == ran['run'], variants.schema.metadata
 EOF
     """
 }
