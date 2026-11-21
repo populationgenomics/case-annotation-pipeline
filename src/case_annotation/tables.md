@@ -57,7 +57,7 @@ manifest says who the proband is, and it lists the columns that the run left out
   of its genes. Group by gene through `unnest(variants.genes)`, `variants.hgnc_ids` or `transcripts`.
 - An allele in an exon of a non-coding RNA gene can have the impact `modifier` alone, so a threshold on
   `variants.worst_impact` drops it. Find it by `non_coding_transcript_exon_variant` in `transcripts.consequences`.
-- The impact and the consequence terms reflect none of these columns, and an allele of impact `modifier` or `low` can be
+- The Annotator's impact and consequence terms ignore other steps' columns, so a `modifier` or `low` allele can be
   pathogenic. Where the table has them, read `variants.utr5_consequences` (also in `transcripts`) for a 5' UTR,
   `variants.branch_points` for a branch point, `variants.ag_gain_high_risk` and `transcripts.ag_gains` for an AG gained
   before an acceptor, `variants.gencode_polya_signal` and `variants.aparent2_*` for polyadenylation,
