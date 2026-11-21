@@ -416,6 +416,53 @@ def test_the_plugins_rules_read_the_alleles_of_the_exon_regions_with_or_without_
         assert all(row[column] is None for column in transcript_rules.COLUMNS.names[:-1])
 
 
+# An invented gene of the reverse strand on chr2, whose last exon lies inside a run of thirteen `CT` from chr2:91 to
+# chr2:116, with a `G` on either side. Its intron ends at chr2:107, and a branch point lies at chr2:130.
+REVERSE_GENE = (
+    '2\tinvented\tgene\t101\t300\t.\t-\t.\tID=gene:ENSG02;Name=GENEB;biotype=protein_coding;gene_id=ENSG02;version=1\n'
+    '2\tinvented\tmRNA\t101\t300\t.\t-\t.\tID=transcript:ENST02;Parent=gene:ENSG02;Name=GENEB-201;'
+    'biotype=protein_coding;transcript_id=ENST02;version=1\n'
+    '2\tinvented\texon\t200\t300\t.\t-\t.\tParent=transcript:ENST02;Name=ENSE05;exon_id=ENSE05;rank=1;version=1\n'
+    '2\tinvented\texon\t101\t106\t.\t-\t.\tParent=transcript:ENST02;Name=ENSE06;exon_id=ENSE06;rank=2;version=1\n'
+    '2\tinvented\tCDS\t210\t290\t.\t-\t0\tID=CDS:ENSP02;Parent=transcript:ENST02;protein_id=ENSP02\n'
+)
+
+
+def test_an_insertion_that_a_record_writes_before_a_transcript_gains_the_ag_of_its_writing_in_the_intron(
+    tmp_path: pathlib.Path,
+) -> None:
+    """One more `CT` of the run is one more `AG` on the gene's strand, behind the branch point of its last intron.
+
+    The record writes it at the run's first base on the genome, which lies before the gene, and no base of the record
+    is the gene's.
+    """
+    with pysam.FastaFile(str(REFERENCE)) as fixture:
+        sequences = {name: fixture.fetch(name) for name in fixture.references}
+    sequences['chr2'] = sequences['chr2'][:89] + 'G' + 'CT' * 13 + 'G' + sequences['chr2'][117:]
+    reference = tmp_path / 'with-a-run.fa'
+    reference.write_text(''.join(f'>{name}\n{bases}\n' for name, bases in sequences.items()))
+    pysam.faidx(str(reference))
+    models = FIXTURE / 'gene-models'
+    public: dict[gene_models.Source, pathlib.Path] = {
+        'Ensembl': _gzipped(tmp_path / 'invented.gff3.gz', (models / 'ensembl.gff3').read_text('utf-8') + REVERSE_GENE),
+        'RefSeq': _gzipped(tmp_path / 'invented.gff.gz', (models / 'refseq.gff').read_text('utf-8')),
+    }
+    prepared = tmp_path / 'gene-models'
+    gene_models.prepare(public, models / 'assembly-report.txt', reference, prepared)
+    catalogue = tmp_path / 'catalogue.tsv'
+    row = 'chr2\t130\t-\tcBP_chr2_130_-_A\t\t\t\t\t\t\t\t\tcBP_Invented\tcBP_chr2_130_-_A'
+    catalogue.write_text('\n'.join([*CATALOGUE.read_text().splitlines()[:3], row]) + '\n')
+    gained = GAINED | {'branch_point_pos': 130, 'branch_point_distance': 15, 'acceptor_distance': -10}
+    # As the record writes it, before the gene, and as the same change is written inside the intron.
+    for record in (('chr2', 90, 'G', 'GCT'), ('chr2', 114, 'T', 'TCT')):
+        given = _given(tmp_path, prepared, alleles=(record,))
+        output = tmp_path / f'at-{record[1]}'
+        transcript_rules.annotate(given, prepared, reference, _evidence(tmp_path), output, branch_points=catalogue)
+        rows = pq.read_table(output / transcript_rules.TABLE_NAME).to_pylist()
+        assert [(row['transcript_id'], row[transcript_rules.AG_GAINS.name]) for row in rows] == [('ENST02.1', [gained])]
+        assert all(rows[0][column] is None for column in transcript_rules.COLUMNS.names[:-1])
+
+
 def test_a_record_is_in_the_exon_regions_by_the_bases_of_its_ref() -> None:
     exons = [(68, 181), (191, 261)]
     starts = [start for start, _end in exons]

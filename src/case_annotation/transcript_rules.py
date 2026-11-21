@@ -425,9 +425,13 @@ def _chromosome(task: _Task) -> tuple[pa.Table, int]:
             overlapping = transcript_models.Overlapping(transcripts)
             annotated: dict[int, Annotated] = {}
             for done, (variant_id, allele, in_exons, span) in enumerate(alleles, start=1):
-                for transcript in overlapping.of(allele.low, allele.high):
+                # The plugins' rules read the transcripts that hold a base of the record. The rule of the gained
+                # `AG` reads every transcript that the allele can be written in: among repeated bases a record can
+                # lie before a transcript whose last intron the same change reaches.
+                low, high = (allele.low, allele.high) if span is None else span
+                for transcript in overlapping.of(low, high):
                     columns: dict[str, Any] = {}
-                    if in_exons:
+                    if in_exons and transcript.start <= allele.high and allele.low <= transcript.end:
                         held = annotated.get(id(transcript))
                         if held is None:
                             held = annotated[id(transcript)] = Annotated(transcript, reference)

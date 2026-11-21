@@ -1827,6 +1827,11 @@ answer on either strand.
 - An allele that can be written before the branch point gains nothing, because everything from the branch point to the
   exon is then as it was. An allele that changes the branch point or a base of the exon gains nothing either.
 - An allele can gain several `AG`s, and each has an entry.
+- The transcripts and introns that an insertion or a deletion can be written in are found by its reach over the bases
+  that it repeats, so a record that lies before a transcript among repeated bases still has the gain of its writing in
+  that transcript's intron. The cut before the step goes by the record alone: an allele whose record lies more than 100
+  bases from every exon is not read, also where the bases that it repeats reach a zone. The step reads a record as
+  `bcftools norm` writes it, and a record with further shared bases at its ends is read as a replacement of bases.
 
 The table has an invented example of each, with the end of an intron whose branch point is the `A` in brackets, `|`
 before the exon and the inserted bases between `<` and `>`.
