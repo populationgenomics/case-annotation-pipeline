@@ -6,6 +6,7 @@ GFF (`REFSEQ`): one gene of the forward strand and one of the reverse strand.
 
 from __future__ import annotations
 
+import dataclasses
 import pathlib
 
 import invented_transcripts
@@ -272,3 +273,15 @@ def test_the_exons_and_introns_near_a_span_are_found_with_a_reach(strand: int) -
     assert transcript.introns_near(first[0] - 4, first[0] - 4, reach=3) == []
     assert sorted(transcript.introns_near(first[1], second[0])) == [first, second]
     assert sorted(transcript.exons_near(transcript.start, transcript.end)) == sorted(transcript.exons)
+
+
+def test_exons_that_overlap_or_lie_in_one_another_are_all_found() -> None:
+    """A file that ranks its exons can give exons that overlap, and a long exon can hide a later short one."""
+    exons = ((100, 400), (150, 160), (170, 180), (390, 500), (600, 610))
+    nested = invented_transcripts.gene().transcript
+    nested = dataclasses.replace(nested, exons=exons, start=100, end=610, coding=None)
+    for low in range(90, 620, 7):
+        for high in (low, low + 3, low + 40):
+            for reach in (0, 3, 12):
+                met = [(start, end) for start, end in exons if start - reach <= high and low <= end + reach]
+                assert sorted(nested.exons_near(low, high, reach)) == met, (low, high, reach)

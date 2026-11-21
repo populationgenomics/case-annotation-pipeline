@@ -482,8 +482,14 @@ def annotate(
     if workers > 1:
         context = multiprocessing.get_context('spawn')
         with concurrent.futures.ProcessPoolExecutor(max_workers=workers, mp_context=context) as pool:
-            for done in concurrent.futures.as_completed([pool.submit(_chromosome, task) for task in tasks]):
-                finished(done.result())
+            waiting = [pool.submit(_chromosome, task) for task in tasks]
+            try:
+                for done in concurrent.futures.as_completed(waiting):
+                    finished(done.result())
+            finally:
+                # After a failure the chromosomes that have not begun are not read.
+                for future in waiting:
+                    future.cancel()
     else:
         for task in tasks:
             finished(_chromosome(task))

@@ -176,7 +176,7 @@ class Placed:
         low, high = self.allele.low, self.allele.high
         return any(
             (start - 3 <= high and low <= start + 7) or (end - 7 <= high and low <= end + 3)
-            for start, end in self.transcript.introns_near(low, high, 3)
+            for start, end in self.transcript.introns_near(low, high, 7)
         )
 
     @functools.cached_property

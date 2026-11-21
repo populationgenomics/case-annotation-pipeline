@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import pathlib
 import random
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any
 
 import pytest
@@ -589,3 +589,48 @@ def test_the_rows_that_the_plugin_ships_as_its_test_are_reproduced(row: dict[str
 def test_the_plugin_s_test_rows_cover_four_of_its_kinds_of_effect() -> None:
     kinds = {kind for row in PUBLIC_ROWS for kind in row['five_prime_UTR_variant_consequence'].split('&')}
     assert kinds == {'-', 'uAUG_gained', 'uAUG_lost', 'uSTOP_lost', 'uFrameShift'}
+
+
+# Reading the changed UTR's frames from the reference's
+
+
+def _random_changes(seed: int, count: int) -> Iterator[tuple[str, utr5.Change]]:
+    letters = random.Random(seed)  # noqa: S311 (invented sequences, no secret)
+    for _ in range(count):
+        alphabet = letters.choice(('ATG', 'ATGA', 'ATGC', 'TAG'))
+        utr = ''.join(letters.choice(alphabet) for _ in range(letters.randint(0, 24)))
+        position = letters.randint(0, len(utr))
+        removed = letters.randint(0, min(5, len(utr) - position))
+        copied = utr[position : position + letters.randint(1, 5)]
+        inserted = letters.choice((copied, ''.join(letters.choice(alphabet) for _ in range(letters.randint(0, 5)))))
+        yield utr, utr5.Change(position, removed, inserted)
+
+
+def test_the_frames_of_a_changed_utr_are_those_of_reading_it_through() -> None:
+    """The changed UTR's stop codons and gained start codons are read from the reference's, without reading it."""
+    for utr, change in _random_changes(5, 6000):
+        changed = utr[: change.position] + change.inserted + utr[change.position + change.removed :]
+        compared = utr5._Compared(utr, changed, *utr5._shared(utr, changed, change.position, change.removed))
+        frames, through = utr5.ReadingFrames(utr, CODING), utr5.ReadingFrames(changed, CODING)
+        after = utr5._ChangedFrames(frames, compared)
+        for start in through.starts:
+            assert after.stop_in_utr(start) == through.stop_in_utr(start), (utr, change, start)
+            assert (after.stop(start), after.type(start)) == (through.stop(start), through.type(start))
+        assert after.starts_made() == [start for start in through.starts if not compared.inherited(start)], (
+            utr,
+            change,
+        )
+
+
+def test_the_start_codons_that_are_passed_over_have_no_record(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only the start codons whose frame the change can meet are looked at, and looking at every one finds no more."""
+    found = [
+        (utr, change, records(utr, change.position, change.removed, change.inserted))
+        for utr, change in _random_changes(6, 6000)
+    ]
+    monkeypatch.setattr(
+        utr5, '_starts_met', lambda frames, compared: [s for s in frames.starts if s < compared.reference_end]
+    )
+    for utr, change, met in found:
+        assert records(utr, change.position, change.removed, change.inserted) == met, (utr, change)
+    assert sum(bool(met) for _utr, _change, met in found) > 500
