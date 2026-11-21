@@ -194,7 +194,10 @@ def _recorded(path: pathlib.Path) -> FileRecord:
 
 
 def _record_order(record: Mapping[str, Any]) -> tuple[str, int, str]:
-    """Where a record stands among those of its row: by kind, then from the 5' end by its start codon, then by text."""
+    """Where a record stands among those of its row: by kind, then from the 5' end by its start codon, then by text.
+
+    A `uSTOP_lost` record has no distance of its start codon, so those of a row stand by their text alone.
+    """
     distances = [record.get('distance_to_cds'), record.get('ref_start_distance_to_cds')]
     start = next((d for d in distances if d is not None), None)
     return (record['consequence'], 0 if start is None else -start, json.dumps(record, sort_keys=True))

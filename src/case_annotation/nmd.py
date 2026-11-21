@@ -13,7 +13,8 @@ gives the first that applies, in this order:
 
 - `intronless`: the transcript has one exon;
 - `E-1`: the base lies in the transcript's last exon, its untranslated part included;
-- `E-2_end-50`: the base lies in the last 52 bases of the last exon but one, which the plugin calls its last 50;
+- `E-2_end-50`: the base is one of the 52 that end with the last base of the last exon but one, which the plugin
+  calls that exon's last 50, and which reach beyond a shorter exon;
 - `cds_start+100`: the allele ends in the first 101 coding bases, which the plugin calls the first 100.
 
 The numbers are the plugin's own and are kept as they are. Which alleles the plugin evaluates at all is VEP's

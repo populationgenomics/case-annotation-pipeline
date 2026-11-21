@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import random
 from collections.abc import Callable
 from typing import Any
 
@@ -23,7 +24,7 @@ CODING = 'ATGGCTGAGCTGTAAGTAGC'
 
 
 def records(utr: str, position: int, removed: int, inserted: str, coding: str = CODING) -> list[dict[str, Any]]:
-    """The records of a change, each without its empty fields, in the order of their start codons."""
+    """The records of a change, each without its empty fields, sorted by kind and text."""
     found = utr5.effects(
         utr5.ReadingFrames(utr, coding), utr5.Change(position, removed, inserted), lambda _start: False
     )
@@ -212,6 +213,29 @@ def test_a_substitution_that_leaves_a_start_codon_where_it_stood_does_not_make_i
 
 def test_a_replacement_of_unequal_length_that_leaves_a_start_codon_where_it_stood_does_not_make_it() -> None:
     assert records('CCATGCC', 1, 5, 'TATGCA') == []
+
+
+def test_a_replacement_does_not_keep_a_start_codon_by_one_that_comes_from_further_on() -> None:
+    """`CATGC` replaced by `G` takes out the first of two start codons, and the second moves to its place."""
+    two = 'GGCATGCATGCC'
+    lost = records(two, 2, 5, 'G')
+    assert [(record['consequence'], record['cap_distance_to_start']) for record in lost] == [('uAUG_lost', 3)]
+    gained = records('GGGATGCC', 2, 1, 'CATGC')
+    assert [(record['consequence'], record['cap_distance_to_start']) for record in gained] == [('uAUG_gained', 3)]
+
+
+def test_gained_and_lost_start_codons_account_for_the_change_in_their_number() -> None:
+    """Each start codon of the changed UTR is the reference's or gained, and each of the reference is kept or lost."""
+    letters = random.Random(11)  # noqa: S311 (invented sequences, no secret)
+    for _ in range(4000):
+        utr = ''.join(letters.choice('ATGC'[: letters.randint(3, 4)]) for _ in range(letters.randint(3, 16)))
+        position = letters.randrange(len(utr))
+        removed = letters.randint(0, min(6, len(utr) - position))
+        inserted = ''.join(letters.choice('ATG') for _ in range(letters.randint(0, 6)))
+        changed = utr[:position] + inserted + utr[position + removed :]
+        found = kinds(utr, position, removed, inserted)
+        difference = found.count('uAUG_gained') - found.count('uAUG_lost')
+        assert difference == changed.count('ATG') - utr.count('ATG'), (utr, position, removed, inserted)
 
 
 def test_a_deletion_that_a_record_writes_as_a_replacement_has_the_deletion_s_records() -> None:

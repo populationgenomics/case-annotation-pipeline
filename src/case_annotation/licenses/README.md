@@ -1,6 +1,6 @@
 # Notices of the works that this package restates
 
-Three modules of this package restate, in Python, rules that others published as Perl. No file of theirs is copied. The
+Four modules of this package restate, in Python, rules that others published as Perl. No file of theirs is copied. The
 licences of those works ask that their notices stay with what is made from them, so they are kept here and are packed
 with the package.
 

@@ -163,6 +163,77 @@ def _shared(reference: str, changed: str, first: int, removed: int) -> tuple[int
     return prefix, suffix
 
 
+@dataclasses.dataclass(frozen=True)
+class _Compared:
+    """A reference UTR beside its changed form: what the two share, and what that says of a codon.
+
+    Among repeated bases an insertion or deletion can be written at several places, and the shared beginning and
+    the shared end then overlap.
+    """
+
+    utr: str
+    changed: str
+    prefix: int  # the bases that the two share at their beginning: the last place where the change can begin
+    suffix: int  # the bases that they share at their end
+
+    @property
+    def same_length(self) -> bool:
+        return len(self.utr) == len(self.changed)
+
+    @property
+    def pure(self) -> bool:
+        """Whether the changed UTR is the reference with bases put in at one place, or taken out at one place.
+
+        The alleles of a record do not say: a record can write a deletion as a longer allele replaced by a shorter.
+        """
+        return self.prefix + self.suffix >= min(len(self.utr), len(self.changed)) and not self.same_length
+
+    @property
+    def reference_end(self) -> int:
+        """Where the shared end begins in the reference.
+
+        A codon of the reference from there on stands whole in the changed UTR with everything behind it, so its
+        reading frame is as it was.
+        """
+        return len(self.utr) - self.suffix
+
+    @property
+    def changed_end(self) -> int:
+        return len(self.changed) - self.suffix
+
+    def stays(self, start: int) -> bool:
+        """Whether a start codon of the reference stands at its own place, where no codon of the shared end does."""
+        return start + 3 <= self.prefix and start < self.changed_end
+
+    def in_place(self, start: int) -> bool:
+        """Whether a replacement of bases by others leaves a start codon at a place where both sequences have one.
+
+        The codon at that place must be of neither shared end: a codon of the shared end is the reference's codon
+        from further on or further back, and is not counted a second time.
+        """
+        both = self.utr[start : start + 3] == _START and self.changed[start : start + 3] == _START
+        return not self.pure and both and start < self.reference_end and start < self.changed_end
+
+    def inherited(self, start: int) -> bool:
+        """Whether a start codon of the changed UTR is one of the reference's.
+
+        It is one of the shared end, or one of the shared beginning whose codon in the reference is not also found
+        in the shared end, or one that a replacement leaves in place.
+        """
+        of_beginning = start + 3 <= self.prefix and start < self.reference_end
+        return start >= self.changed_end or of_beginning or self.in_place(start)
+
+    def stop_touched(self, codon: int) -> bool:
+        """Whether a way of writing the allele changes a base of a stop codon of the reference or parts it."""
+        if not self.pure:
+            return codon + 3 > self.prefix and codon < self.reference_end
+        deleted = len(self.utr) - len(self.changed)
+        if deleted < 0:
+            return self.reference_end <= codon + 2 and self.prefix >= codon + 1
+        # The first place where the deletion can begin is as many bases before the shared end as it removes.
+        return self.reference_end - deleted <= codon + 2 and self.prefix + deleted > codon
+
+
 def effects(frames: ReadingFrames, change: Change, evidence: Callable[[int], bool]) -> list[dict[str, Any]]:
     """The records of an allele in a 5' UTR: one for each start codon and analysis that applies.
 
@@ -173,33 +244,10 @@ def effects(frames: ReadingFrames, change: Change, evidence: Callable[[int], boo
     changed = utr[: change.position] + change.inserted + utr[change.position + change.removed :]
     if changed == utr:
         return []
-    prefix, suffix = _shared(utr, changed, change.position, change.removed)
-    same_length = len(changed) == len(utr)
+    compared = _Compared(utr, changed, *_shared(utr, changed, change.position, change.removed))
+    prefix, same_length, reference_end = compared.prefix, compared.same_length, compared.reference_end
     after = ReadingFrames(changed, frames.coding, frames.coding_stops)
-
     shift = (len(changed) - len(utr)) % 3 != 0
-    # Among repeated bases an insertion or deletion can be written at several places, and the two shared stretches
-    # overlap. `first_place` and `prefix` are the first and the last place in the reference UTR where it can begin.
-    only_deletes, only_inserts = len(utr) - len(changed), len(changed) - len(utr)
-    # Whether the changed UTR is the reference with bases put in at one place, or taken out at one place, and no more.
-    # The alleles of the record do not say: a record can write a deletion as a longer allele replaced by a shorter one.
-    pure = prefix + suffix >= min(len(utr), len(changed)) and not same_length
-    first_place = len(utr) - suffix - max(only_deletes, 0) if pure else prefix
-    # Where the shared end begins in each sequence. A codon of the reference from there on stands whole in the
-    # changed UTR with everything behind it, so its reading frame is as it was.
-    reference_end, changed_end = len(utr) - suffix, len(changed) - suffix
-
-    def stays(start: int) -> bool:
-        """Whether a start codon of the reference stands at its own place, where no codon of the shared end does."""
-        return start + 3 <= prefix and start < changed_end
-
-    def stop_touched(codon: int) -> bool:
-        """Whether a way of writing the allele changes a base of a stop codon of the reference or parts it."""
-        if not pure:
-            return codon + 3 > prefix and codon < reference_end
-        if only_inserts > 0:
-            return first_place <= codon + 2 and prefix >= codon + 1
-        return first_place <= codon + 2 and prefix + only_deletes > codon
 
     def of_start(start: int) -> dict[str, Any]:
         context, strength = kozak(utr, start)
@@ -210,11 +258,7 @@ def effects(frames: ReadingFrames, change: Change, evidence: Callable[[int], boo
 
     records: list[dict[str, Any]] = []
     for start in after.starts:
-        # A start codon is made by the allele unless it is one of the shared end, or one of the shared beginning
-        # whose codon in the reference is not also found in the shared end. A replacement of bases by others does not
-        # make a start codon where the reference has one, as it does not remove one there.
-        inherited = start >= changed_end or (start + 3 <= prefix and start < reference_end)
-        if inherited or (not pure and utr[start : start + 3] == _START):
+        if compared.inherited(start):
             continue
         context, strength = kozak(changed, start)
         records.append(
@@ -231,7 +275,7 @@ def effects(frames: ReadingFrames, change: Change, evidence: Callable[[int], boo
     for start in frames.starts:
         if start >= reference_end:
             break
-        if not stays(start) and (pure or changed[start : start + 3] != _START):
+        if not compared.stays(start) and not compared.in_place(start):
             records.append(
                 {
                     'consequence': 'uAUG_lost',
@@ -243,7 +287,7 @@ def effects(frames: ReadingFrames, change: Change, evidence: Callable[[int], boo
                 | of_start(start)
             )
         stop = frames.stop_in_utr(start)
-        if stop is not None and stop_touched(stop):
+        if stop is not None and compared.stop_touched(stop):
             # The stop codon stays where a stop codon still stands at its place and the frame up to it is the same.
             if changed[stop : stop + 3] in _STOPS and (same_length or prefix >= stop):
                 continue
@@ -260,7 +304,7 @@ def effects(frames: ReadingFrames, change: Change, evidence: Callable[[int], boo
                     | of_start(start)
                 )
             continue
-        if not stays(start):
+        if not compared.stays(start):
             continue
         frame_end = len(utr) - 1 if stop is None else stop - 1
         if same_length:
