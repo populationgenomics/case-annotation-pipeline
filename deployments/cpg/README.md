@@ -7,15 +7,18 @@ lands. [Annotation](../../docs/annotation.md) explains what the workflows do.
 
 ## What is in place
 
-| Input                                | Where                                                                             |
-| ------------------------------------ | --------------------------------------------------------------------------------- |
-| the Annotator's image                | `australia-southeast1-docker.pkg.dev/cpg-common/images-dev/dragen`                |
-| the tools image                      | `australia-southeast1-docker.pkg.dev/cpg-common/images-dev/case-annotation-tools` |
-| the licence key                      | the Secret Manager secret `dragen-api-key` in the dataset's project               |
-| the annotation data                  | `gs://cpg-rd-benchmark-test/references/dragen-annotation/4.0.0/202610/GRCh38/`    |
-| GRCh38                               | `gs://cpg-common-main/references/hg38/v0/Homo_sapiens_assembly38.fasta`           |
-| the archive of gnomAD's joint values | `gs://cpg-common-test/gnomad/echtvar_simple/gnomad_4.1_whole_genome.zip`          |
-| outputs                              | `gs://cpg-rd-benchmark-test`                                                      |
+| Input                                | Where                                                                                         |
+| ------------------------------------ | --------------------------------------------------------------------------------------------- |
+| the Annotator's image                | `australia-southeast1-docker.pkg.dev/cpg-common/images-dev/dragen`                            |
+| the tools image                      | `australia-southeast1-docker.pkg.dev/cpg-common/images-dev/case-annotation-tools`             |
+| the licence key                      | the Secret Manager secret `dragen-api-key` in the dataset's project                           |
+| the annotation data                  | `gs://cpg-rd-benchmark-test/references/dragen-annotation/4.0.0/202610/GRCh38/`                |
+| GRCh38                               | `gs://cpg-common-main/references/hg38/v0/Homo_sapiens_assembly38.fasta`                       |
+| the archive of gnomAD's joint values | `gs://cpg-common-test/gnomad/echtvar_simple/gnomad_4.1_whole_genome.zip`                      |
+| the gene models                      | `gs://cpg-rd-benchmark-test/references/annotation/gene_models/ensembl-115_refseq-RS_2025_08/` |
+| the archives of AlphaGenome's scores | `gs://cpg-common-test/references/alphagenome/echtvar/`                                        |
+| the joined files and STRchive's loci | `gs://cpg-rd-benchmark-test/references/annotation/`                                           |
+| outputs                              | `gs://cpg-rd-benchmark-test`                                                                  |
 
 - The Annotator's image is CPG's DRAGEN image, which holds the Annotator at `/opt/dragen/share/nirvana/Annotator` with
   `gcp-secret` and `jq` ([The Annotator's image](../../docs/annotator-image.md)). It is built by hand, because DRAGEN's
@@ -23,7 +26,7 @@ lands. [Annotation](../../docs/annotation.md) explains what the workflows do.
 
 - The tools image is built from [containers/tools/Dockerfile](../../containers/tools/Dockerfile) at a release tag, and
   the Dockerfile shows the command. The params file pins it by digest, so a new tag means a new build and a new digest
-  there. The pinned image was built at the tag `v0.3.1`, which is the commit `52e0a6fa98493bcdf9c48201280468b7828b148d`,
+  there. The pinned image was built at the tag `v0.5.2`, which is the commit `3aa097702d5e1657486cea8cbea22a2671d1188f`,
   and the registry tags it with both. The image has to be of the release of the workflow that a run launches:
   `family_tables.nf` gives its own version to its first step and to the step that writes a family's folder, and each
   refuses to run with tools of another version, the first before anything is annotated. A run of a later release
@@ -44,9 +47,34 @@ lands. [Annotation](../../docs/annotation.md) explains what the workflows do.
   ([gnomAD's joint values](../../docs/annotation.md#gnomads-joint-values)). Each family's manifest records the SHA-256
   that its run read.
 
+- The gene models are the folder that `case-annotation gene-models` wrote from Ensembl's release 115 and RefSeq's
+  release `GCF_000001405.40-RS_2025_08`, which are the releases of the catalog `202610`
+  ([The gene models](../../docs/annotation.md#the-gene-models)). Its `gene-models.json` records the public files with
+  their SHA-256.
+
+- The three archives of AlphaGenome's scores are echtvar archives that were built from DeepMind's downloads
+  ([AlphaGenome's archives](../../docs/annotation.md#alphagenomes-archives)). Each has a folder of its own, which also
+  holds its SHA-256 and a `receipt.json` that records the download it was built from. The breakdown archive
+  (`alphagenome_avi_breakdown`) and the splicing archive (`alphagenome_splicing`) are for non-commercial use only, and
+  the folder of each holds a `TERMS.txt` with the notice that DeepMind's terms ask for
+  ([The terms of AlphaGenome's files](../../docs/annotation.md#the-terms-of-alphagenomes-files)).
+
+- The seven public files of [Joined files](../../docs/annotation.md#joined-files) are copies as their sources publish
+  them, each of the size that the section gives. The catalogue of branch points was prepared from the two datasets of
+  Zhang et al. with UCSC's chain file `hg19ToHg38.over.chain.gz`, and the `branch-points.json` beside it records the
+  three files with their SHA-256.
+  [The catalogue of branch points](../../docs/annotation.md#the-catalogue-of-branch-points) quotes the terms of that
+  chain file.
+
+- STRchive's loci are the file of the release `v2.28.0`, which STRchive published on 8 October 2026
+  ([STRchive's ranges of the repeats](../../docs/annotation.md#strchives-ranges-of-the-repeats)). No other release is in
+  the bucket.
+
 [test.annotator.params.yaml](test.annotator.params.yaml) holds the images, the Annotator's path and version, the
 licence's secret and the output bucket for runs at the test access level, with the images pinned by digest. A run copies
-it and adds its own params. No other access level has a params file yet.
+it and adds its own params. The reference files that only `family_tables.nf` takes are not in it, because a run of
+`annotator.nf` stops at a param that the workflow does not declare. Their lines are in [Family tables](#family-tables).
+No other access level has a params file yet.
 
 ## Launching a workflow
 
@@ -120,7 +148,7 @@ sources: [<source>, <source>, ...]
 ```
 
 A run over a few regions takes `regions`, a BED file in a bucket, and a `label` for its folder. It cuts the VCF in the
-tools image, which the params file pins as built at the tag `v0.3.1`.
+tools image, which the params file pins as built at the tag `v0.5.2`.
 
 ## Family tables
 
@@ -135,14 +163,29 @@ and the VCFs of its larger variants where it has them
 writes one, and [contract/examples/families.csv](../../contract/examples/families.csv) is an invented one.
 
 The params are the ones that [contract/workflow.json](../../contract/workflow.json) lists for `family_tables.nf`. Every
-line of `test.annotator.params.yaml` is one of them, and its tools image is the one built at the tag `v0.3.1`. A run
-adds CPG's reference and archive, and its own sheet, group and catalog:
+line of `test.annotator.params.yaml` is one of them, and its tools image is the one built at the tag `v0.5.2`. A run
+adds CPG's reference, its archives, its gene models and its other reference files, and its own sheet, group and catalog:
 
 ```sh
 cp deployments/cpg/test.annotator.params.yaml <run>.params.yaml
 cat >> <run>.params.yaml <<'EOF'
 reference: gs://cpg-common-main/references/hg38/v0/Homo_sapiens_assembly38.fasta
 gnomad_joint: gs://cpg-common-test/gnomad/echtvar_simple/gnomad_4.1_whole_genome.zip
+gene_models: gs://cpg-rd-benchmark-test/references/annotation/gene_models/ensembl-115_refseq-RS_2025_08
+alphagenome_avi: gs://cpg-common-test/references/alphagenome/echtvar/alphagenome_avi/alphagenome_avi.zip
+alphagenome_avi_breakdown: gs://cpg-common-test/references/alphagenome/echtvar/alphagenome_avi_breakdown/alphagenome_avi_breakdown.zip
+alphagenome_splicing: gs://cpg-common-test/references/alphagenome/echtvar/alphagenome_splicing/alphagenome_splicing.zip
+gnomad_mito: gs://cpg-rd-benchmark-test/references/annotation/gnomad_mito/v3.1/gnomad.genomes.v3.1.sites.chrM.vcf.bgz
+mitotip: gs://cpg-rd-benchmark-test/references/annotation/mitotip/2020-04-27/mitotip_scores.txt
+gencode_polya: gs://cpg-rd-benchmark-test/references/annotation/gencode_polya/v50/gencode.v50.polyAs.gtf.gz
+aparent2: gs://cpg-rd-benchmark-test/references/annotation/aparent2/2022-11-12/aparent2_ism_scores_polyadb_v3.csv.gz
+genomic_constraint: gs://cpg-rd-benchmark-test/references/annotation/genomic_constraint/v3.1.2/constraint_z_genome_1kb.qc.download.txt.gz
+mcr: gs://cpg-rd-benchmark-test/references/annotation/mcr/v4.1.1/gnomad_v4.1.1_non_outlier_mcrs.tsv
+mpc: gs://cpg-rd-benchmark-test/references/annotation/mpc/v4.1.1/gnomad_v4.1.1_mpc.tsv.bgz
+branch_points: gs://cpg-rd-benchmark-test/references/annotation/branch_points/pnas.2211194119-ucsc-hg19ToHg38/branch-points.tsv.gz
+strchive: gs://cpg-rd-benchmark-test/references/annotation/strchive/v2.28.0/STRchive-loci-v2.28.0.json
+strchive_release: v2.28.0
+strchive_release_date: '2026-10-08'
 families: gs://<bucket>/<path>/families.csv
 group: <group>
 catalog: '202610'
@@ -154,6 +197,17 @@ analysis-runner seqera --dataset rd-benchmark --access-level test \
     --main-script family_tables.nf --commit-id <commit> \
     --params-file <run>.params.yaml
 ```
+
+Of these files, a run needs `reference`, `gnomad_joint` and `gene_models`. It can leave out any of the three AlphaGenome
+archives and any of the eight files from `gnomad_mito` to `branch_points`, and its tables then lack the columns of what
+it left out. The three `strchive` lines are given together or left out together, and the date is a quoted string.
+
+> [!IMPORTANT]
+>
+> A run that gives `alphagenome_avi_breakdown` or `alphagenome_splicing` writes tables under DeepMind's terms for
+> non-commercial use: `variants` then has the `avi_shap_` columns or `alphagenome_splicing`. Tables with those columns
+> must not be handed to a commercial organisation. A run that leaves both lines out writes tables without those columns,
+> and `alphagenome_avi` alone is offered for commercial use as well.
 
 > [!WARNING]
 >
