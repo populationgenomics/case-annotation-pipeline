@@ -16,7 +16,7 @@
 # user-mode emulators, 8.0.4 and 8.1.5 ran the wheel, while 9.2.2, 10.0.4 and 10.2.3 crashed as soon as pyarrow or
 # DuckDB was imported.
 
-FROM ghcr.io/astral-sh/uv:0.13.8@sha256:5cc1805e2426484abca4ad46ea783bab281fdb225fd82d8ce6d66a81254bac85 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.9@sha256:d3b601f0c7b118bc1753febf7c41cc80981df678445e0254284eecf84db79a7d AS uv
 
 # The package without its sources or its dev groups, and the lock's group `image`, which is upd. Its metadata names the
 # README, so the build reads that too. uv clones upd's repository with git, which only this stage holds.
