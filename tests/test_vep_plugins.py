@@ -689,7 +689,7 @@ def test_the_workflow_names_the_files_as_the_tools_do() -> None:
     )
     assert f'for model in {models}; do' in MODULES
     assert '--output_file vep/\\${name}.json.gz' in MODULES
-    assert f'--synonyms gene-models/{gene_models.SYNONYMS_NAME}' in MODULES
+    assert f'--synonyms "\\${{inputs}}/gene-models/{gene_models.SYNONYMS_NAME}"' in MODULES
     for name in (gene_models.EXONS_NAME, gene_models.CONTROLS_NAME, gene_models.RECORD_NAME):
         assert f"settings.gene_models.resolve('{name}')" in WORKFLOW
     # The workflow looks for every file of the prepared folder before a task runs.
@@ -714,6 +714,37 @@ def test_the_step_fixes_perls_hash_order_and_fails_for_a_plugin_that_does_not_lo
     assert '--offline' not in script
     assert '--dir_plugins "\\${UTRANNOTATOR_DIR}"' in script
     assert "Plugin '[^']+' (went wrong|did not return)|Failed to (compile|instantiate) plugin" in script
+
+
+def test_the_step_fails_for_a_run_in_which_vep_did_not_set_its_offline_mode() -> None:
+    (script,) = re.findall(r'\nprocess VEP_PLUGINS \{\n.*?\n    script:\n(.*?)\n    stub:\n', MODULES, flags=re.DOTALL)
+    assert "if ! grep -q 'Setting offline mode' vep/\\${name}.warnings.txt; then" in script
+    assert '--database' not in script
+    assert '--cache' not in script
+
+
+def test_vep_reads_the_reference_and_the_gene_models_from_copies_on_the_tasks_disk() -> None:
+    (process,) = re.findall(r'\nprocess VEP_PLUGINS \{\n(.*?)\n    stub:\n', MODULES, flags=re.DOTALL)
+    directives, script = process.split('\n    script:\n')
+    # Both are copied before VEP starts, with what a staged link points to.
+    copied = script.index('cp -L ${reference} ${reference_index} "\\${inputs}/"\n')
+    assert copied < script.index('cp -rL gene-models "\\${inputs}/gene-models"\n') < script.index('vep --input_file')
+    # The folder of the copies has a fixed absolute path, since VEP's warnings quote it.
+    (folder,) = re.findall(r'^    inputs=(\S+)$', script, flags=re.MULTILINE)
+    assert re.fullmatch(r'(/[\w-]+)+', folder)
+    # Every file that VEP reads many times is a copy: the command names neither staged path.
+    (command,) = re.findall(r'\n        (vep --input_file .*?"\\\$\{options\[@\]\}")\n', script, flags=re.DOTALL)
+    given = dict(re.findall(r'(--gff|--fasta|--synonyms) (\S+)', command))
+    assert given == {
+        '--gff': '"\\${inputs}/gene-models/\\${file}"',
+        '--fasta': '"\\${inputs}/${reference.name}"',
+        '--synonyms': f'"\\${{inputs}}/gene-models/{gene_models.SYNONYMS_NAME}"',
+    }
+    # The record's checksum is of the copy that VEP read.
+    assert 'recorded "\\${inputs}/gene-models/\\${file}"' in script
+    assert 'recorded gene-models/' not in script
+    # A run that stalls ends.
+    assert len(re.findall(r'^    time \d+\.h$', directives, flags=re.MULTILINE)) == 1
 
 
 def test_every_column_of_the_table_has_a_type_that_the_contract_names() -> None:

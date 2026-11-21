@@ -374,7 +374,18 @@ process VEP_SITES {
 // without a network: it builds each transcript from the file and the reference. PERL_HASH_SEED and PERL_PERTURB_KEYS
 // fix the order of Perl's hashes, in which UTRannotator writes the kinds of an allele's effects, so that two runs
 // write the same text. --safe makes VEP fail for a plugin that does not load. A plugin that fails on an allele only
-// leaves a warning, so the step fails for such a warning too.
+// leaves a warning, so the step fails for such a warning too. VEP takes no --offline, with which it looks for a cache:
+// without a cache and without --database it sets its offline mode itself and says so in a warning, and the step fails
+// for a run without that warning.
+// The reference, its index and the gene models are copied to a folder of the container's /tmp, and VEP reads the
+// copies. The folder has a fixed name, since VEP's warnings quote the path. With --fork VEP starts a process for every
+// few dozen alleles, and each one opens the reference and the gene model file again and reads from many places in
+// both. An executor that mounts a bucket instead of copying a task's inputs, as Google Batch does, answers such a read
+// with a request to the bucket, which takes far longer than a read from a disk. The disk holds the image, the copies,
+// which are 3.5 GB for GRCh38 with both files of the gene models, and VEP's output.
+// The time limit ends a run that has stalled. With eight processes on four cores VEP read 10,000 alleles in 21
+// seconds with either file, so both files take a little over an hour for a million alleles in exons, and the limit
+// leaves room for a union several times that size on a slower machine.
 // The stub gives its folder a fixed time, as the stub of ECHTVAR_VALUES does.
 process VEP_PLUGINS {
     tag "${group}"
@@ -383,6 +394,7 @@ process VEP_PLUGINS {
     cpus 8
     memory 32.GB
     disk 50.GB
+    time 12.h
 
     input:
     tuple val(group), path(sites), path(sites_index)
@@ -403,19 +415,31 @@ process VEP_PLUGINS {
         printf '{"name": "%s", "bytes": %s, "sha256": "%s"}' "\$(basename "\$1")" "\$(stat -L -c %s "\$1")" \\
             "\$(sha256sum "\$1" | cut -d ' ' -f 1)"
     }
+    inputs=/tmp/vep-inputs
+    mkdir "\${inputs}"
+    trap 'rm -rf "\${inputs}"' EXIT
+    cp -L ${reference} ${reference_index} "\${inputs}/"
+    cp -rL gene-models "\${inputs}/gene-models"
+    echo "copied the reference and the gene models to \${inputs} in \${SECONDS} s"
     mkdir vep
     read_models=()
     for model in Ensembl:ensembl.gff3.gz:ensembl RefSeq:refseq.gff.gz:refseq; do
         IFS=: read -r source file name <<< "\${model}"
+        started=\${SECONDS}
         vep --input_file ${sites} --output_file vep/\${name}.json.gz --warning_file vep/\${name}.warnings.txt \\
-            --gff gene-models/\${file} --fasta ${reference} --synonyms gene-models/chromosome-synonyms.txt \\
+            --gff "\${inputs}/gene-models/\${file}" --fasta "\${inputs}/${reference.name}" \\
+            --synonyms "\${inputs}/gene-models/chromosome-synonyms.txt" \\
             --dir_plugins "\${UTRANNOTATOR_DIR}" "\${plugins[@]}" --fork ${task.cpus} "\${options[@]}"
-        if [[ -f vep/\${name}.warnings.txt ]] &&
-            grep -E "Plugin '[^']+' (went wrong|did not return)|Failed to (compile|instantiate) plugin" vep/\${name}.warnings.txt >&2; then
+        echo "VEP read \${file} in \$((SECONDS - started)) s"
+        if ! grep -q 'Setting offline mode' vep/\${name}.warnings.txt; then
+            echo "${group}: VEP did not say that it ran offline while it read \${file}" >&2
+            exit 1
+        fi
+        if grep -E "Plugin '[^']+' (went wrong|did not return)|Failed to (compile|instantiate) plugin" vep/\${name}.warnings.txt >&2; then
             echo "${group}: a plugin failed while VEP read \${file}" >&2
             exit 1
         fi
-        read_models+=("\$(printf '{"source": "%s", "file": %s}' "\${source}" "\$(recorded gene-models/\${file})")")
+        read_models+=("\$(printf '{"source": "%s", "file": %s}' "\${source}" "\$(recorded "\${inputs}/gene-models/\${file}")")")
     done
     version=\$(vep --help | awk '\$1 == "ensembl-vep" { print \$3 }')
     quoted() {

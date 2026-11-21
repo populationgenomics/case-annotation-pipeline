@@ -820,8 +820,8 @@ launched pipeline says, and the tools image has to be of that release
 ([Checks that stop a run](#checks-that-stop-a-run)).
 
 An included workflow comes without this repository's `nextflow.config`. Its processes keep the directives that are
-written in them, which are the machine type, the CPUs, the memory and the disk of the larger steps. The config of the
-including pipeline provides the rest:
+written in them, which are the machine type, the CPUs, the memory and the disk of the larger steps, and the time limit
+of `VEP_PLUGINS`. The config of the including pipeline provides the rest:
 
 - the image of each process: the Annotator's image for `ILLUMINA_ANNOTATE` and `ILLUMINA_ANNOTATE_SV`, the VEP image for
   `VEP_PLUGINS`, and `case-annotation-tools` of the workflow's release for every other process
@@ -1503,20 +1503,30 @@ for each transcript.
 
 - VEP runs once for each gene model file, since it reads one such file in a run, with `--gff`, `--fasta` and
   `--synonyms`. It needs no network and no cache. The step does not give `--offline`, with which VEP looks for a cache
-  and stops without one.
+  and stops without one. Without a cache and without `--database`, VEP sets its offline mode itself and says so in its
+  first warning, and the step stops for a run without that warning.
+- The step first copies the reference, its index and the folder of the gene models to the container's `/tmp`, and VEP
+  reads the copies. With `--fork`, VEP starts a new process for every few dozen alleles, and each process opens the
+  reference and the gene model file again and reads from many places in both: in a trial with Ensembl's file, about 250
+  reads for 58 alleles, of which 17 to 31 did not continue the one before. An executor that mounts a bucket instead of
+  copying a task's inputs, as Google Batch does, answers each such read with a request to the bucket. The copies are 3.5
+  GB for GRCh38 and the two files above, and the step writes how long the copy and each run of VEP took to its log.
 - `--transcript_version` adds the version to an Ensembl transcript's id. RefSeq's ids end in their version already.
 - `PERL_HASH_SEED=0` and `PERL_PERTURB_KEYS=0` fix the order of Perl's hashes, in which UTRannotator writes the kinds of
   an allele's effects. Two runs then write the same text, and `VEP_PLUGIN_TABLE` sorts what it writes as well.
 - `--safe` makes VEP stop for a plugin that does not compile or load. Without it VEP only warns and annotates without
   the plugin. A plugin that fails on one allele leaves a warning even with `--safe`, so the step also stops for a
   warning that a plugin went wrong.
-- `--fork` gives VEP the task's CPUs, with `--buffer_size 1000`.
+- `--fork` gives VEP the task's CPUs, with `--buffer_size 1000`. A process then takes at most 62 alleles with 8 CPUs.
+- The step has a time limit of 12 hours, so that a run that has stalled ends.
 
 The cut to the exons keeps the run short and loses nothing: a variant in a 5′ UTR lies in an exon, and so does one that
 ends a reading frame, so every allele that a plugin would evaluate is still read. The regions cover 239 Mb, about 8% of
 the genome, so VEP reads roughly one allele of a whole genome in twelve. That share is an estimate, and `VEP_SITES`
-writes the count of a run to its log. In a trial on a laptop, VEP read 50,000 invented alleles in exons with four
-processes in 212 seconds with Ensembl's file and in 180 with RefSeq's, in up to 1.2 GB of memory.
+writes the count of a run to its log. In a trial on a laptop, with the two files above on the container's own disk, VEP
+read 10,399 invented alleles in exons with eight processes on four cores in 21 seconds with Ensembl's file and in 20
+with RefSeq's, in up to 210 MB of memory for each process. At that rate both files take a little over an hour for a
+million alleles.
 
 #### What the table keeps
 
