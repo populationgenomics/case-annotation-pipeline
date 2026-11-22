@@ -465,7 +465,7 @@ jobs:
           # Refused, each with its own message: a family id that is not a folder name; a family without a proband,
           # which is empty where none is designated; a structural-variant VCF in a run built without the steps of the
           # structural variants; a setting that is none of the workflow's; a setting that every run needs, given as
-          # null; a family with seven values in place of its eight.
+          # null; a family with seven values in place of its eight; a family with two files of blinded positions.
           refused() {
             local message=$1
             shift
@@ -483,6 +483,8 @@ jobs:
           refused 'the setting workers is null' "${family[@]}" --null_setting workers
           refused 'fam-c: a family is tuple(family, vcf, ped, proband, sv, cnv, repeats, blinded)' "${family[@]}" \
             --short_family
+          refused 'fam-c: a family has one file of blinded positions or none, and this one has 2' "${family[@]}" \
+            --with_blinded --second_blinded
 
   annotator:
     # Runs the Annotator's processes for real on an invented stand-in for the Annotator, in a stand-in for its image, and

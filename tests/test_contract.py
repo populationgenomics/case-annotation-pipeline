@@ -519,7 +519,8 @@ def test_a_family_of_an_including_pipeline_is_checked_as_it_arrives() -> None:
     check = _function(FAMILY_TABLES, 'checkRecord')
     # A family has its eight values, the last of them the file of its blinded positions.
     assert 'if (record.size() != 8) {\n        error(' in check
-    assert 'def (family, _vcf, _ped, proband, sv, cnv, _repeats, _blinded) = record' in check
+    assert 'def (family, _vcf, _ped, proband, sv, cnv, _repeats, blinded) = record' in check
+    assert 'if ([blinded].flatten().size() > 1) {\n        error(' in check
     assert 'if (proband == null) {\n        error(' in check
     assert 'checkIds(family, proband)' in check
     assert 'if (!annotates_sv && (sv || cnv)) {\n        error(' in check

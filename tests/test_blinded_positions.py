@@ -72,6 +72,7 @@ def _with(key: str, value: object) -> dict[str, Any]:
 _REFUSED_FILES: Mapping[str, tuple[str, str]] = {
     'text that is no JSON': ('chr1\t100\t100\n', 'not a file of blinded positions'),
     'a list in place of the object': (json.dumps([_GOOD]), 'not a file of blinded positions'),
+    'lists nested deeper than a reader of JSON follows': ('[' * 100_000, 'not a file of blinded positions'),
     'another assembly': (json.dumps(_with('assembly', 'GRCh37')), 'assembly'),
     'no assembly': (json.dumps({k: v for k, v in _GOOD.items() if k != 'assembly'}), 'assembly'),
     'other coordinates': (json.dumps(_with('coordinates', '0-based, half-open')), 'coordinates'),

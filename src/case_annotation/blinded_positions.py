@@ -99,7 +99,7 @@ def read(path: pathlib.Path, chromosomes: Collection[str]) -> BlindedPositions:
     try:
         json.loads(text, object_pairs_hook=_once)
         positions = BlindedPositions.model_validate_json(text)
-    except ValueError as error:
+    except (ValueError, RecursionError) as error:
         raise ValueError(f'{path}: not a file of blinded positions: {error}') from error
     for kind, place, interval in positions.entries():
         if interval.chrom not in chromosomes:

@@ -497,7 +497,11 @@ def checkRecord(record, annotates_sv) {
     if (record.size() != 8) {
         error("${record[0]}: a family is tuple(family, vcf, ped, proband, sv, cnv, repeats, blinded), and this one has ${record.size()} values")
     }
-    def (family, _vcf, _ped, proband, sv, cnv, _repeats, _blinded) = record
+    def (family, _vcf, _ped, proband, sv, cnv, _repeats, blinded) = record
+    // The tools read one file of blinded positions, and of several they would read the last alone.
+    if ([blinded].flatten().size() > 1) {
+        error("${family}: a family has one file of blinded positions or none, and this one has ${[blinded].flatten().size()}")
+    }
     // As for a sheet's row: read as empty, an absent proband would pass for a family in which none is designated.
     if (proband == null) {
         error("${family}: no proband, which is an empty string where none is designated")
