@@ -37,6 +37,11 @@ A family with a child whose parents are both sequenced gets one more:
 
 - `upd.parquet`: one row per region in which such a child shows the alleles of one parent alone, on the autosomes.
 
+A family whose sheet row names a file of blinded positions (blinded_positions) gets `variants` and `sv` with a null in
+the ClinVar columns and in `rsids` of the rows that an entry of the file reaches. The values are emptied in the queries
+that the tables are written from, so no file of the folder holds anything of them, and the manifest says only that the
+run was given such a file.
+
 Each table is sorted by chromosome (1 to 22, X, Y, M), then position, and written with zstd in row groups of 100,000
 rows, with Bloom filters on the columns that look up a variant, a gene or a transcript. The columns whose values rarely
 repeat within a row group are written without a dictionary, each with the encoding that _ENCODINGS gives it.
@@ -61,6 +66,7 @@ import pysam
 
 from case_annotation import (
     annotation_tables,
+    blinded_positions,
     echtvar_values,
     gene_models,
     joined_values,
@@ -477,6 +483,10 @@ class FamilyManifest(pydantic.BaseModel, frozen=True, extra='forbid'):
     # that upd could not assess. A family whose record names no child in either list has no upd table. An upd table
     # has no row of an assessed child without a region, and none of a child that was not assessed.
     roh_upd: roh_upd.RohUpdInfo
+    # Whether the run was given a file of blinded positions for the family (blinded_positions). Where it was, a null
+    # in a ClinVar column of variants or of sv, or in rsids, can stand for a value that the run emptied. Nothing else
+    # of the file is recorded: not its name, its size or its checksum, and not its entries or how many they are.
+    blinded_positions: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -745,24 +755,43 @@ def _read_structural(structural: Structural, samples: Sequence[str], records_pat
     return sequences
 
 
+# The normalised allele of a structural variant written as a sequence, by its record's ID: its variant id, and where
+# it lies, as a row of variants says it.
+_SV_ALLELES = pa.schema(
+    [
+        pa.field('sv_id', _STRING, nullable=False),
+        pa.field('variant_id', _STRING, nullable=False),
+        pa.field('chrom', _STRING, nullable=False),
+        pa.field('pos', _INT, nullable=False),
+        pa.field('ref', _STRING, nullable=False),
+    ]
+)
+
+
 def read_sv_alleles(path: pathlib.Path, sequences: Collection[str]) -> pa.Table:
-    """The variant id of each structural variant written as a sequence, from its normalised record.
+    """The normalised allele of each structural variant written as a sequence, from its normalised record.
 
     The file holds those records of the family's structural-variant VCF, on the primary chromosomes, after the
     normalisation that the family's own VCF gets, each under its ID. It fails unless its records are exactly the
     sequences given, each once, so that the alleles are this VCF's.
     """
-    ids: dict[str, str] = {}
+    alleles: dict[str, dict[str, Any]] = {}
     with pysam.VariantFile(str(path)) as vcf:
         for record in vcf:
-            if record.id is None or record.id in ids:
+            if record.id is None or record.id in alleles:
                 raise ValueError(f'{path}: {record.chrom}:{record.pos} has no ID, or the ID of another record')
-            ids[record.id] = annotation_tables.record_id(record, str(path))
-    if extra := sorted(ids.keys() - set(sequences))[:5]:
+            alleles[record.id] = {
+                'sv_id': record.id,
+                'variant_id': annotation_tables.record_id(record, str(path)),
+                'chrom': record.chrom,
+                'pos': record.pos,
+                'ref': record.ref,
+            }
+    if extra := sorted(alleles.keys() - set(sequences))[:5]:
         raise ValueError(f"{path}: holds records that are no sequence of the family's structural variants: {extra}")
-    if missing := sorted(set(sequences) - ids.keys())[:5]:
+    if missing := sorted(set(sequences) - alleles.keys())[:5]:
         raise ValueError(f"{path}: lacks sequences of the family's structural variants, such as {missing}")
-    return pa.table({'sv_id': pa.array(list(ids.keys()), _STRING), 'variant_id': pa.array(list(ids.values()), _STRING)})
+    return pa.Table.from_pylist(list(alleles.values()), schema=_SV_ALLELES)
 
 
 def _annotate_records(
@@ -834,15 +863,19 @@ def _structural_queries(
     loci: Sequence[strchive.Locus] | None,
     samples: Sequence[str],
     work: pathlib.Path,
+    *,
+    blinded: bool,
 ) -> tuple[dict[str, tuple[str, pa.Schema]], tuple[int, int] | None]:
     """The query and the schema of each table of the family's larger variants, by the table's name.
 
     Reads the VCFs into views of the connection, which also has the family's `records`. `annotated` is the annotation
     of the group's structural variants, which a family with a caller's VCF has, and `sv_omitted` the columns of sv
     that the family's table leaves out. `loci` are those of the release of STRchive that the run gives, or None in a
-    run without one, whose repeats table lacks STRchive's columns. Also returns how many of the family's repeats have
-    an entry of STRchive and how many have none, or None where nothing was matched: in a run without a release and in
-    a family without repeat VCFs.
+    run without one, whose repeats table lacks STRchive's columns. `blinded` says that the connection has the entries
+    of the family's blinded positions, and sv then reads its records' annotation with the ClinVar columns emptied for
+    the records that an entry reaches (blinded_positions.blind_records). Also returns how many of the family's repeats
+    have an entry of STRchive and how many have none, or None where nothing was matched: in a run without a release
+    and in a family without repeat VCFs.
     """
     queries: dict[str, tuple[str, pa.Schema]] = {}
     if structural.callers:
@@ -854,19 +887,19 @@ def _structural_queries(
             'SELECT sv_id FROM sv_records GROUP BY 1 HAVING count(*) > 1 ORDER BY 1 LIMIT 5'
         ).fetchall():
             raise ValueError(f"the family's callers give several records one ID, such as {[r[0] for r in repeated]}")
-        empty = pa.array([], _STRING)
-        alleles = pa.table({'sv_id': empty, 'variant_id': empty})
+        alleles = _SV_ALLELES.empty_table()
         if sv_alleles is not None:
             alleles = read_sv_alleles(sv_alleles, sequences)
         con.register('sv_alleles', alleles)
         annotation, transcripts = _annotate_records(con, family, annotated, sv_omitted)
+        annotated_records = blinded_positions.blind_records(con, annotation.names) if blinded else 'sv_annotated'
         columns = ', '.join(f'r.{column}' for column in sv_tables.RECORD_COLUMNS)
         # A record names a row of variants only where the family's variants table holds its allele. What a record
         # holds after its own columns are the members' calls, as sv ends.
         records = (
             f'SELECT {columns}, a.variant_id AS small_variant_id, {", ".join(f"n.{c}" for c in annotation.names)}, '  # noqa: S608 (column names of this package's own)
             f'r.* EXCLUDE ({", ".join(sv_tables.RECORD_COLUMNS)}) '
-            'FROM sv_records r JOIN sv_annotated n USING (sv_id) '
+            f'FROM sv_records r JOIN {annotated_records} n USING (sv_id) '
             'LEFT JOIN (SELECT * FROM sv_alleles SEMI JOIN records USING (variant_id)) a USING (sv_id) '
             'ORDER BY chrom_rank(r.chrom), r.pos, r.end_pos, r.sv_id'
         )
@@ -958,6 +991,24 @@ def _plugin_matching(con: duckdb.DuckDBPyConnection, source: gene_models.Source)
     )
 
 
+def _ranges_record(ranges: strchive.Release | None, counts: tuple[int, int] | None) -> strchive.StrchiveFile | None:
+    """The record of the release of STRchive that a family's repeats were matched with; None where none were.
+
+    `counts` are the family's repeats with an entry of the release and those without one (_structural_queries).
+    """
+    if ranges is None or counts is None:
+        return None
+    return strchive.StrchiveFile(
+        file=ranges.file.name,
+        bytes=ranges.file.stat().st_size,
+        sha256=_sha256(ranges.file),
+        release=ranges.name,
+        release_date=ranges.date,
+        matched_repeats=counts[0],
+        unmatched_repeats=counts[1],
+    )
+
+
 def assemble(
     family: str,
     vcf_path: pathlib.Path,
@@ -974,6 +1025,7 @@ def assemble(
     sv_alleles: pathlib.Path | None = None,
     sv_annotated: SvAnnotation | None = None,
     ranges: strchive.Release | None = None,
+    blinded: pathlib.Path | None = None,
     scratch: pathlib.Path | None = None,
 ) -> FamilyManifest:
     """Writes the family's tables and manifest into the output folder.
@@ -988,7 +1040,10 @@ def assemble(
     sources as the union's, since one run makes both. `ranges` is the release of STRchive that the run gives, whose
     file is read and checked for every family, and matched with the repeats of a family that has them. `segments` is
     the folder of the family's runs of homozygosity and regions of uniparental disomy (roh_upd.convert's output
-    folder), which must be of this family's samples and pedigree.
+    folder), which must be of this family's samples and pedigree. `blinded` is the file of the family's blinded
+    positions, or None for a family whose sheet row names none (blinded_positions). With a file, the function prints
+    one line for each of its entries, with the rows that the entry reached: the lines go to the log of the step, which
+    is no file of the family's folder, and an entry that reached no row is no error.
 
     A row of `transcripts` gets the plugins' values of its allele and transcript, matched by the transcript's id with
     its version. A row of the plugins without such a row is left out and counted, and so is a row of `transcripts` in
@@ -1017,6 +1072,7 @@ def assemble(
     plugins_info = _read_rules(plugins, joined_files)
     segment_info = roh_upd.read_info(segments)
     loci = None if ranges is None else strchive.read(ranges.file)
+    positions = None if blinded is None else blinded_positions.read(blinded, _CHROM_RANK)
     output.mkdir(parents=True)
     with tempfile.TemporaryDirectory(dir=scratch) as tmp:
         work = pathlib.Path(tmp)
@@ -1107,12 +1163,15 @@ def assemble(
         # The two columns that are taken over an allele's rows of transcripts, for the allele's row of variants. A run
         # without the catalogue of branch points has no column of the gained `AG`s.
         over_transcripts = [f'u.{_UTR5.name}', *([] if _AG_GAIN.name in omitted else [f'g.{_AG_GAIN.name}'])]
+        # A family with blinded positions reads the union's variants through a view that empties the ClinVar columns
+        # and the dbSNP ids of the alleles that an entry reaches, so that the table is written from emptied values.
+        union_variants = blinded_positions.blind_variants(con, positions)
         # A record's columns after its id are the family's QUAL and FILTER and the members' calls, as variants ends.
         queries = {
             'variants': (
                 f'SELECT v.*{exclude}, {", ".join([*from_archives, *from_files, *over_transcripts])}, '  # noqa: S608 (column names of this package's own)
                 'r.* EXCLUDE (variant_id) '
-                'FROM union_variants v JOIN records r USING (variant_id) JOIN union_archives a USING (variant_id) '
+                f'FROM {union_variants} v JOIN records r USING (variant_id) JOIN union_archives a USING (variant_id) '
                 f'JOIN union_joined j USING (variant_id) LEFT JOIN ({_KINDS}) u USING (variant_id) '
                 f'{_GAINED if len(over_transcripts) > 1 else ""}'
                 'ORDER BY chrom_rank(v.chrom), v.pos, v.ref, v.alt'
@@ -1126,19 +1185,19 @@ def assemble(
             'transcripts': pa.schema([field for field in TRANSCRIPT if field.name not in transcripts_omitted]),
         }
         larger, counts = _structural_queries(
-            con, family, structural, sv_alleles, sv_annotated, sv_omitted, loci, samples, work
+            con,
+            family,
+            structural,
+            sv_alleles,
+            sv_annotated,
+            sv_omitted,
+            loci,
+            samples,
+            work,
+            blinded=positions is not None,
         )
-        ranges_record = None
-        if ranges is not None and counts is not None:
-            ranges_record = strchive.StrchiveFile(
-                file=ranges.file.name,
-                bytes=ranges.file.stat().st_size,
-                sha256=_sha256(ranges.file),
-                release=ranges.name,
-                release_date=ranges.date,
-                matched_repeats=counts[0],
-                unmatched_repeats=counts[1],
-            )
+        blinded_positions.log(con, positions, with_records='sv' in larger)
+        ranges_record = _ranges_record(ranges, counts)
         repeats_omitted = REPEAT_SOURCES[strchive.NAME] if 'repeats' in larger and ranges is None else ()
         # A table of the larger variants carries the provenance of what annotated it: the annotation of the group's
         # structural variants for the two tables that hold it, and for the repeats the release of STRchive, as in the
@@ -1179,7 +1238,6 @@ def assemble(
         con.read_parquet(str(output / 'transcripts.parquet')).create_view('written_transcripts')
         matching = tuple(_plugin_matching(con, source) for source in gene_models.FILES)
         con.close()
-    sequenced = set(samples)
     manifest = FamilyManifest(
         schema_version=SCHEMA_VERSION,
         pipeline_version=PIPELINE_VERSION,
@@ -1191,7 +1249,7 @@ def assemble(
                 mother=m.mother,
                 sex=m.sex,
                 affected=m.affected,
-                sequenced=m.sample in sequenced,
+                sequenced=m.sample in samples,
                 role=roles.get(m.sample),
             )
             for m in ped.members
@@ -1214,6 +1272,7 @@ def assemble(
         strchive=ranges_record,
         repeats_omitted_columns=repeats_omitted,
         roh_upd=segment_info,
+        blinded_positions=positions is not None,
     )
     (output / 'manifest.json').write_text(manifest.model_dump_json(indent=2) + '\n')
     return manifest
@@ -1251,14 +1310,20 @@ def _vcf_samples(vcf_path: pathlib.Path) -> list[str]:
 
 
 def check_inputs(
-    family: str, ped_path: pathlib.Path, vcf_path: pathlib.Path, proband: str | None, structural: Structural
+    family: str,
+    ped_path: pathlib.Path,
+    vcf_path: pathlib.Path,
+    proband: str | None,
+    structural: Structural,
+    blinded: pathlib.Path | None = None,
 ) -> None:
     """Fails unless the family's inputs fit together, before anything is annotated.
 
     The PED file is the family's and names each sample of the VCF, each sample can name its column in the tables that
     hold one per member (check_column_names), and the proband that the run's sheet names, if any, is an individual of
     the PED file and a sample of the VCF. The VCFs of the family's larger variants hold exactly the VCF's samples, the
-    repeat VCFs one sample each.
+    repeat VCFs one sample each. The file of the family's blinded positions, where the sheet names one, is one that
+    blinded_positions.read reads.
     """
     ped = pedigree.read(ped_path)
     samples = _vcf_samples(vcf_path)
@@ -1266,3 +1331,5 @@ def check_inputs(
     check_column_names(samples)
     member_roles(ped, samples, proband)
     structural.check(samples)
+    if blinded is not None:
+        blinded_positions.read(blinded, _CHROM_RANK)

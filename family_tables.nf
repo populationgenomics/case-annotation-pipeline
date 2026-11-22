@@ -13,7 +13,8 @@
 // variants and copy-number segments of the group's families go the same way as their alleles: the union of their sites
 // is annotated once, in a second Annotator run with the same catalog and sources, and each family's tables read its
 // records' annotation from it. The Annotator does not read the repeats. A run that gives a release of STRchive adds its
-// size ranges to each family's repeats table.
+// size ranges to each family's repeats table. A family whose row names a file of blinded positions gets tables that say
+// nothing of ClinVar or dbSNP at those positions, while the unions keep what they hold.
 //
 // The steps are the workflow ANNOTATE_FAMILIES, which takes the families as a channel and its settings as values, so
 // that another pipeline can include it and give it families that it makes in the same run (docs/annotation.md,
@@ -32,7 +33,10 @@ params {
     // Three more columns are optional, and so is each of their fields: sv_vcf and cnv_vcf, the VCFs of the family's
     // structural-variant caller and of its copy-number caller, whose samples are the family's, and repeat_vcfs, its
     // members' repeat VCFs, one of each sequenced member, separated by semicolons. Each is bgzipped with its .tbi
-    // beside it. A family gets the tables of what its row names. A sheet with any other column stops the run.
+    // beside it. A family gets the tables of what its row names.
+    // One more column is optional, and so is its field: blinded_positions, a JSON file of the positions at which the
+    // family's tables are to say nothing of ClinVar or dbSNP (docs/annotation.md, Blinded positions). A sheet with
+    // any other column stops the run.
     families: Path
     // The name of the families' source selection, which names the union and its folder. It is internal: where a
     // reader of the tables is not to learn the selection, pick a name that does not describe it.
@@ -118,10 +122,11 @@ workflow {
     if (ids.unique(false).size() != ids.size()) {
         error("${params.families}: a family is listed twice")
     }
-    // The VCFs of each family's larger variants with their indexes: an empty list for what its row does not name.
+    // The VCFs of each family's larger variants with their indexes, and the file of its blinded positions: an empty
+    // list for what its row does not name.
     families = channel.fromList(rows)
         .map { row ->
-            tuple(row.family, file(row.vcf), file(row.ped), row.proband, indexed([row.sv_vcf]), indexed([row.cnv_vcf]), indexed(repeatVcfs(row)))
+            tuple(row.family, file(row.vcf), file(row.ped), row.proband, indexed([row.sv_vcf]), indexed([row.cnv_vcf]), indexed(repeatVcfs(row)), blindedPositions(row))
         }
     annotated = ANNOTATE_FAMILIES(
         families,
@@ -137,10 +142,11 @@ workflow {
 
 // The steps of the family tables, for the entry workflow above and for a pipeline that includes this workflow.
 //
-// `families` holds each family once, as tuple(family, vcf, ped, proband, sv, cnv, repeats): its id, its VCF, its PED
-// file, its proband's sample id (empty where none is designated), and the VCFs of its structural-variant caller, of
-// its copy-number caller and of its members' repeats. Each of the last three is a list of the VCFs with their .tbi
-// indexes, and an empty list for what the family does not have.
+// `families` holds each family once, as tuple(family, vcf, ped, proband, sv, cnv, repeats, blinded): its id, its VCF,
+// its PED file, its proband's sample id (empty where none is designated), the VCFs of its structural-variant caller,
+// of its copy-number caller and of its members' repeats, and the file of its blinded positions. Each of the three
+// before the last is a list of the VCFs with their .tbi indexes, and the last a list of the one file. Each is an
+// empty list for what the family does not have.
 //
 // `annotates_sv` is a Boolean, true where any family has a structural-variant or a copy-number VCF. The steps of their
 // union are part of the run or not when the workflow is built, before a family arrives, so a caller knows the value
@@ -233,18 +239,18 @@ workflow ANNOTATE_FAMILIES {
     passed = families.join(checked.map { f -> [f] })
     reference = channel.value(tuple(settings.reference, reference_index))
     normalised = NORMALISE_FAMILY(
-        passed.map { family, vcf, _ped, _proband, _sv, _cnv, _repeats -> tuple(family, vcf) },
+        passed.map { family, vcf, _ped, _proband, _sv, _cnv, _repeats, _blinded -> tuple(family, vcf) },
         reference,
     )
     sv_alleles = NORMALISE_SV(
-        passed.filter { _family, _vcf, _ped, _proband, sv, _cnv, _repeats -> sv }.map { family, _vcf, _ped, _proband, sv, _cnv, _repeats -> tuple(family, sv) },
+        passed.filter { _family, _vcf, _ped, _proband, sv, _cnv, _repeats, _blinded -> sv }.map { family, _vcf, _ped, _proband, sv, _cnv, _repeats, _blinded -> tuple(family, sv) },
         reference,
     )
     union = UNION_SITES(settings.group, normalised.sites.flatten().collect())
     // The union of the group's structural variants and copy-number segments, where a family has a VCF of either.
     if (annotates_sv) {
         sv_sites = SV_SITES(
-            passed.filter { _family, _vcf, _ped, _proband, sv, cnv, _repeats -> sv || cnv }.map { family, _vcf, _ped, _proband, sv, cnv, _repeats -> tuple(family, sv, cnv) }
+            passed.filter { _family, _vcf, _ped, _proband, sv, cnv, _repeats, _blinded -> sv || cnv }.map { family, _vcf, _ped, _proband, sv, cnv, _repeats, _blinded -> tuple(family, sv, cnv) }
         )
         // Nothing is checked of the list: it is also what is left of the sites when another error ends the run, and
         // an error raised for it would be reported in place of that one. SV_UNION's command fails without sites.
@@ -336,15 +342,16 @@ workflow ANNOTATE_FAMILIES {
     // Each family's runs of homozygosity and regions of uniparental disomy, from its VCF as it was given: the tools
     // read sites of the family's own records, which the normalised VCF has split into alleles.
     segments = ROH_UPD(
-        passed.map { family, vcf, ped, _proband, _sv, _cnv, _repeats -> tuple(family, vcf, ped) },
+        passed.map { family, vcf, ped, _proband, _sv, _cnv, _repeats, _blinded -> tuple(family, vcf, ped) },
         settings.gnomad_joint,
     )
     // The PED file comes from the family as it was given rather than through NORMALISE_FAMILY: a task's input passed on
     // as its output is a link into that task's work directory, which another VM cannot follow to the file. The VCFs of
-    // the larger variants come from there too. A family without a structural-variant VCF has no normalised sequences.
+    // the larger variants and the file of the blinded positions come from there too. A family without a
+    // structural-variant VCF has no normalised sequences.
     written = FAMILY_TABLES(
-        normalised.family.join(families.map { family, _vcf, ped, proband, sv, cnv, repeats -> [family, ped, proband, sv, cnv, repeats] }).join(sv_alleles, remainder: true).map { family, vcf, index, ped, proband, sv, cnv, repeats, alleles ->
-            tuple(family, vcf, index, ped, proband, sv, cnv, repeats, alleles ?: [])
+        normalised.family.join(families.map { family, _vcf, ped, proband, sv, cnv, repeats, blinded -> [family, ped, proband, sv, cnv, repeats, blinded] }).join(sv_alleles, remainder: true).map { family, vcf, index, ped, proband, sv, cnv, repeats, blinded, alleles ->
+            tuple(family, vcf, index, ped, proband, sv, cnv, repeats, blinded, alleles ?: [])
         }.join(segments),
         tables,
         archive_values,
@@ -433,9 +440,10 @@ def geneModelFiles() {
     return ['ensembl.gff3.gz', 'ensembl.gff3.gz.tbi', 'refseq.gff.gz', 'refseq.gff.gz.tbi', 'chromosome-synonyms.txt', 'exons.bed', 'controls.vcf', 'gene-models.json']
 }
 
-// The columns of the families sheet: four that every sheet has, and the optional ones of the larger variants.
+// The columns of the families sheet: four that every sheet has, the optional ones of the larger variants, and the
+// optional one of the blinded positions.
 def sheetColumns() {
-    return ['family', 'vcf', 'ped', 'proband', 'sv_vcf', 'cnv_vcf', 'repeat_vcfs']
+    return ['family', 'vcf', 'ped', 'proband', 'sv_vcf', 'cnv_vcf', 'repeat_vcfs', 'blinded_positions']
 }
 
 // A row of the families sheet: its family id, which names the family's outputs, its two files, and its proband's
@@ -464,6 +472,10 @@ def checkFamily(row) {
                 error("${row.family}: ${vcf}: no .tbi beside it")
             }
         }
+    // The file of the blinded positions is optional too. A named one that does not exist would otherwise fail a task.
+    if (row.blinded_positions && !file(row.blinded_positions).exists()) {
+        error("${row.family}: ${row.blinded_positions}: no such file of blinded positions")
+    }
     return row.family
 }
 
@@ -481,7 +493,11 @@ def checkIds(family, proband) {
 // run starts, and an including pipeline's families come during the run. A structural-variant or copy-number VCF in a
 // run that was built without the steps of their union would reach FAMILY_TABLES with no annotation to read.
 def checkRecord(record, annotates_sv) {
-    def (family, _vcf, _ped, proband, sv, cnv, _repeats) = record
+    // A family with fewer values would be read as one without what it lacks, and its tables would not be blinded.
+    if (record.size() != 8) {
+        error("${record[0]}: a family is tuple(family, vcf, ped, proband, sv, cnv, repeats, blinded), and this one has ${record.size()} values")
+    }
+    def (family, _vcf, _ped, proband, sv, cnv, _repeats, _blinded) = record
     // As for a sheet's row: read as empty, an absent proband would pass for a family in which none is designated.
     if (proband == null) {
         error("${family}: no proband, which is an empty string where none is designated")
@@ -504,6 +520,12 @@ def repeatVcfs(row) {
         error("${row.family}: an empty entry among its repeat_vcfs, which are separated by single semicolons: ${row.repeat_vcfs}")
     }
     return vcfs
+}
+
+// The file of a family's blinded positions as a process stages it: a list of the one file that the row names, and an
+// empty list where the sheet has no such column or the row leaves it empty.
+def blindedPositions(row) {
+    return row.blinded_positions ? [file(row.blinded_positions)] : []
 }
 
 // Each named VCF with the index beside it, as a process stages them; nothing for a VCF the row does not name.

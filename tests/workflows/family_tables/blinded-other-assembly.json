@@ -1,0 +1,8 @@
+{
+  "assembly": "GRCh37",
+  "coordinates": "1-based, both ends inclusive",
+  "small": [
+    {"chrom": "chr1", "start": 300, "end": 300}
+  ],
+  "structural": []
+}

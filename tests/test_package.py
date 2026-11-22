@@ -53,7 +53,7 @@ def test_the_pipelines_version_is_the_one_line_of_its_file_and_the_packages() ->
     given = re.escape(version)
     one_line = re.findall(rf"FAMILY_CHECK\(families\.join\(structural\), '{given}'\)", test)
     refused = re.findall(rf"FAMILY_CHECK_\w+_REFUSED\(\n        channel\.of\(.*\),\n        '{given}',\n    \)", test)
-    assert len(one_line) + len(refused) == len(re.findall(r'= FAMILY_CHECK\w*\(', test)) == 4
+    assert len(one_line) + len(refused) == len(re.findall(r'= FAMILY_CHECK\w*\(', test)) == 5
 
 
 def test_the_first_step_of_a_run_refuses_tools_of_another_release_before_the_annotator_runs() -> None:

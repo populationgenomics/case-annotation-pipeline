@@ -31,7 +31,8 @@ for it.
 In `families-sheet.json`, `column_required` says whether a sheet's header must hold the column and `value_required`
 whether a row must hold a value in it. A `pattern` is matched against the whole value. A column with an `index_suffix`
 names VCFs that each have an index beside them, named as the VCF with the suffix. The `separator` stands between the
-VCFs of one field.
+VCFs of one field. `blinded_positions` names one JSON file, which
+[Blinded positions](../docs/annotation.md#blinded-positions) describes.
 
 In `workflow.json`, a param is `required` where its workflow declares it without a default, and a `pattern` on a list
 param holds for each of its values. A param with an `index_suffix` names a file that has an index beside it, as in the

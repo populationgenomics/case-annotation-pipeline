@@ -9,11 +9,14 @@
 include { ANNOTATE_FAMILIES ; unionFolder ; annotatorFolder ; familyFolder } from '../../../family_tables.nf'
 
 params {
-    // The family's id and its proband's sample id, and whether its files hold a structural-variant VCF. A run without
-    // proband gives the workflow a family without one, which it refuses.
+    // The family's id and its proband's sample id, and whether its files hold a structural-variant VCF and a file of
+    // blinded positions. A run without proband gives the workflow a family without one, which it refuses, and so
+    // does a run with short_family, which gives the family without the last of its eight values.
     family: String
     proband: String?
     with_sv: Boolean = false
+    with_blinded: Boolean = false
+    short_family: Boolean = false
     // What ANNOTATE_FAMILIES takes beside the family: whether the run has the steps of the structural variants, and
     // its settings. The run reuses an annotation, so it names no source and nothing of the Annotator's. It can name
     // any of the archives of AlphaGenome's scores, any of the public files that are joined to the alleles, and a
@@ -78,7 +81,10 @@ workflow {
         strchive_release_date: params.strchive_release_date,
         gene_models: params.gene_models,
     ]
-    families = MADE_FAMILY(params.with_sv).map { vcf, ped, sv -> tuple(params.family, vcf, ped, params.proband, sv, [], []) }
+    families = MADE_FAMILY(params.with_sv, params.with_blinded).map { vcf, ped, sv, blinded ->
+        def family = [params.family, vcf, ped, params.proband, sv, [], [], blinded]
+        params.short_family ? family.take(7) : family
+    }
     annotated = ANNOTATE_FAMILIES(
         families,
         params.annotates_sv,
@@ -110,12 +116,13 @@ output {
 process MADE_FAMILY {
     input:
     val with_sv
+    val with_blinded
 
     output:
-    tuple path('made.vcf.gz'), path('made.ped'), path('made.sv.vcf.gz{,.tbi}', arity: '0..2')
+    tuple path('made.vcf.gz'), path('made.ped'), path('made.sv.vcf.gz{,.tbi}', arity: '0..2'), path('made.blinded-positions.json', arity: '0..1')
 
     script:
     """
-    touch made.vcf.gz made.ped ${with_sv ? 'made.sv.vcf.gz made.sv.vcf.gz.tbi' : ''}
+    touch made.vcf.gz made.ped ${with_sv ? 'made.sv.vcf.gz made.sv.vcf.gz.tbi' : ''} ${with_blinded ? 'made.blinded-positions.json' : ''}
     """
 }

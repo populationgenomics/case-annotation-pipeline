@@ -40,6 +40,10 @@ DATE = strchive.DATE.pattern
 SEPARATOR = ';'
 INDEX_SUFFIX = '.tbi'
 
+# The sheet's column that names the file of a family's blinded positions, and the key under which the family's
+# manifest says whether its row named one.
+BLINDED = 'blinded_positions'
+
 # The sheet's columns that give a family each table of its larger variants: a row that names a VCF in one of them gets
 # the table.
 TABLE_COLUMNS: Mapping[str, tuple[str, ...]] = {
@@ -120,6 +124,7 @@ def families_sheet() -> dict[str, Any]:
             column('sv_vcf', **larger),
             column('cnv_vcf', **larger),
             column('repeat_vcfs', **larger, separator=SEPARATOR),
+            column(BLINDED, column_required=False, value_required=False),
         ],
         'other_columns': 'refused',
     }
@@ -325,6 +330,7 @@ _EXAMPLE_ROWS: Sequence[Mapping[str, str]] = (
         'sv_vcf': f'{_EXAMPLE_FOLDER}/family-a.sv.vcf.gz',
         'cnv_vcf': f'{_EXAMPLE_FOLDER}/family-a.cnv.vcf.gz',
         'repeat_vcfs': SEPARATOR.join(f'{_EXAMPLE_FOLDER}/{sample}.repeats.vcf.gz' for sample in _EXAMPLE_SAMPLES),
+        BLINDED: f'{_EXAMPLE_FOLDER}/family-a.blinded-positions.json',
     },
     {
         'family': 'family-b',
@@ -334,6 +340,7 @@ _EXAMPLE_ROWS: Sequence[Mapping[str, str]] = (
         'sv_vcf': '',
         'cnv_vcf': '',
         'repeat_vcfs': '',
+        BLINDED: '',
     },
 )
 
@@ -589,6 +596,7 @@ def example_manifest() -> family_tables.FamilyManifest:
             upd_children=(roh_upd.Trio(child=child, mother=mother, father=father),),
             upd_not_assessed=(),
         ),
+        blinded_positions=bool(_EXAMPLE_ROWS[0][BLINDED]),
     )
 
 
