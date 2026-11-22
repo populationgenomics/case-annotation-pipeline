@@ -81,6 +81,14 @@ _REFUSED_FILES: Mapping[str, tuple[str, str]] = {
         json.dumps(_with('small', [{'chrom': 'chr1', 'start': 100, 'end': 100, 'alt': 'T'}])),
         'alt',
     ),
+    'a list twice, of which a reader of JSON keeps the second': (
+        json.dumps(_GOOD).replace('"structural"', '"small": [], "structural"'),
+        r"the keys \['small'\] more than once",
+    ),
+    'an end twice in one entry': (
+        json.dumps(_GOOD).replace('"end": 100', '"end": 100, "end": 200'),
+        r"the keys \['end'\] more than once",
+    ),
     'an entry without its end': (json.dumps(_with('small', [{'chrom': 'chr1', 'start': 100}])), 'end'),
     'an entry that ends before it starts': (
         json.dumps(_with('structural', [{'chrom': 'chr2', 'start': 5000, 'end': 1001}])),

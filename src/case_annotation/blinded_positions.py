@@ -18,9 +18,10 @@ The functions of the two rules read views of the connection that family_tables.a
 
 from __future__ import annotations
 
+import json
 import pathlib
 from collections.abc import Collection, Sequence
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 import duckdb
 import pyarrow as pa
@@ -74,16 +75,31 @@ class BlindedPositions(pydantic.BaseModel, frozen=True, extra='forbid', strict=T
         return [(kind, place, interval) for kind, intervals in kinds for place, interval in enumerate(intervals)]
 
 
+def _once(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """The object of a JSON document's keys and values; fails for a key that the object holds twice.
+
+    A JSON reader keeps the last value of a repeated key, so a second `small` would replace the first list
+    without a word, and the positions of the first would stay in the tables.
+    """
+    held = dict(pairs)
+    if len(held) != len(pairs):
+        keys = [key for key, _value in pairs]
+        raise ValueError(f'the keys {sorted({key for key in keys if keys.count(key) > 1})} more than once')
+    return held
+
+
 def read(path: pathlib.Path, chromosomes: Collection[str]) -> BlindedPositions:
     """A family's blinded positions from their file.
 
     Raises:
-        ValueError: if the file is not the object described above, with a key that it does not know among the
-            refused ones, or an entry lies on a chromosome that is none of those given.
+        ValueError: if the file is not the object described above, with a key that it does not know or a key
+            twice among the refused ones, or an entry lies on a chromosome that is none of those given.
     """
+    text = path.read_bytes()
     try:
-        positions = BlindedPositions.model_validate_json(path.read_bytes())
-    except pydantic.ValidationError as error:
+        json.loads(text, object_pairs_hook=_once)
+        positions = BlindedPositions.model_validate_json(text)
+    except ValueError as error:
         raise ValueError(f'{path}: not a file of blinded positions: {error}') from error
     for kind, place, interval in positions.entries():
         if interval.chrom not in chromosomes:
