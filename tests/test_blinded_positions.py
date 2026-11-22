@@ -94,6 +94,10 @@ _REFUSED_FILES: Mapping[str, tuple[str, str]] = {
         json.dumps(_with('small', [{'chrom': 'chr1', 'start': '100', 'end': 100}])),
         'start',
     ),
+    'a position past the last that a table holds': (
+        json.dumps(_with('small', [{'chrom': 'chr1', 'start': 100, 'end': 2**31}])),
+        'end',
+    ),
     'a position with a fraction': (json.dumps(_with('small', [{'chrom': 'chr1', 'start': 100, 'end': 100.5}])), 'end'),
     'a chromosome without its prefix': (
         json.dumps(_with('small', [{'chrom': '1', 'start': 100, 'end': 100}])),
@@ -439,12 +443,16 @@ def _record(accession: str, begin: int, end: int, kind: str, **extra: object) ->
     )
 
 
-def _with_records(without: Collection[str] = ()) -> Callable[[str, sv_sites.Site], dict[str, Any]]:
+def _with_records(
+    without: Collection[str] = (), begins: Mapping[tuple[str, str], int] | None = None
+) -> Callable[[str, sv_sites.Site], dict[str, Any]]:
     """An invented annotation in which six records of the family's callers have a ClinVar record, each named after it.
 
     They are the structural-variant caller's symbolic deletion, the copy-number caller's loss, its gain and its
     segment of two alleles, which the Annotator matched by overlap, and the two short sequences, which it annotated
-    as small variants and which hold a record of their own allele. The records of `without` have none.
+    as small variants and which hold a record of their own allele. The records of `without` have none. `begins`
+    gives the first base that the Annotator annotated of an allele, by its record's ID and the allele, where that
+    is another than the first base of the record.
     """
 
     def annotated(sv_id: str, site: sv_sites.Site) -> dict[str, Any]:
@@ -466,6 +474,8 @@ def _with_records(without: Collection[str] = ()) -> Callable[[str, sv_sites.Site
         if sv_id == 'inv:DEL:1':
             entry = invented_sv_annotation.gnomad_entry('inv-gnomad-1', 1001, 5000, 'deletion', 0.25, **whole)
             sources['gnomad'] = [entry]
+        if (sv_id, site.alt) in (begins or {}):
+            variant['begin'] = (begins or {})[sv_id, site.alt]
         return invented_sv_annotation.position(site, variant, **sources)
 
     return annotated
@@ -532,6 +542,35 @@ def test_an_entry_empties_the_clinvar_columns_of_the_records_it_reaches(tmp_path
     assert [r for r in blinded.to_pylist() if r['sv_id'] not in reached] == [
         r for r in plain.to_pylist() if r['sv_id'] not in reached
     ]
+
+
+# What an entry reaches of two records whose annotated interval is not their own. The Annotator annotated the
+# symbolic deletion inv:DEL:1, of chr1:1001-5000, from chr1:2001, and the gain of the segment inv:CNV:1, of
+# chr10:5001-15000, from another base than its loss, so that the segment has no annotated interval.
+_BEGINS = {('inv:DEL:1', '<DEL>'): 2001, ('inv:CNV:1', '<DUP>'): 5002}
+_REACHED_BY_ANNOTATED: Mapping[str, tuple[tuple[str, int, int], set[str]]] = {
+    'over half of the annotated interval and under half of the record': (('chr1', 2001, 3600), {'inv:DEL:1'}),
+    'over half of the record and under half of the annotated interval': (('chr1', 1001, 3100), {'inv:DEL:1'}),
+    'under half of both': (('chr1', 2001, 3400), set()),
+    'the interval of a record without an annotated interval': (('chr10', 5001, 15_000), {'inv:CNV:1'}),
+    'an interval before a record without an annotated interval': (('chr10', 101, 200), set()),
+    'an interval after a record without an annotated interval': (('chr10', 20_001, 30_000), set()),
+}
+
+
+@pytest.mark.parametrize('case', _REACHED_BY_ANNOTATED)
+def test_an_entry_is_compared_with_the_interval_that_the_annotator_annotated_where_a_record_has_one(
+    tmp_path: pathlib.Path, case: str
+) -> None:
+    interval, reached = _REACHED_BY_ANNOTATED[case]
+    inputs = test_family_tables._inputs(tmp_path) | test_family_tables._larger(
+        tmp_path, annotated=_with_records(begins=_BEGINS)
+    )
+    _assemble(inputs, blinded=_file(tmp_path / 'positions.json', structural=[interval]))
+    rows = {row['sv_id']: row for row in pq.read_table(tmp_path / 'out' / 'sv.parquet').to_pylist()}
+    assert (rows['inv:DEL:1']['annotated_pos'], rows['inv:DEL:1']['annotated_end_pos']) == (2000, 5000)
+    assert (rows['inv:CNV:1']['annotated_pos'], rows['inv:CNV:1']['annotated_end_pos']) == (None, 15_000)
+    assert _WITH_RECORDS - {sv_id for sv_id, row in rows.items() if row['clinvar_records'] is not None} == reached
 
 
 def test_a_blinded_sv_table_is_the_file_of_an_annotation_that_never_had_the_records(tmp_path: pathlib.Path) -> None:

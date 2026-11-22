@@ -42,13 +42,16 @@ SV_COLUMNS = sv_annotation.SOURCE_COLUMNS['clinvar']
 
 type Kind = Literal['small', 'structural']
 
+# The last position that a table can hold, whose `pos` and `end_pos` are 32-bit integers.
+_LAST = 2**31 - 1
+
 
 class Interval(pydantic.BaseModel, frozen=True, extra='forbid', strict=True):
     """The reference bases from `start` to `end`, counted from 1, on a chromosome named as the tables name it."""
 
     chrom: str
-    start: int = pydantic.Field(ge=1)
-    end: int
+    start: int = pydantic.Field(ge=1, le=_LAST)
+    end: int = pydantic.Field(le=_LAST)
 
     @pydantic.model_validator(mode='after')
     def _in_order(self) -> Self:
@@ -164,15 +167,21 @@ def blind_records(con: duckdb.DuckDBPyConnection, columns: Collection[str]) -> s
     among `columns`, the ones the run did not leave out, null for those records.
 
     An entry of a structural variant is compared with the record's own interval and with the one that the Annotator
-    annotated, which can begin elsewhere for a record written as a sequence. The joins read a record's own columns
-    only, since a member's column may bear any other name.
+    annotated, which can begin elsewhere for a record written as a sequence. A record of two alleles that were
+    annotated over two intervals has none, and is compared by its own alone: DuckDB's least and greatest skip a
+    null, so a comparison with a missing interval would hold for an entry anywhere. The joins read a record's own
+    columns only, since a member's column may bear any other name.
     """
+    annotated = (
+        'n.annotated_pos IS NOT NULL AND n.annotated_end_pos IS NOT NULL '
+        f'AND {_overlapping("n.annotated_pos", "n.annotated_end_pos")}'
+    )
     con.execute(
         'CREATE TEMP TABLE blinded_sv AS '  # noqa: S608 (conditions of this module's own)
         'SELECT r.sv_id, e.kind, e.place FROM (SELECT sv_id, chrom, pos, end_pos FROM sv_records) r '
         'JOIN (SELECT sv_id, annotated_pos, annotated_end_pos FROM sv_annotated) n USING (sv_id) '
         "JOIN blinded_entries e ON e.kind = 'structural' AND e.chrom = r.chrom "
-        f'AND ({_overlapping("r.pos", "r.end_pos")} OR {_overlapping("n.annotated_pos", "n.annotated_end_pos")}) '
+        f'AND ({_overlapping("r.pos", "r.end_pos")} OR ({annotated})) '
         f'UNION ALL SELECT a.sv_id, e.kind, e.place FROM sv_alleles a JOIN blinded_entries e ON {_IN_REACH}'
     )
     emptied = [column for column in SV_COLUMNS if column in columns]

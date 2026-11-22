@@ -119,7 +119,7 @@ process MADE_FAMILY {
     val with_blinded
 
     output:
-    tuple path('made.vcf.gz'), path('made.ped'), path('made.sv.vcf.gz{,.tbi}', arity: '0..2'), path('made.blinded-positions.json', arity: '0..1')
+    tuple path('made.vcf.gz'), path('made.ped'), path('made.sv.vcf.gz{,.tbi}', arity: '0..2'), path('made.blinded-positions*.json', arity: '0..*')
 
     script:
     """

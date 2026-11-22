@@ -766,7 +766,7 @@ A family's row can name a file of blinded positions. The family's tables then sa
 positions: the ClinVar columns and `rsids` hold a null there, as they do for a variant that neither source has a record
 of. The input serves a reader who is to judge a variant without being told what has been reported about it, as when
 methods of interpretation are compared on variants whose classification is known. A family whose row names no file gets
-its tables as every run so far wrote them.
+its tables with every value that the run's sources hold.
 
 The file is JSON. It states its assembly and its coordinates, and holds two lists of intervals. This one is invented:
 
@@ -827,10 +827,14 @@ shares with it at least half of the longer of the two: a [reciprocal overlap](gl
 more, at which the Annotator matches a ClinVar record to a record
 ([What the annotation says of a record](family-tables.md#what-the-annotation-says-of-a-record)). The entry is compared
 with the record's own interval and with the interval that the Annotator annotated (`annotated_pos` and
-`annotated_end_pos`), and one of the two is enough. Whether the record is a loss or a gain is not compared. Such an
-entry empties no row of `variants`: the small variants inside the interval keep what they hold, because some thousand
-emptied rows in a row would outline the interval. A variant of a length that both kinds of caller report can stand in
-both lists.
+`annotated_end_pos`) where the record has one, and one of the two is enough. Whether the record is a loss or a gain is
+not compared. Such an entry empties no row of `variants`: the small variants inside the interval keep what they hold,
+because some thousand emptied rows in a row would outline the interval. A variant of a length that both kinds of caller
+report can stand in both lists.
+
+The rows are found by the entry and not by a ClinVar record. A ClinVar record whose interval is another than the entry's
+can stand on a record of `sv` that overlaps it and not the entry by half, and that record keeps it. Where the interval
+of the ClinVar record to leave out is known and differs from the variant's own, it is given as an entry too.
 
 A null is what each of these columns holds for a variant without a record, the list columns among them, so a blinded row
 reads as a row that never had a record. The values are emptied in the query that a table is written from, before the
