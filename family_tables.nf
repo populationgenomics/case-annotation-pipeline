@@ -118,6 +118,12 @@ workflow {
     if (unknown) {
         error("${params.families}: the columns ${unknown} are none of a families sheet, which has ${sheetColumns().join(', ')}")
     }
+    // A row holds the last value of a column that the header has twice, so the first of two files of blinded
+    // positions, or of two probands, would be dropped while the run ended well.
+    def repeated = params.families.splitCsv()[0].countBy { name -> name }.findAll { _name, times -> times > 1 }.keySet()
+    if (repeated) {
+        error("${params.families}: the columns ${repeated} more than once")
+    }
     def ids = rows.collect { row -> checkFamily(row) }
     if (ids.unique(false).size() != ids.size()) {
         error("${params.families}: a family is listed twice")

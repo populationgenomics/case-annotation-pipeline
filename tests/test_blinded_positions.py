@@ -520,6 +520,7 @@ _REACHED_RECORDS: Mapping[str, tuple[dict[str, list[tuple[str, int, int]]], set[
         {'small': [('chr1', 2000, 2000), ('chr1', 25_000, 25_000), ('chr10', 9000, 9000)]},
         set(),
     ),
+    'a small variant as long as a record matched by overlap': ({'small': [('chr1', 1001, 5000)]}, set()),
     'the intervals of the two short sequences as structural variants': (
         {'structural': [('chr10', 7, 8), ('chr2', 299, 301)]},
         set(),

@@ -155,6 +155,9 @@ jobs:
             > stub/blinded.csv
           printf 'family,vcf,ped,proband,blinded_positions\nfam-a,/src/stub/family-a.vcf.gz,/src/stub/family-a.ped,A3,/src/stub/no-such-file.json\n' \
             > stub/blinded-missing.csv
+          # A sheet whose header has the column of the blinded positions twice.
+          printf 'family,vcf,ped,proband,blinded_positions,blinded_positions\nfam-a,/src/stub/family-a.vcf.gz,/src/stub/family-a.ped,A3,/src/stub/family-a.blinded-positions.json,\n' \
+            > stub/repeated-column.csv
           # An optional column under a misspelt name.
           printf '%s\n%s,\n' "${larger/sv_vcf/sv_vcfs}" "${a}" > stub/misspelt-column.csv
           printf "sources: [\"clin'var\"]\n" > stub/quoted-source.params.yaml
@@ -358,7 +361,7 @@ jobs:
           # a sample id; a reused annotation that holds none of the group; a reused annotation without its run config,
           # which Nextflow refuses by the missing file's path; a file of blinded positions that does not exist; a
           # repeat VCF without its index; an empty entry among a
-          # row's repeat VCFs; a sheet with a column that is none of a families sheet; a reused annotation without
+          # row's repeat VCFs; a sheet with a column that is none of a families sheet; a sheet with a column twice; a reused annotation without
           # that of the structural variants, for a group with a family that names their VCF; a release of STRchive
           # without its name and date; a name and a date without the release's file; a name that is not one of a
           # release; a date that is not written as YYYY-MM-DD; a folder of gene models without one of its files.
@@ -397,6 +400,8 @@ jobs:
             --families /src/stub/repeat-empty.csv
           refused 'the columns [sv_vcfs] are none of a families sheet' "${sources[@]}" "${annotator[@]}" \
             --families /src/stub/misspelt-column.csv
+          refused 'the columns [blinded_positions] more than once' "${sources[@]}" "${annotator[@]}" \
+            --families /src/stub/repeated-column.csv
           refused 'stub-group: /src/stub/annotated-no-sv holds no out/stub-group.sv.json.gz' \
             --families /src/stub/larger.csv --annotated /src/stub/annotated-no-sv
           reused=("${families[@]}" --annotated /src/stub/annotated)
