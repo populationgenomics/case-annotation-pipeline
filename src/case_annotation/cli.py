@@ -74,7 +74,7 @@ def _blinded_argument(parser: argparse.ArgumentParser) -> None:
         '--blinded-positions',
         type=pathlib.Path,
         help=(
-            "a JSON file of the positions at which the family's tables are to say nothing of ClinVar or dbSNP: its "
+            "a JSON file of the positions at which the family's tables are to say nothing of ClinVar: its "
             'assembly, its coordinates, and the intervals of small variants and of structural variants'
         ),
     )
@@ -880,7 +880,7 @@ _SUBCOMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Ca
             'repeats, its roh table and, for a family with a child whose parents are both sequenced, its upd table '
             "from roh-upd's output, its manifest with the roles of the proband the run names and of its parents, and "
             'a copy of the notes on the tables (tables.md); with a file of blinded positions, variants and sv hold '
-            'nothing of ClinVar or dbSNP in the rows that an entry of the file reaches'
+            'nothing of ClinVar in the rows that an entry of the file reaches'
         ),
         _family_tables_arguments,
         _family_tables,

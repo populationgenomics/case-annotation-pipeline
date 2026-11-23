@@ -141,7 +141,7 @@ releases can add a locus or move a range, so what `repeats` holds of it depends 
 and no part of a bundle, so it has no entry in the table above and none under `annotation.omitted`.
 
 A run names the sources it annotates with in `sources`, and it includes a dated source only by naming it. A run that
-names ClinVar and dbSNP can still leave their data out of one family's tables at single positions
+names ClinVar can still leave its data out of one family's tables at single positions
 ([Blinded positions](#blinded-positions)). It names sources, not annotation types, so a source is included or left out
 whole. The workflow uses the groups in three ways.
 
@@ -397,8 +397,8 @@ These VCFs have to meet conditions of their own:
   its records break a check, such as a copy-number caller that writes its genotypes by another convention.
 
 One more column is optional in the same way. `blinded_positions` names a JSON file of the positions at which the
-family's tables are to say nothing of ClinVar or dbSNP ([Blinded positions](#blinded-positions)). A family whose row
-leaves it empty gets its tables as they are.
+family's tables are to say nothing of ClinVar ([Blinded positions](#blinded-positions)). A family whose row leaves it
+empty gets its tables as they are.
 
 > [!WARNING]
 >
@@ -694,7 +694,7 @@ Annotator's output has a folder of its own, which the catalog names without the 
 >
 > The two unions and the Annotator's output hold every family's alleles and records, so publishing any of them beside a
 > family's tables would show that family what the others carry. Only a family's own folder may reach whoever analyses
-> that family. The unions also hold the ClinVar records and dbSNP ids that the tables of a family with
+> that family. The unions also hold the ClinVar records that the tables of a family with
 > [blinded positions](#blinded-positions) leave out.
 
 `group` names the run's families together ([Groups](#groups)).
@@ -763,10 +763,10 @@ catalog and sources can still be split into groups, which only keeps each run to
 
 ### Blinded positions
 
-A family's row can name a file of blinded positions. The family's tables then say nothing of ClinVar or dbSNP at those
-positions: the ClinVar columns and `rsids` hold a null there, as they do for a variant that neither source has a record
-of. The input serves a reader who is to judge a variant without being told what has been reported about it. A family
-whose row names no file gets its tables with every value that the run's sources hold.
+A family's row can name a file of blinded positions. The family's tables then say nothing of ClinVar at those positions:
+the ClinVar columns hold a null there, as they do for a variant that ClinVar has no record of. The input serves a reader
+who is to judge a variant without being told what has been reported about it. A family whose row names no file gets its
+tables with every value that the run's sources hold.
 
 The file is JSON. It states its assembly and its coordinates, and holds two lists of intervals. This one is invented:
 
@@ -800,7 +800,7 @@ from `pos` to the last base of `ref`:
 
 Such an entry empties two things.
 
-- In `variants`, it empties `rsids` and the ten ClinVar columns (`clinvar_accession`, `clinvar_classification`,
+- In `variants`, it empties the ten ClinVar columns (`clinvar_accession`, `clinvar_classification`,
   `clinvar_review_status`, `clinvar_stars`, `clinvar_conditions`, `clinvar_last_evaluated`, `clinvar_last_updated`,
   `clinvar_pubmed_ids`, `clinvar_records` and `clinvar_other_alleles`) of every row whose `ref` lies within one base of
   the entry. Those are the rows with a `pos` of at most `end + 1` whose last base of `ref` is at least `start - 1`. They
@@ -812,8 +812,8 @@ Such an entry empties two things.
   is the one that `small_variant_id` names where `variants` holds it, and the test is the same for a record whose allele
   `variants` lacks.
 
-The test reaches one base beside the entry for a reason. The tables write an insertion or a deletion with the base
-before it. The Annotator lists ClinVar's records of other alleles at the position of an allele, which
+The test reaches one base beside the entry on purpose, as a tolerance. The tables write an insertion or a deletion with
+the base before it. The Annotator lists ClinVar's records of other alleles at the position of an allele, which
 `clinvar_other_alleles` holds, and Illumina does not say which base the position of an insertion or a deletion is. If it
 is the first base that the allele changes, the record of an insertion written at one base stands on a change of the next
 base, and the record of a change of one base stands on an insertion written at the base before. One base on either side
@@ -829,8 +829,9 @@ more, at which the Annotator matches a ClinVar record to a record
 with the record's own interval and with the interval that the Annotator annotated (`annotated_pos` and
 `annotated_end_pos`) where the record has one, and one of the two is enough. Whether the record is a loss or a gain is
 not compared. Such an entry empties no row of `variants`: the small variants inside the interval keep what they hold,
-because some thousand emptied rows in a row would outline the interval. A variant of a length that both kinds of caller
-report can stand in both lists.
+because some thousand emptied rows in a row would outline the interval. A variant that can be a row of both tables, as a
+deletion of some tens of bases can be, needs an entry in each list: an entry of `small` for its row of `variants`, and
+an entry of `structural` for its record of `sv`. With one of the two alone, the other table's row can keep its records.
 
 The rows are found by the entry and not by a ClinVar record. A ClinVar record whose interval is another than the entry's
 can stand on a record of `sv` that overlaps it and not the entry by half, and that record keeps it. Where the interval
@@ -849,6 +850,12 @@ Everything else stays as it is.
   such: REVEL, gnomAD's MPC score and MitoTIP ([Dated sources](#dated-sources) says what each has seen). Each scores a
   possible change whether or not anyone reported it, so a score does not say that the variant has a record, while it may
   be higher because the variant has one.
+- `rsids` keeps an allele's dbSNP ids at a blinded position. An allele that a population database holds nearly always
+  has an rsID, so a row without one would stand out among its neighbours and mark the position. The id is also no extra
+  key for a reader of the tables, who can look an allele up by its chromosome, its position and its bases as well as by
+  its rsID. A newly minted rsID still says that someone reported the variant ([Dated sources](#dated-sources)), and a
+  run with blinded positions does not hide that. Whoever serves live lookups to a reader of the tables has to blind them
+  by position.
 - STRchive's ranges in `repeats` are not emptied.
 - The two unions, their tables and the Annotator's JSON keep every value, because they serve all families of the group.
   They hold what the family's tables no longer say and must not reach a reader of those tables

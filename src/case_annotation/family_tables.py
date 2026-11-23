@@ -38,7 +38,7 @@ A family with a child whose parents are both sequenced gets one more:
 - `upd.parquet`: one row per region in which such a child shows the alleles of one parent alone, on the autosomes.
 
 A family whose sheet row names a file of blinded positions (blinded_positions) gets `variants` and `sv` with a null in
-the ClinVar columns and in `rsids` of the rows that an entry of the file reaches. The values are emptied in the queries
+the ClinVar columns of the rows that an entry of the file reaches. The values are emptied in the queries
 that the tables are written from, so no file of the folder holds anything of them, and the manifest says only that the
 run was given such a file.
 
@@ -484,7 +484,7 @@ class FamilyManifest(pydantic.BaseModel, frozen=True, extra='forbid'):
     # has no row of an assessed child without a region, and none of a child that was not assessed.
     roh_upd: roh_upd.RohUpdInfo
     # Whether the run was given a file of blinded positions for the family (blinded_positions). Where it was, a null
-    # in a ClinVar column of variants or of sv, or in rsids, can stand for a value that the run emptied. Nothing else
+    # in a ClinVar column of variants or of sv can stand for a value that the run emptied. Nothing else
     # of the file is recorded: not its name, its size or its checksum, and not its entries or how many they are.
     blinded_positions: bool
 
@@ -1164,7 +1164,7 @@ def assemble(
         # without the catalogue of branch points has no column of the gained `AG`s.
         over_transcripts = [f'u.{_UTR5.name}', *([] if _AG_GAIN.name in omitted else [f'g.{_AG_GAIN.name}'])]
         # A family with blinded positions reads the union's variants through a view that empties the ClinVar columns
-        # and the dbSNP ids of the alleles that an entry reaches, so that the table is written from emptied values.
+        # of the alleles that an entry reaches, so that the table is written from emptied values.
         union_variants = blinded_positions.blind_variants(con, positions)
         # A record's columns after its id are the family's QUAL and FILTER and the members' calls, as variants ends.
         queries = {

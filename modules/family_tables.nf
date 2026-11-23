@@ -583,7 +583,7 @@ process ROH_UPD {
 // upd, such a child's regions of uniparental disomy, both from ROH_UPD's folder of the family (segments). The stub
 // cannot read a pedigree, so it writes no upd.
 // blinded is the file of the family's blinded positions, and an empty list for a family whose row names none. With
-// it, case-annotation writes variants and sv with nothing of ClinVar or dbSNP in the rows that an entry reaches, and
+// it, case-annotation writes variants and sv with nothing of ClinVar in the rows that an entry reaches, and
 // prints for each entry how many rows it reached. Those lines stay in the task's log. The outputs are the files of
 // the family's folder by name, so the file itself and the log are published with none of them.
 process FAMILY_TABLES {

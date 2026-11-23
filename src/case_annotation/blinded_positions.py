@@ -1,8 +1,8 @@
-"""The positions at which a family's tables say nothing of ClinVar or dbSNP (docs/annotation.md, Blinded positions).
+"""The positions at which a family's tables say nothing of ClinVar (docs/annotation.md, Blinded positions).
 
-A run can name a file of such positions for a family. The family's tables then hold a null in the ClinVar columns and
-in `rsids` of the rows in reach of an entry, as a row without a record holds one, so that a reader of the tables cannot
-tell a blinded row from a row that never had a record. The union's tables are not changed.
+A run can name a file of such positions for a family. The family's tables then hold a null in the ClinVar columns of
+the rows in reach of an entry, as a row without a record holds one, so that a reader of the tables cannot tell a
+blinded row from a row that never had a record. The union's tables are not changed.
 
 The file is a JSON object that states its assembly and its coordinates and holds two lists of intervals:
 
@@ -36,9 +36,10 @@ from case_annotation import annotation_tables, sv_annotation
 # single-base change on an insertion written one base before it. One base on either side covers both readings.
 REACH = 1
 
-# The columns that an entry empties, by table: the ClinVar columns of both, and the dbSNP ids of an allele, since an
-# id that dbSNP minted says that someone reported the allele.
-VARIANTS_COLUMNS = (*annotation_tables.SOURCE_COLUMNS['dbSNP'], *annotation_tables.SOURCE_COLUMNS['clinvar'])
+# The columns that an entry empties, by table: the ClinVar columns of both. An allele keeps its dbSNP ids. An allele
+# that a population database holds nearly always has one, so a row without one would stand out among its
+# neighbours, and an id gives a reader nothing that the allele's position and bases do not give.
+VARIANTS_COLUMNS = annotation_tables.SOURCE_COLUMNS['clinvar']
 SV_COLUMNS = sv_annotation.SOURCE_COLUMNS['clinvar']
 
 type Kind = Literal['small', 'structural']

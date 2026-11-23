@@ -82,7 +82,7 @@
 // Sites that hold an allele of the exons twice are refused before the rules are applied to them.
 // Family A's row also names a file of blinded positions, family-a.blinded-positions.json, and family B's names none:
 // the file goes through FAMILY_CHECK into FAMILY_TABLES as family_tables.nf passes it, and CHECK_BLINDED reads what
-// the two manifests say of it. The run names neither ClinVar nor dbSNP, so no table has a column that an entry could
+// the two manifests say of it. The run does not name ClinVar, so no table has a column that an entry could
 // empty, and tests/test_blinded_positions.py holds the rows to the entries. A file that states another assembly
 // (blinded-other-assembly.json) is refused by the family check.
 // Refused inputs must fail, and so must Annotator outputs without the group's annotation. The case-annotation and

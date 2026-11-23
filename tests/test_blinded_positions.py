@@ -136,7 +136,7 @@ def test_a_file_that_is_not_one_of_blinded_positions_is_refused(tmp_path: pathli
 
 
 def _known(tag: str) -> dict[str, Any]:
-    """A value in every column that an entry empties, each of which carries the tag."""
+    """A value in every column that an entry empties, and a dbSNP id, each of which carries the tag."""
     record = {
         'accession': f'VCV-{tag}',
         'version': '1',
@@ -165,11 +165,13 @@ def _known(tag: str) -> dict[str, Any]:
 
 def test_the_invented_values_fill_every_column_that_an_entry_empties() -> None:
     known = _known('x')
-    assert set(known) == set(blinded_positions.VARIANTS_COLUMNS)
+    assert set(known) == {*blinded_positions.VARIANTS_COLUMNS, 'rsids'}
     assert all(value is not None for value in known.values())
+    # The ClinVar columns alone: an allele keeps its dbSNP ids.
     assert set(blinded_positions.VARIANTS_COLUMNS) == {
-        name for name in annotation_tables.VARIANTS.names if name == 'rsids' or name.startswith('clinvar_')
+        name for name in annotation_tables.VARIANTS.names if name.startswith('clinvar_')
     }
+    assert len(blinded_positions.VARIANTS_COLUMNS) == 10
     assert set(blinded_positions.SV_COLUMNS) == {
         name for name in sv_annotation.COLUMNS.names if name.startswith('clinvar_')
     }
@@ -216,8 +218,8 @@ def _family(
 ) -> dict[str, Any]:
     """The arguments of assemble for a family with these alleles, in a union that has records of each of them.
 
-    Every allele has a value in each column that an entry empties, which carries the allele's id, but for the alleles
-    of `without_records`, which have none, as an allele that neither ClinVar nor dbSNP holds.
+    Every allele has a dbSNP id and a value in each column that an entry empties, which carry the allele's id. The
+    alleles of `without_records` have the dbSNP id alone, as an allele that ClinVar does not hold.
     """
     inputs = test_family_tables._inputs(tmp_path)
     carried = (test_family_tables._REF, test_family_tables._REF, test_family_tables._HET)
@@ -230,7 +232,7 @@ def _family(
     (union / 'transcripts').mkdir()
     rows = [
         {'chrom': chrom, 'pos': int(pos), 'ref': ref, 'alt': alt, 'variant_id': allele, 'worst_impact': 'modifier'}
-        | ({} if allele in without_records else _known(allele))
+        | ({'rsids': _known(allele)['rsids']} if allele in without_records else _known(allele))
         for allele, chrom, pos, ref, alt in placed
     ]
     pq.write_table(pa.Table.from_pylist(rows, schema=annotation_tables.VARIANTS), union / 'variants' / 'p0.parquet')
@@ -349,9 +351,8 @@ def test_a_blinded_table_is_the_file_of_a_union_that_never_had_the_records(tmp_p
     kept = set(_FAMILY) - reached
     assert kept
     for allele in reached:
-        assert not any(
-            tag in read for tag in (f'VCV-{allele}', f'VCV-other-{allele}', f'rs-{allele}', f'pmid-{allele}')
-        )
+        assert not any(tag in read for tag in (f'VCV-{allele}', f'VCV-other-{allele}', f'pmid-{allele}'))
+        assert f'rs-{allele}' in read
     for allele in kept:
         assert all(tag in read for tag in (f'VCV-{allele}', f'VCV-other-{allele}', f'rs-{allele}', f'pmid-{allele}'))
     # The two manifests differ in the one key that says a file was given.
@@ -425,12 +426,23 @@ def test_the_step_logs_how_many_rows_each_entry_reached_and_an_entry_that_reache
     assert capsys.readouterr().out == ''
 
 
-def test_a_run_that_named_neither_clinvar_nor_dbsnp_has_no_column_to_empty(tmp_path: pathlib.Path) -> None:
-    inputs = _family(tmp_path, without_records=_FAMILY, sources=('Ensembl',))
+def test_a_blinded_row_keeps_its_dbsnp_ids(tmp_path: pathlib.Path) -> None:
+    inputs = _family(tmp_path)
+    _assemble(inputs, blinded=_file(tmp_path / 'positions.json', small=[interval for interval, _ in _REACHED.values()]))
+    rows = pq.read_table(tmp_path / 'out' / 'variants.parquet').to_pylist()
+    emptied = [row for row in rows if row['clinvar_records'] is None]
+    assert len(emptied) > 10
+    assert all(row['rsids'] == [f'rs-{row["variant_id"]}'] for row in rows)
+
+
+def test_a_run_that_did_not_name_clinvar_has_no_column_to_empty(tmp_path: pathlib.Path) -> None:
+    inputs = _family(tmp_path, without_records=_FAMILY, sources=('Ensembl', 'dbSNP'))
     positions = _file(tmp_path / 'positions.json', small=[('chr1', 100, 100)])
     manifest = _assemble(inputs, blinded=positions)
     assert set(blinded_positions.VARIANTS_COLUMNS) <= set(manifest.omitted_columns)
     assert manifest.blinded_positions
+    rows = pq.read_table(tmp_path / 'out' / 'variants.parquet').to_pylist()
+    assert all(row['rsids'] for row in rows)
 
 
 def test_a_malformed_file_stops_the_step_before_it_writes_a_folder(tmp_path: pathlib.Path) -> None:

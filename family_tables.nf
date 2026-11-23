@@ -14,7 +14,7 @@
 // is annotated once, in a second Annotator run with the same catalog and sources, and each family's tables read its
 // records' annotation from it. The Annotator does not read the repeats. A run that gives a release of STRchive adds its
 // size ranges to each family's repeats table. A family whose row names a file of blinded positions gets tables that say
-// nothing of ClinVar or dbSNP at those positions, while the unions keep what they hold.
+// nothing of ClinVar at those positions, while the unions keep what they hold.
 //
 // The steps are the workflow ANNOTATE_FAMILIES, which takes the families as a channel and its settings as values, so
 // that another pipeline can include it and give it families that it makes in the same run (docs/annotation.md,
@@ -35,7 +35,7 @@ params {
     // members' repeat VCFs, one of each sequenced member, separated by semicolons. Each is bgzipped with its .tbi
     // beside it. A family gets the tables of what its row names.
     // One more column is optional, and so is its field: blinded_positions, a JSON file of the positions at which the
-    // family's tables are to say nothing of ClinVar or dbSNP (docs/annotation.md, Blinded positions). A sheet with
+    // family's tables are to say nothing of ClinVar (docs/annotation.md, Blinded positions). A sheet with
     // any other column stops the run.
     families: Path
     // The name of the families' source selection, which names the union and its folder. It is internal: where a
