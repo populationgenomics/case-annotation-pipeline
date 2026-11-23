@@ -641,6 +641,17 @@ def test_a_run_that_did_not_name_clinvar_has_no_column_of_sv_to_empty(tmp_path: 
     assert set(blinded_positions.SV_COLUMNS) <= set(manifest.sv_omitted_columns)
 
 
+def test_a_file_without_an_entry_leaves_the_folder_of_a_family_with_larger_variants_as_it_is(
+    tmp_path: pathlib.Path,
+) -> None:
+    inputs = test_family_tables._inputs(tmp_path) | _larger(tmp_path)
+    _assemble(inputs, output=tmp_path / 'plain')
+    _assemble(inputs, output=tmp_path / 'empty', blinded=_file(tmp_path / 'positions.json'))
+    # The records' annotation goes through a view of its own in a run with a file, and sv has the same bytes.
+    assert 'sv.parquet' in _folder(tmp_path / 'plain')
+    assert _folder(tmp_path / 'plain') == _folder(tmp_path / 'empty')
+
+
 # ---- a folder with a file beside one without ----
 
 
@@ -717,8 +728,9 @@ def test_a_folder_differs_from_that_of_a_run_without_the_file_in_the_emptied_val
     unlike = {path for path in was if was[path] != now[path]}
     assert unlike <= follow
     assert {path for path in follow if path[-1] == 'sha256'} <= unlike
-    # No file of the folder says that the run was given positions, and none holds the name or the checksum of their
-    # file.
+    # No file of the folder holds the word, or the name or the checksum of the positions' file, in its bytes as they
+    # are stored. Of a table that covers its column names and its key-value metadata, and the comparison above its
+    # values.
     marks = (b'blind', positions.stem.encode(), _sha256(positions).encode())
     for name, content in given.items():
         assert not any(mark in content.lower() for mark in marks), name

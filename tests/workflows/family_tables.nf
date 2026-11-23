@@ -1274,8 +1274,9 @@ EOF
 
 // What the two families' folders say of the blinded positions, which is nothing: the manifest of family A, whose row
 // names a file, has the keys of the manifest of family B, whose row names none, and neither has a word of blinded
-// positions. No file of either folder is the file of the positions or says anything of them, and family A's manifest
-// holds neither the file's name nor its checksum.
+// positions. No file of either folder is the file of the positions, and none has the word in its bytes as they are
+// stored, which of a table covers its column names and its key-value metadata. Family A's manifest holds neither the
+// file's name nor its checksum.
 process CHECK_BLINDED {
     input:
     tuple path(manifests, stageAs: 'manifest-?.json'), path(files, stageAs: 'folder-?/*')
