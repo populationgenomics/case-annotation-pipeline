@@ -301,9 +301,10 @@ def test_the_workflow_gives_the_file_of_the_blinded_positions_to_the_two_steps_t
         assert cli.parser().parse_args([command, *_stated(command)]).blinded_positions is None
         given = cli.parser().parse_args([command, *_stated(command), option, 'positions.json'])
         assert given.blinded_positions == pathlib.Path('positions.json')
-    # The manifest says whether the row named one, under the column's name, and nothing else of the file.
-    described = contract.manifest_schema()['properties'][contract.BLINDED]
-    assert described['type'] == 'boolean'
+    # The manifest has no key of the column's name, and its schema says nothing of blinded positions at any depth.
+    assert contract.BLINDED not in contract.manifest_schema()['properties']
+    assert 'blind' not in json.dumps(contract.manifest_schema()).lower()
+    assert 'blind' not in contract.files()['examples/manifest.json'].lower()
 
 
 def test_the_example_sheet_meets_the_sheets_rules() -> None:

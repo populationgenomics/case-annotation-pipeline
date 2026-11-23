@@ -861,12 +861,13 @@ Everything else stays as it is.
   They hold what the family's tables no longer say and must not reach a reader of those tables
   ([What a run publishes](#what-a-run-publishes)).
 
-A family's folder says one thing of the file: its manifest has `blinded_positions`, which is `true` for a family whose
-row named a file and `false` for every other family. The manifest records every other input file with its name, its size
-and its SHA-256, and this one with none of the three, and it holds neither the entries nor how many there are. A
-checksum or a count of a short list of positions could be matched against lists made from the family's own variants. The
-key is there because a reader of a folder has to know whether a null in these columns can stand for an emptied value,
-and it says the same for every family that has a file, also for one whose file holds no entry.
+A family's folder carries no mark of the file. It holds the same files as the folder of a run without the file, its
+tables have the same columns and the same key-value metadata, and its manifest has the same keys. The manifest's values
+differ in the sizes and the checksums of `variants` and `sv` alone, which follow from the emptied values, and a file
+without an entry leaves the whole folder as a run without a file writes it. A folder that said that positions were
+blinded would tell a reader of the tables that something is hidden, and a checksum or a count of a short list of
+positions could be matched against lists made from the family's own variants. Whoever needs to know that a family was
+blinded keeps that record with the positions file.
 
 `FAMILY_CHECK` reads the file before anything is annotated, and the run stops there for a file that is not as described
 above. An entry that reaches no row does not stop the run, since a caller can miss a variant or filter it out.

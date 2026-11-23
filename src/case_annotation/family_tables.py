@@ -39,8 +39,9 @@ A family with a child whose parents are both sequenced gets one more:
 
 A family whose sheet row names a file of blinded positions (blinded_positions) gets `variants` and `sv` with a null in
 the ClinVar columns of the rows that an entry of the file reaches. The values are emptied in the queries
-that the tables are written from, so no file of the folder holds anything of them, and the manifest says only that the
-run was given such a file.
+that the tables are written from, so no file of the folder holds anything of them. Nothing in the folder says that
+the run was given such a file: the manifest's keys, the notes and the tables' key-value metadata are those of a run
+without one.
 
 Each table is sorted by chromosome (1 to 22, X, Y, M), then position, and written with zstd in row groups of 100,000
 rows, with Bloom filters on the columns that look up a variant, a gene or a transcript. The columns whose values rarely
@@ -440,6 +441,8 @@ class TranscriptRules(pydantic.BaseModel, frozen=True, extra='forbid'):
 
 
 class FamilyManifest(pydantic.BaseModel, frozen=True, extra='forbid'):
+    # No key says whether the run was given a file of blinded positions for the family (blinded_positions), and none
+    # holds anything of such a file: a manifest that did would tell a reader of the tables that something is hidden.
     schema_version: str
     # The release of the pipeline that wrote the folder (PIPELINE_VERSION), the same in every run of one release.
     pipeline_version: str
@@ -483,10 +486,6 @@ class FamilyManifest(pydantic.BaseModel, frozen=True, extra='forbid'):
     # that upd could not assess. A family whose record names no child in either list has no upd table. An upd table
     # has no row of an assessed child without a region, and none of a child that was not assessed.
     roh_upd: roh_upd.RohUpdInfo
-    # Whether the run was given a file of blinded positions for the family (blinded_positions). Where it was, a null
-    # in a ClinVar column of variants or of sv can stand for a value that the run emptied. Nothing else
-    # of the file is recorded: not its name, its size or its checksum, and not its entries or how many they are.
-    blinded_positions: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1272,7 +1271,6 @@ def assemble(
         strchive=ranges_record,
         repeats_omitted_columns=repeats_omitted,
         roh_upd=segment_info,
-        blinded_positions=positions is not None,
     )
     (output / 'manifest.json').write_text(manifest.model_dump_json(indent=2) + '\n')
     return manifest

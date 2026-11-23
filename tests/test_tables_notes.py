@@ -200,3 +200,15 @@ def test_the_notes_stand_alone_in_a_familys_folder() -> None:
 )
 def test_a_link_out_of_the_notes_is_caught(written: str) -> None:
     assert links_out(f'{NOTES}\nSee {written}.\n')
+
+
+def says_blinded(text: str) -> bool:
+    """Whether a text says anything of blinded positions, in whatever case."""
+    return 'blind' in text.lower()
+
+
+def test_the_notes_say_nothing_of_blinded_positions() -> None:
+    # The notes go into every family's folder, and no file of a folder says anything of blinded positions
+    # (docs/annotation.md, Blinded positions).
+    assert not says_blinded(NOTES)
+    assert says_blinded(f'{NOTES}\n- A null in a ClinVar column can stand for a value at a Blinded position.\n')

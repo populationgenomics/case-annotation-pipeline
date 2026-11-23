@@ -1,6 +1,6 @@
 {
   "schema_version": "0.5.0",
-  "pipeline_version": "0.6.0",
+  "pipeline_version": "0.6.1",
   "family": "family-a",
   "members": [
     {
@@ -469,6 +469,5 @@
       }
     ],
     "upd_not_assessed": []
-  },
-  "blinded_positions": true
+  }
 }
