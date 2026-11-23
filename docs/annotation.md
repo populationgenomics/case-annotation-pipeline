@@ -473,7 +473,7 @@ flowchart LR
         FAMILY["FAMILY_TABLES<br/>both unions cut to<br/>the family, with<br/>its members' calls;<br/>the repeats;<br/>roh and upd"]
     end
 
-    OUT[("annotations/family-a/<br/>tables-0.5.0-<br/>illumina-202610/<br/>3 to 7 Parquet tables,<br/>manifest.json")]
+    OUT[("annotations/family-a/<br/>tables-0.5.1-<br/>illumina-202610/<br/>3 to 7 Parquet tables,<br/>manifest.json")]
 
     IN --> EACH --> UNION --> CUT --> OUT
     EACH --> SVUNION --> CUT
@@ -680,7 +680,7 @@ It is careful in these ways:
 ### What a run publishes
 
 The workflow publishes the union and the families' folders apart, and the tables' version and the catalog name the
-folder of each. For the tables' version `0.5.0` and catalog `202610` the folder is `tables-0.5.0-illumina-202610`. The
+folder of each. For the tables' version `0.5.1` and catalog `202610` the folder is `tables-0.5.1-illumina-202610`. The
 Annotator's output has a folder of its own, which the catalog names without the tables' version.
 
 | What                                                                                                           | Folder                                                           |
@@ -861,12 +861,13 @@ Everything else stays as it is.
   They hold what the family's tables no longer say and must not reach a reader of those tables
   ([What a run publishes](#what-a-run-publishes)).
 
-A family's folder says one thing of the file: its manifest has `blinded_positions`, which is `true` for a family whose
-row named a file and `false` for every other family. The manifest records every other input file with its name, its size
-and its SHA-256, and this one with none of the three, and it holds neither the entries nor how many there are. A
-checksum or a count of a short list of positions could be matched against lists made from the family's own variants. The
-key is there because a reader of a folder has to know whether a null in these columns can stand for an emptied value,
-and it says the same for every family that has a file, also for one whose file holds no entry.
+A family's folder carries no mark of the file. It holds the same files as the folder of a run without the file, its
+tables have the same columns and the same key-value metadata, and its manifest has the same keys. The manifest's values
+differ in the sizes and the checksums of `variants` and `sv` alone, which follow from the emptied values, and a file
+without an entry leaves the whole folder as a run without a file writes it. A folder that said that positions were
+blinded would tell a reader of the tables that something is hidden, and a checksum or a count of a short list of
+positions could be matched against lists made from the family's own variants. Whoever needs to know that a family was
+blinded keeps that record with the positions file.
 
 `FAMILY_CHECK` reads the file before anything is annotated, and the run stops there for a file that is not as described
 above. An entry that reaches no row does not stop the run, since a caller can miss a variant or filter it out.
@@ -2507,10 +2508,10 @@ sources in `runConfigs/bundle.json`, and the download's log beside it as `<assem
 
 ### Published folders
 
-For the group `g1`, the family `family-a`, the tables' version `0.5.0` and catalog `202610`:
+For the group `g1`, the family `family-a`, the tables' version `0.5.1` and catalog `202610`:
 
 ```text
-annotation-unions/g1/tables-0.5.0-illumina-202610/
+annotation-unions/g1/tables-0.5.1-illumina-202610/
     g1.vcf.gz, g1.vcf.gz.tbi     the union's sites
     tables/                      variants/ and transcripts/, each a folder of parts, and annotation.json
     echtvar_values/              echtvar_values.parquet and echtvar_values.json
@@ -2524,7 +2525,7 @@ annotation-unions/g1/illumina-202610/
     out/                         g1.json.gz and g1.sv.json.gz, each with the .jsi index that the Annotator writes
     run.json                     the run config of both Annotator runs
     g1.annotate.log, g1.sv.annotate.log
-annotations/family-a/tables-0.5.0-illumina-202610/
+annotations/family-a/tables-0.5.1-illumina-202610/
     variants.parquet
     transcripts.parquet
     roh.parquet

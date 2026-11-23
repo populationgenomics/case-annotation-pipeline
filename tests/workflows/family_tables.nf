@@ -81,9 +81,9 @@
 // models whose record names the controls on another transcript is refused, which is what a run meets whose gene models are not as their record describes them.
 // Sites that hold an allele of the exons twice are refused before the rules are applied to them.
 // Family A's row also names a file of blinded positions, family-a.blinded-positions.json, and family B's names none:
-// the file goes through FAMILY_CHECK into FAMILY_TABLES as family_tables.nf passes it, and CHECK_BLINDED reads what
-// the two manifests say of it. The run does not name ClinVar, so no table has a column that an entry could
-// empty, and tests/test_blinded_positions.py holds the rows to the entries. A file that states another assembly
+// the file goes through FAMILY_CHECK into FAMILY_TABLES as family_tables.nf passes it, and CHECK_BLINDED reads that
+// neither family's folder says anything of it. The run does not name ClinVar, so no table has a column that an entry
+// could empty, and tests/test_blinded_positions.py holds the rows to the entries. A file that states another assembly
 // (blinded-other-assembly.json) is refused by the family check.
 // Refused inputs must fail, and so must Annotator outputs without the group's annotation. The case-annotation and
 // echtvar steps run in the tools image, built first. Run with Docker from the repository's root, with this folder's
@@ -146,7 +146,7 @@ workflow {
     def blinded = file("${fixture}/family-a.blinded-positions.json")
     structural = larger.map { f, sv, cnv, repeats -> tuple(f, sv, cnv, repeats, [blinded]) }.mix(channel.of(tuple('family-b', [], [], [], [])))
 
-    checked = FAMILY_CHECK(families.join(structural), '0.6.0')
+    checked = FAMILY_CHECK(families.join(structural), '0.6.1')
     normalised = NORMALISE_FAMILY(
         families.join(checked.map { f -> [f] }).map { f, vcf, _ped, _proband -> tuple(f, vcf) },
         reference,
@@ -260,8 +260,8 @@ workflow {
         file("${fixture}/strchive.json"),
         'v0.0.0',
         '2099-01-01',
-        '0.5.0',
-        '0.6.0',
+        '0.5.1',
+        '0.6.1',
     )
     // What FAMILY_TABLES gives of a family: its id, variants, transcripts, roh, the manifest, the notes, and the
     // tables that only some families have.
@@ -354,19 +354,19 @@ workflow {
     )
     other_proband = FAMILY_CHECK_PROBAND_REFUSED(
         channel.of(tuple('family-a', file("${fixture}/family-a.vcf"), file("${fixture}/family-a.ped"), 'B3', [], [], [], [])),
-        '0.6.0',
+        '0.6.1',
     )
     two_repeats = FAMILY_CHECK_REPEATS_REFUSED(
         channel.of(tuple('family-a', file("${fixture}/family-a.vcf"), file("${fixture}/family-a.ped"), 'A3', [], [], [file("${fixture}/A1.repeats.vcf"), file("${fixture}/A2.repeats.vcf")], [])),
-        '0.6.0',
+        '0.6.1',
     )
     other_samples = FAMILY_CHECK_SV_SAMPLES_REFUSED(
         channel.of(tuple('family-b', file("${fixture}/family-b.vcf"), file("${fixture}/family-b.ped"), '', [file("${fixture}/family-a.sv.vcf")], [], [], [])),
-        '0.6.0',
+        '0.6.1',
     )
     other_assembly = FAMILY_CHECK_BLINDED_REFUSED(
         channel.of(tuple('family-a', file("${fixture}/family-a.vcf"), file("${fixture}/family-a.ped"), 'A3', [], [], [], [file("${fixture}/blinded-other-assembly.json")])),
-        '0.6.0',
+        '0.6.1',
     )
     sv_mismatch = NORMALISE_SV_REF_MISMATCH_REFUSED(
         channel.of(tuple('sv-mismatch', [file("${fixture}/sv-ref-mismatch.vcf")])),
@@ -1272,9 +1272,11 @@ EOF
     """
 }
 
-// What the two families' folders say of the blinded positions: family A's manifest says that the run was given a file
-// and family B's that it was given none, with the same keys. No file of either folder is the file of the positions, and
-// family A's manifest holds neither the file's name nor its checksum.
+// What the two families' folders say of the blinded positions, which is nothing: the manifest of family A, whose row
+// names a file, has the keys of the manifest of family B, whose row names none, and neither has a word of blinded
+// positions. No file of either folder is the file of the positions, and none has the word in its bytes as they are
+// stored, which of a table covers its column names and its key-value metadata. Family A's manifest holds neither the
+// file's name nor its checksum.
 process CHECK_BLINDED {
     input:
     tuple path(manifests, stageAs: 'manifest-?.json'), path(files, stageAs: 'folder-?/*')
@@ -1290,8 +1292,8 @@ import pathlib
 texts = [pathlib.Path(name).read_text() for name in ('manifest-1.json', 'manifest-2.json')]
 manifests = [json.loads(text) for text in texts]
 assert [m['family'] for m in manifests] == ['family-a', 'family-b'], manifests
-assert [m['blinded_positions'] for m in manifests] == [True, False], manifests
 assert manifests[0].keys() == manifests[1].keys()
+assert not any('blind' in text.lower() for text in texts), texts
 held = pathlib.Path('${blinded}').read_bytes()
 assert json.loads(held)['small'], held
 for text in texts:
@@ -1300,6 +1302,7 @@ files = sorted(path for path in pathlib.Path('.').glob('folder-*/*'))
 assert len(files) > 8, files
 assert all(path.suffix in ('.parquet', '.md') for path in files), files
 assert all(path.read_bytes() != held for path in files), files
+assert not any(b'blind' in path.read_bytes().lower() for path in files), files
 EOF
     """
 }
@@ -1342,7 +1345,7 @@ manifest = json.load(open('${manifest}'))
 rows = {t['table']: t['rows'] for t in manifest['tables']}
 assert rows == {'variants': 11, 'transcripts': 11, 'sv': 10, 'sv_transcripts': 11, 'repeats': 2, 'roh': 0, 'upd': 0}, rows
 assert manifest['sv_callers'] == ['sv', 'cnv'], manifest
-assert manifest['schema_version'] == '0.5.0', manifest
+assert manifest['schema_version'] == '0.5.1', manifest
 assert manifest['sv_annotation']['sources'] == manifest['annotation']['sources'] == ['Ensembl', 'gnomad'], manifest
 table = pq.read_table('sv.parquet')
 assert table.column_names[:4] == ['chrom', 'pos', 'end_pos', 'sv_id'], table.column_names

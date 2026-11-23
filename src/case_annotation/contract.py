@@ -40,8 +40,7 @@ DATE = strchive.DATE.pattern
 SEPARATOR = ';'
 INDEX_SUFFIX = '.tbi'
 
-# The sheet's column that names the file of a family's blinded positions, and the key under which the family's
-# manifest says whether its row named one.
+# The sheet's column that names the file of a family's blinded positions. The family's manifest has no key of it.
 BLINDED = 'blinded_positions'
 
 # The sheet's columns that give a family each table of its larger variants: a row that names a VCF in one of them gets
@@ -596,7 +595,6 @@ def example_manifest() -> family_tables.FamilyManifest:
             upd_children=(roh_upd.Trio(child=child, mother=mother, father=father),),
             upd_not_assessed=(),
         ),
-        blinded_positions=bool(_EXAMPLE_ROWS[0][BLINDED]),
     )
 
 

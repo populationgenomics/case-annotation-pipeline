@@ -187,8 +187,8 @@ of one of its releases.
 ### Blinded positions
 
 Positions that a run is given for one family, at which the family's tables hold a null in the ClinVar columns, as for a
-variant without a record. The unions keep the values. A family's manifest says whether the run was given such positions,
-and nothing says where they are ([Blinded positions](annotation.md#blinded-positions)).
+variant without a record. The unions keep the values. Nothing in the family's folder says that the run was given such
+positions, or where they are ([Blinded positions](annotation.md#blinded-positions)).
 
 ### STRchive
 

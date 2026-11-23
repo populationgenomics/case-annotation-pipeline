@@ -2,7 +2,8 @@
 
 A run can name a file of such positions for a family. The family's tables then hold a null in the ClinVar columns of
 the rows in reach of an entry, as a row without a record holds one, so that a reader of the tables cannot tell a
-blinded row from a row that never had a record. The union's tables are not changed.
+blinded row from a row that never had a record. No file of the family's folder says that the run named such a file.
+The union's tables are not changed.
 
 The file is a JSON object that states its assembly and its coordinates and holds two lists of intervals:
 

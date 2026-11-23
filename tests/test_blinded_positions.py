@@ -335,6 +335,11 @@ def _everything(path: pathlib.Path) -> str:
     return f'{file.read().to_pylist()} {file.schema_arrow.metadata} {file.metadata.to_dict()}'
 
 
+def _folder(path: pathlib.Path) -> dict[str, bytes]:
+    """The files of a family's folder, by name, each with its bytes."""
+    return {file.name: file.read_bytes() for file in path.iterdir()}
+
+
 def test_a_blinded_table_is_the_file_of_a_union_that_never_had_the_records(tmp_path: pathlib.Path) -> None:
     entries = [interval for interval, _reached in _REACHED.values()]
     reached = set().union(*(reached for _interval, reached in _REACHED.values()))
@@ -355,21 +360,19 @@ def test_a_blinded_table_is_the_file_of_a_union_that_never_had_the_records(tmp_p
         assert f'rs-{allele}' in read
     for allele in kept:
         assert all(tag in read for tag in (f'VCV-{allele}', f'VCV-other-{allele}', f'rs-{allele}', f'pmid-{allele}'))
-    # The two manifests differ in the one key that says a file was given.
-    differing = {key for key in type(blinded).model_fields if getattr(blinded, key) != getattr(never, key)}
-    assert differing == {'blinded_positions'}
-    assert (blinded.blinded_positions, never.blinded_positions) == (True, False)
+    # The two manifests are the same, key for key.
+    assert blinded == never
 
 
-def test_a_file_without_an_entry_leaves_the_tables_as_a_run_without_a_file_writes_them(tmp_path: pathlib.Path) -> None:
+def test_a_file_without_an_entry_leaves_the_folder_as_a_run_without_a_file_writes_it(tmp_path: pathlib.Path) -> None:
     inputs = _family(tmp_path)
     plain = _assemble(inputs, output=tmp_path / 'plain')
     empty = _assemble(inputs, output=tmp_path / 'empty', blinded=_file(tmp_path / 'positions.json'))
-    assert plain.tables == empty.tables
-    assert (plain.blinded_positions, empty.blinded_positions) == (False, True)
+    assert plain == empty
+    assert _folder(tmp_path / 'plain') == _folder(tmp_path / 'empty')
 
 
-def test_the_manifest_holds_nothing_of_the_file_but_that_one_was_given(tmp_path: pathlib.Path) -> None:
+def test_the_manifest_holds_nothing_of_the_file(tmp_path: pathlib.Path) -> None:
     inputs = _family(tmp_path)
     one = _file(tmp_path / 'one-entry.json', small=[('chr1', 100, 100)])
     three = _file(
@@ -383,7 +386,6 @@ def test_the_manifest_holds_nothing_of_the_file_but_that_one_was_given(tmp_path:
     # Two files that empty the same rows give the same manifest: nothing in it depends on the file's name, on its
     # size, on its bytes or on how many entries it holds.
     assert manifests[0] == manifests[1]
-    assert json.loads(manifests[0])['blinded_positions'] is True
     for path in (one, three):
         assert path.name not in manifests[1]
         assert path.stem not in manifests[1]
@@ -440,7 +442,6 @@ def test_a_run_that_did_not_name_clinvar_has_no_column_to_empty(tmp_path: pathli
     positions = _file(tmp_path / 'positions.json', small=[('chr1', 100, 100)])
     manifest = _assemble(inputs, blinded=positions)
     assert set(blinded_positions.VARIANTS_COLUMNS) <= set(manifest.omitted_columns)
-    assert manifest.blinded_positions
     rows = pq.read_table(tmp_path / 'out' / 'variants.parquet').to_pylist()
     assert all(row['rsids'] for row in rows)
 
@@ -640,6 +641,101 @@ def test_a_run_that_did_not_name_clinvar_has_no_column_of_sv_to_empty(tmp_path: 
     assert set(blinded_positions.SV_COLUMNS) <= set(manifest.sv_omitted_columns)
 
 
+def test_a_file_without_an_entry_leaves_the_folder_of_a_family_with_larger_variants_as_it_is(
+    tmp_path: pathlib.Path,
+) -> None:
+    inputs = test_family_tables._inputs(tmp_path) | _larger(tmp_path)
+    _assemble(inputs, output=tmp_path / 'plain')
+    _assemble(inputs, output=tmp_path / 'empty', blinded=_file(tmp_path / 'positions.json'))
+    # The records' annotation goes through a view of its own in a run with a file, and sv has the same bytes.
+    assert 'sv.parquet' in _folder(tmp_path / 'plain')
+    assert _folder(tmp_path / 'plain') == _folder(tmp_path / 'empty')
+
+
+# ---- a folder with a file beside one without ----
+
+
+def _values(document: object, path: tuple[str | int, ...] = ()) -> dict[tuple[str | int, ...], object]:
+    """Every value of a JSON document, by the keys and the places in lists that lead to it.
+
+    An object and a list stand under their own path too, as the name of their type, so that an empty one differs
+    from a null.
+    """
+    if isinstance(document, dict):
+        children: list[tuple[str | int, object]] = list(document.items())
+    elif isinstance(document, list):
+        children = list(enumerate(document))
+    else:
+        return {path: document}
+    found: dict[tuple[str | int, ...], object] = {path: type(document).__name__}
+    for key, child in children:
+        found |= _values(child, (*path, key))
+    return found
+
+
+def test_a_folder_differs_from_that_of_a_run_without_the_file_in_the_emptied_values_alone(
+    tmp_path: pathlib.Path,
+) -> None:
+    inputs = test_family_tables._inputs(tmp_path) | _larger(tmp_path)
+    positions = _file(
+        tmp_path / 'given-positions.json',
+        small=[('chr1', 5, 5), ('chr10', 7, 7)],
+        structural=[('chr1', 1001, 5000)],
+    )
+    _assemble(inputs, output=tmp_path / 'without')
+    _assemble(inputs, output=tmp_path / 'with', blinded=positions)
+    without, given = _folder(tmp_path / 'without'), _folder(tmp_path / 'with')
+    # The two tables that an entry empties values of, each with its key, the columns that an entry empties and the
+    # rows that the entries reach.
+    emptied = {
+        'variants': ('variant_id', blinded_positions.VARIANTS_COLUMNS, {'chr1-5-C-T', 'chr10-7-G-GA'}),
+        'sv': ('sv_id', blinded_positions.SV_COLUMNS, {'inv:DEL:1', 'inv:INS:1'}),
+    }
+    # The same files, and every file but the two tables and the manifest with the same bytes, the notes among them.
+    assert without.keys() == given.keys()
+    changed = {'manifest.json', *(f'{table}.parquet' for table in emptied)}
+    assert {'tables.md', 'transcripts.parquet', 'sv_transcripts.parquet', 'repeats.parquet'} <= without.keys() - changed
+    assert {name for name in without if without[name] != given[name]} == changed
+    for table, (key, columns, reached) in emptied.items():
+        before, after = (pq.ParquetFile(tmp_path / run / f'{table}.parquet') for run in ('without', 'with'))
+        # The same columns, of the same types, and the same metadata, the file's own and the schema's.
+        assert after.schema_arrow.equals(before.schema_arrow, check_metadata=True)
+        assert after.metadata.metadata == before.metadata.metadata
+        assert after.metadata.num_row_groups == before.metadata.num_row_groups
+        rows, read = before.read().to_pylist(), after.read().to_pylist()
+        assert [row[key] for row in read] == [row[key] for row in rows]
+        differing = {
+            (row[key], column)
+            for row, other in zip(rows, read, strict=True)
+            for column in row
+            if row[column] != other[column]
+        }
+        # The values that differ are the ones that a reached row held in the columns that an entry empties, and
+        # each is a null with the file.
+        held = {
+            (row[key], column) for row in rows if row[key] in reached for column in columns if row[column] is not None
+        }
+        assert differing == held
+        assert {row for row, _column in differing} == reached
+        assert all(row[column] is None for row in read for column in columns if row[key] in reached)
+    # The manifests have the same keys at every level and lists of the same lengths. Their values differ in the size
+    # and the checksum of the two tables alone, which follow from the emptied values.
+    manifest = json.loads(without['manifest.json'])
+    was, now = _values(manifest), _values(json.loads(given['manifest.json']))
+    assert was.keys() == now.keys()
+    places = {listed['table']: place for place, listed in enumerate(manifest['tables'])}
+    follow = {('tables', places[table], key) for table in emptied for key in ('bytes', 'sha256')}
+    unlike = {path for path in was if was[path] != now[path]}
+    assert unlike <= follow
+    assert {path for path in follow if path[-1] == 'sha256'} <= unlike
+    # No file of the folder holds the word, or the name or the checksum of the positions' file, in its bytes as they
+    # are stored. Of a table that covers its column names and its key-value metadata, and the comparison above its
+    # values.
+    marks = (b'blind', positions.stem.encode(), _sha256(positions).encode())
+    for name, content in given.items():
+        assert not any(mark in content.lower() for mark in marks), name
+
+
 # ---- the commands ----
 
 
@@ -651,7 +747,6 @@ def test_the_commands_take_the_file_and_the_check_refuses_one_that_is_malformed(
     cli.main([*check, '--blinded-positions', str(positions)])
     tables = [*test_family_tables._tables_command(inputs), '--proband', 'S3', '--blinded-positions', str(positions)]
     cli.main(tables)
-    assert json.loads((inputs['output'] / 'manifest.json').read_text())['blinded_positions'] is True
     assert _emptied(inputs['output'] / 'variants.parquet', 'variant_id', blinded_positions.VARIANTS_COLUMNS)
     other = tmp_path / 'other.json'
     other.write_text(json.dumps(_with('assembly', 'GRCh37')))
