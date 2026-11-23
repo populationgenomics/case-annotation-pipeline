@@ -191,12 +191,12 @@ jobs:
           # table of its runs of homozygosity among them. tests/test_contract.py holds the three folders to the
           # contract's.
           results=results
-          union=annotation-unions/stub-group/tables-0.5.0-illumina-202610
+          union=annotation-unions/stub-group/tables-0.5.1-illumina-202610
           annotation=annotation-unions/stub-group/illumina-202610
           for f in "${union}"/{stub-group.vcf.gz,stub-group.vcf.gz.tbi,tables,echtvar_values,joined_values,transcript_rules} \
             "${annotation}"/{run.json,stub-group.annotate.log,out/stub-group.json.gz} \
-            annotations/fam-{a,b}/tables-0.5.0-illumina-202610/{variants,transcripts,roh}.parquet \
-            annotations/fam-{a,b}/tables-0.5.0-illumina-202610/manifest.json; do
+            annotations/fam-{a,b}/tables-0.5.1-illumina-202610/{variants,transcripts,roh}.parquet \
+            annotations/fam-{a,b}/tables-0.5.1-illumina-202610/manifest.json; do
             test -L "${results}/${f}" || { echo "not published: ${f}" >&2; exit 1; }
           done
           # A stub reads no pedigree, so no family of a stub run gets the table of the regions of uniparental disomy.
@@ -206,7 +206,7 @@ jobs:
           fi
           # Every family's folder holds the notes on its tables beside the manifest.
           for family in fam-a fam-b; do
-            test -L "${results}/annotations/${family}/tables-0.5.0-illumina-202610/tables.md" ||
+            test -L "${results}/annotations/${family}/tables-0.5.1-illumina-202610/tables.md" ||
               { echo "not published: tables.md of ${family}" >&2; exit 1; }
           done
           if find "${results}/annotations" -name 'stub-group*' | grep -q .; then
@@ -256,7 +256,7 @@ jobs:
             cat reuse.log
             exit 1
           fi
-          test -L stub/reuse/annotations/fam-a/tables-0.5.0-illumina-202610/manifest.json
+          test -L stub/reuse/annotations/fam-a/tables-0.5.1-illumina-202610/manifest.json
           test -L "stub/reuse/${union}/echtvar_values"
           test -L "stub/reuse/${union}/transcript_rules"
           test ! -e "stub/reuse/${annotation}"
@@ -273,7 +273,7 @@ jobs:
             grep -qF 'ANNOTATE_FAMILIES:ECHTVAR_VALUES (stub-group)' "${run}.log" ||
               { echo "did not run: ECHTVAR_VALUES" >&2; cat "${run}.log"; exit 1; }
             test -L "stub/${run}/${union}/echtvar_values"
-            test -L "stub/${run}/annotations/fam-a/tables-0.5.0-illumina-202610/variants.parquet"
+            test -L "stub/${run}/annotations/fam-a/tables-0.5.1-illumina-202610/variants.parquet"
           done
           # A run names any of the eight files that are joined to the alleles: here all of them, and then
           # APARENT2's alone. The step that joins them runs in each, as it does in a run that names none.
@@ -289,7 +289,7 @@ jobs:
             grep -qF 'ANNOTATE_FAMILIES:JOINED_VALUES (stub-group)' "${run}.log" ||
               { echo "did not run: JOINED_VALUES" >&2; cat "${run}.log"; exit 1; }
             test -L "stub/${run}/${union}/joined_values"
-            test -L "stub/${run}/annotations/fam-a/tables-0.5.0-illumina-202610/variants.parquet"
+            test -L "stub/${run}/annotations/fam-a/tables-0.5.1-illumina-202610/variants.parquet"
           done
           # A family whose row names the VCFs of its larger variants gets their tables beside the others, in the same
           # folder, and its structural variants are normalised; a family whose row names none gets no such table. The
@@ -309,12 +309,12 @@ jobs:
             exit 1
           fi
           for table in variants transcripts roh sv sv_transcripts repeats; do
-            test -L "stub/larger/annotations/fam-a/tables-0.5.0-illumina-202610/${table}.parquet" ||
+            test -L "stub/larger/annotations/fam-a/tables-0.5.1-illumina-202610/${table}.parquet" ||
               { echo "not published: ${table}" >&2; exit 1; }
           done
-          test -L stub/larger/annotations/fam-b/tables-0.5.0-illumina-202610/variants.parquet
+          test -L stub/larger/annotations/fam-b/tables-0.5.1-illumina-202610/variants.parquet
           for table in sv sv_transcripts repeats; do
-            test ! -e "stub/larger/annotations/fam-b/tables-0.5.0-illumina-202610/${table}.parquet"
+            test ! -e "stub/larger/annotations/fam-b/tables-0.5.1-illumina-202610/${table}.parquet"
           done
           for f in stub-group.sv.vcf.gz stub-group.sv.vcf.gz.tbi stub-group.sv.map.parquet sv_annotation; do
             test -L "stub/larger/${union}/${f}" || { echo "not published: ${f}" >&2; exit 1; }
@@ -335,15 +335,15 @@ jobs:
             stub-group.sv.annotate.log; do
             test -L "stub/larger-annotated/${annotation}/${f}" || { echo "not published: ${f}" >&2; exit 1; }
           done
-          test -L stub/larger-annotated/annotations/fam-a/tables-0.5.0-illumina-202610/sv_transcripts.parquet
+          test -L stub/larger-annotated/annotations/fam-a/tables-0.5.1-illumina-202610/sv_transcripts.parquet
           # A run gives a release of STRchive with its name and its date, for the repeats tables of its families.
           strchive=(--strchive /src/stub/strchive.json --strchive_release v0.0.0 --strchive_release_date 2099-01-01)
           family_run --families /src/stub/larger.csv --annotated /src/stub/annotated "${strchive[@]}" \
             --output_dir /src/stub/strchive > strchive.log
           grep -qF 'ANNOTATE_FAMILIES:FAMILY_TABLES (fam-a)' strchive.log ||
             { echo "did not run: FAMILY_TABLES" >&2; cat strchive.log; exit 1; }
-          test -L stub/strchive/annotations/fam-a/tables-0.5.0-illumina-202610/repeats.parquet
-          test -L stub/strchive/annotations/fam-b/tables-0.5.0-illumina-202610/manifest.json
+          test -L stub/strchive/annotations/fam-a/tables-0.5.1-illumina-202610/repeats.parquet
+          test -L stub/strchive/annotations/fam-b/tables-0.5.1-illumina-202610/manifest.json
           # A family whose row names a file of blinded positions and one whose row names none get their tables in one
           # run, and the file is published with neither family's tables nor with the union.
           family_run --families /src/stub/blinded.csv --annotated /src/stub/annotated --output_dir /src/stub/positions \
@@ -351,7 +351,7 @@ jobs:
           for family in fam-a fam-b; do
             grep -qF "ANNOTATE_FAMILIES:FAMILY_TABLES (${family})" blinded.log ||
               { echo "did not run: FAMILY_TABLES (${family})" >&2; cat blinded.log; exit 1; }
-            test -L "stub/positions/annotations/${family}/tables-0.5.0-illumina-202610/variants.parquet"
+            test -L "stub/positions/annotations/${family}/tables-0.5.1-illumina-202610/variants.parquet"
           done
           if find stub/positions -name '*blinded*' | grep -q .; then
             echo 'the file of the blinded positions is published' >&2
@@ -465,11 +465,11 @@ jobs:
             exit 1
           fi
           # What it publishes lies where a run of family_tables.nf publishes it.
-          union=annotation-unions/stub-group/tables-0.5.0-illumina-202610
+          union=annotation-unions/stub-group/tables-0.5.1-illumina-202610
           for f in "${union}"/{stub-group.vcf.gz,stub-group.vcf.gz.tbi,tables,echtvar_values,joined_values,transcript_rules} \
             "${union}"/{stub-group.sv.vcf.gz,stub-group.sv.map.parquet,sv_annotation} \
-            annotations/fam-c/tables-0.5.0-illumina-202610/{variants,transcripts,roh,sv,sv_transcripts}.parquet \
-            annotations/fam-c/tables-0.5.0-illumina-202610/{manifest.json,tables.md}; do
+            annotations/fam-c/tables-0.5.1-illumina-202610/{variants,transcripts,roh,sv,sv_transcripts}.parquet \
+            annotations/fam-c/tables-0.5.1-illumina-202610/{manifest.json,tables.md}; do
             test -L "stub/included/${f}" || { echo "not published: ${f}" >&2; exit 1; }
           done
           # Refused, each with its own message: a family id that is not a folder name; a family without a proband,

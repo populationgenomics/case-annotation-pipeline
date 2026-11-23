@@ -1,4 +1,4 @@
-# Family tables `0.5.0`: what the tables do not show
+# Family tables `0.5.1`: what the tables do not show
 
 Only the manifest says who the proband is.
 

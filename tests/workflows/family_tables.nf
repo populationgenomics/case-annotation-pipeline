@@ -260,7 +260,7 @@ workflow {
         file("${fixture}/strchive.json"),
         'v0.0.0',
         '2099-01-01',
-        '0.5.0',
+        '0.5.1',
         '0.6.1',
     )
     // What FAMILY_TABLES gives of a family: its id, variants, transcripts, roh, the manifest, the notes, and the
@@ -1344,7 +1344,7 @@ manifest = json.load(open('${manifest}'))
 rows = {t['table']: t['rows'] for t in manifest['tables']}
 assert rows == {'variants': 11, 'transcripts': 11, 'sv': 10, 'sv_transcripts': 11, 'repeats': 2, 'roh': 0, 'upd': 0}, rows
 assert manifest['sv_callers'] == ['sv', 'cnv'], manifest
-assert manifest['schema_version'] == '0.5.0', manifest
+assert manifest['schema_version'] == '0.5.1', manifest
 assert manifest['sv_annotation']['sources'] == manifest['annotation']['sources'] == ['Ensembl', 'gnomad'], manifest
 table = pq.read_table('sv.parquet')
 assert table.column_names[:4] == ['chrom', 'pos', 'end_pos', 'sv_id'], table.column_names

@@ -1,5 +1,5 @@
 {
-  "tables_version": "0.5.0",
+  "tables_version": "0.5.1",
   "tables": [
     {
       "name": "variants",

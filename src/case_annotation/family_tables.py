@@ -82,10 +82,11 @@ from case_annotation import (
 )
 
 # The version of these tables' layout: it names the output folder, and changes whenever a column is renamed, retyped
-# or removed, or its meaning changes. A table, a column or a manifest key that is added leaves it, because a reader of
-# the Parquet tables by column name, or of the manifest as plain JSON, reads what it knew as before, and the manifest
-# lists the tables that a folder holds. A reader that validates the manifest with an earlier build's FamilyManifest,
-# which forbids unknown keys, refuses the new key; nothing in this repository reads a manifest back.
+# or removed, or its meaning changes, and whenever a key of the manifest is renamed, retyped or removed. A table, a
+# column or a manifest key that is added leaves it, because a reader of the Parquet tables by column name, or of the
+# manifest as plain JSON, reads what it knew as before, and the manifest lists the tables that a folder holds. A reader
+# that validates the manifest with an earlier build's FamilyManifest, which forbids unknown keys, refuses the new key;
+# nothing in this repository reads a manifest back.
 # It is the one line of tables-version.txt in this package, so that a caller outside Python can read the same value.
 SCHEMA_VERSION = importlib.resources.files('case_annotation').joinpath('tables-version.txt').read_text().strip()
 # The notes on the tables (tables.md in this package): what a reader of the tables cannot see in them and gets wrong
