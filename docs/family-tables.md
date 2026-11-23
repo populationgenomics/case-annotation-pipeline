@@ -1630,6 +1630,10 @@ A query on these columns has to allow for the following.
   with `list_filter` or with `unnest`, as above.
 - `clinvar_last_updated`, `clinvar_pubmed_ids` and `clinvar_other_alleles` are `clinvar_` columns, so a run without
   ClinVar leaves them out with the others.
+- In a folder whose manifest has `blinded_positions` as `true`, a null in a `clinvar_` column can stand for a value that
+  the run emptied, and nothing in the folder says in which rows ([Blinded positions](annotation.md#blinded-positions)).
+  The absence of a record is then no evidence that ClinVar has none. In a folder whose manifest has `false`, a null
+  means that the run's version of the source holds no record.
 
 The following was measured on the Annotator's output for one whole genome with catalog `202610`. Illumina states none of
 it except the rule for the flags.
@@ -1747,7 +1751,8 @@ by_rsid = con.sql(
 
 As for `hgnc_ids`, the query reads the whole column, which is larger here and takes about a quarter of a second
 ([How fast](#how-fast)). A family whose run did not name dbSNP has no `rsids` column, and the query fails: the manifest
-lists the column under `omitted_columns`.
+lists the column under `omitted_columns`. The column is the same in a folder whose manifest has `blinded_positions` as
+`true`: an allele keeps its ids at a blinded position ([Blinded positions](annotation.md#blinded-positions)).
 
 ### Rare damaging variants in the proband
 
@@ -2811,7 +2816,9 @@ clinvar_overlapping = con.sql(
 
 A record at an overlap near 1 is nearly this variant, and one near 0.5 is a variant twice or half its size. A record of
 a small variant's own allele has no overlap and comes last. In a folder whose run did not name ClinVar, `sv` has no
-`clinvar_` column and the query fails, as a query on `variants` does.
+`clinvar_` column and the query fails, as a query on `variants` does. In a folder whose manifest has `blinded_positions`
+as `true`, a record can lack the ClinVar records that overlap it, as an allele of `variants` can lack its own
+([Blinded positions](annotation.md#blinded-positions)).
 
 ### Recessive: a small variant and a deletion in one gene
 
@@ -3413,6 +3420,7 @@ Every manifest holds every key below, also the manifest of a family without the 
 | `sv_omitted_columns`          | the columns of `sv` that the run left out because it did not name their dated source; an empty list in a family without `sv`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `strchive`                    | the release of STRchive that the `strchive_` columns of `repeats` come from ([STRchive's ranges of the repeats](annotation.md#strchives-ranges-of-the-repeats)): its `file` name, its size in `bytes` and its `sha256` as the run read it, the `release` and its `release_date` as the run stated them, since the file holds neither, and the rows of `repeats` with a locus of STRchive as `matched_repeats` and those without one as `unmatched_repeats`; null in a run that was given no release, and in a family without `repeats`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `roh_upd`                     | what found the rows of `roh` and `upd` ([Runs of homozygosity and uniparental disomy](annotation.md#runs-of-homozygosity-and-uniparental-disomy)): the versions of bcftools and of upd, the commit of upd's repository that upd was installed from, the commands that prepared the VCF both tools read and the two tools' own commands, the archive that gave each site its frequency, in the form of `gnomad_joint` with the one field that was read, the number of `sites` in the prepared VCF, the members that `roh` is of as `roh_members`, the children that upd assessed as `upd_children`, each with its mother and father, and as `upd_not_assessed` the children with both parents sequenced that upd was not run for, each with its mother, its father and the `reason`, which is `no informative site`; both lists are empty in a family without `upd`                                                                                                                                                                               |
+| `blinded_positions`           | whether the family's row named a file of blinded positions ([Blinded positions](annotation.md#blinded-positions)): `true` or `false`. Where it is `true`, a null in a `clinvar_` column of `variants` or of `sv` can stand for a value that the run emptied. The manifest holds nothing else of the file: not its name, its size or its checksum, and not its entries or how many there are                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `repeats_omitted_columns`     | the columns of `repeats` that the run left out because it was given no release of STRchive; an empty list in a family without `repeats`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 The reasons, under `annotation.omitted`, follow the groups of sources in [Dated sources](annotation.md#dated-sources):

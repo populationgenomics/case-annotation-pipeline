@@ -184,6 +184,12 @@ it, and a family's manifest records the versions that the run pinned and the sou
 ([Dated sources](annotation.md#dated-sources)). STRchive is a dated source too, which a run includes by giving the file
 of one of its releases.
 
+### Blinded positions
+
+Positions that a run is given for one family, at which the family's tables hold a null in the ClinVar columns, as for a
+variant without a record. The unions keep the values. A family's manifest says whether the run was given such positions,
+and nothing says where they are ([Blinded positions](annotation.md#blinded-positions)).
+
 ### STRchive
 
 A curated, public catalogue of the tandem repeats that are linked to a disease, with the sizes at which each repeat

@@ -68,6 +68,18 @@ def _structural(args: argparse.Namespace) -> family_tables.Structural:
     return family_tables.Structural(sv_vcf=args.sv_vcf, cnv_vcf=args.cnv_vcf, repeat_vcfs=tuple(args.repeat_vcf))
 
 
+def _blinded_argument(parser: argparse.ArgumentParser) -> None:
+    """The file of a family's blinded positions as the run's sheet names it, which is optional."""
+    parser.add_argument(
+        '--blinded-positions',
+        type=pathlib.Path,
+        help=(
+            "a JSON file of the positions at which the family's tables are to say nothing of ClinVar: its "
+            'assembly, its coordinates, and the intervals of small variants and of structural variants'
+        ),
+    )
+
+
 def _family_check_arguments(parser: argparse.ArgumentParser) -> None:
     path = pathlib.Path
     parser.add_argument('--family', required=True, help="the family's id, which its PED file must hold")
@@ -83,6 +95,7 @@ def _family_check_arguments(parser: argparse.ArgumentParser) -> None:
     )
     _proband_arguments(parser)
     _structural_arguments(parser)
+    _blinded_argument(parser)
     _release_argument(parser)
 
 
@@ -112,7 +125,9 @@ def _require_release(given: str) -> None:
 
 def _family_check(args: argparse.Namespace) -> None:
     _require_release(args.pipeline_version)
-    family_tables.check_inputs(args.family, args.ped, args.vcf, args.proband, _structural(args))
+    family_tables.check_inputs(
+        args.family, args.ped, args.vcf, args.proband, _structural(args), blinded=args.blinded_positions
+    )
 
 
 def _annotation_tables_arguments(parser: argparse.ArgumentParser) -> None:
@@ -454,6 +469,7 @@ def _family_tables_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--vcf', type=path, required=True, help="the family's normalised VCF, with its index beside it")
     _proband_arguments(parser)
     _structural_arguments(parser)
+    _blinded_argument(parser)
     parser.add_argument(
         '--sv-alleles',
         type=path,
@@ -541,6 +557,7 @@ def _family_tables(args: argparse.Namespace) -> None:
         sv_alleles=args.sv_alleles,
         sv_annotated=sv_annotated,
         ranges=ranges,
+        blinded=args.blinded_positions,
         scratch=args.scratch,
     )
 
@@ -751,7 +768,8 @@ _SUBCOMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Ca
             "of the variants table (it is no allele column's name and no other sample's id, whatever the case of its "
             'letters, and no column of the sv or the repeats table either), that the proband the run names for the '
             'family, if any, is an individual of the PED file and a sample of the VCF, and that the VCFs of its '
-            "structural variants, copy numbers and repeats hold the family's samples, before any annotation runs"
+            "structural variants, copy numbers and repeats hold the family's samples, and that the file of its "
+            'blinded positions, if the run names one, is such a file, before any annotation runs'
         ),
         _family_check_arguments,
         _family_check,
@@ -861,7 +879,8 @@ _SUBCOMMANDS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Ca
             "structural variants and, where the run gives a release of STRchive, STRchive's size ranges of the "
             'repeats, its roh table and, for a family with a child whose parents are both sequenced, its upd table '
             "from roh-upd's output, its manifest with the roles of the proband the run names and of its parents, and "
-            'a copy of the notes on the tables (tables.md)'
+            'a copy of the notes on the tables (tables.md); with a file of blinded positions, variants and sv hold '
+            'nothing of ClinVar in the rows that an entry of the file reaches'
         ),
         _family_tables_arguments,
         _family_tables,

@@ -200,6 +200,13 @@ def test_the_sheets_columns_are_the_ones_the_workflow_reads() -> None:
     assert re.search(
         r'def unknown = rows\[0\]\.keySet\(\) - sheetColumns\(\)\n\s+if \(unknown\) \{\n\s+error\(', FAMILY_TABLES
     )
+    # A column is there once: a row would hold the last of two values under one name.
+    assert 'def lines = params.families.splitCsv()\n' in FAMILY_TABLES
+    assert 'def repeated = lines[0].countBy { name -> name }' in FAMILY_TABLES
+    assert 'if (repeated) {\n        error(' in FAMILY_TABLES
+    # A row has no field past the header's columns, which a read by the header's names would drop.
+    assert 'def longer = lines.findAll { fields -> fields.size() > lines[0].size() }' in FAMILY_TABLES
+    assert 'if (longer) {\n        error(' in FAMILY_TABLES
     read = set(re.findall(r'\brow\.(\w+)', FAMILY_TABLES)) - {'containsKey'}
     assert read == set(COLUMNS)
     assert (SHEET['format'], SHEET['header']) == ('csv', True)
@@ -238,18 +245,26 @@ def test_an_empty_proband_reaches_the_tools_as_no_proband() -> None:
     for command in ('family-check', 'family-tables'):
         stated = f'{command} --family ${{family}} --ped ${{ped}} --vcf ${{vcf}} ${{probandOption(proband)}}'
         assert f'case-annotation {stated}' in FAMILY_MODULES
-        options = ['--family', 'f', '--ped', 'p', '--vcf', 'v', '--no-proband', '--pipeline-version', 'p']
-        if command == 'family-tables':
-            options += ['--annotation', 'a', '--echtvar-values', 'e', '--joined-values', 'j', '--transcript-rules', 'v']
-            options += ['--roh-upd', 'r']
-            options += ['--schema-version', 's', '--output', 'o']
-        assert cli.parser().parse_args([command, *options]).proband is None
+        assert cli.parser().parse_args([command, *_stated(command)]).proband is None
+
+
+def _stated(command: str) -> list[str]:
+    """The options that one of the two commands of a family needs, for a family without a proband."""
+    options = ['--family', 'f', '--ped', 'p', '--vcf', 'v', '--no-proband', '--pipeline-version', 'p']
+    if command == 'family-tables':
+        options += ['--annotation', 'a', '--echtvar-values', 'e', '--joined-values', 'j', '--transcript-rules', 'v']
+        options += ['--roh-upd', 'r']
+        options += ['--schema-version', 's', '--output', 'o']
+    return options
 
 
 def test_the_workflow_reads_the_vcfs_of_the_larger_variants_as_the_sheet_names_them() -> None:
     # One VCF in each of sv_vcf and cnv_vcf, and several in repeat_vcfs, between separators.
     larger = 'indexed([row.sv_vcf]), indexed([row.cnv_vcf]), indexed(repeatVcfs(row))'
-    assert f'tuple(row.family, file(row.vcf), file(row.ped), row.proband, {larger})' in FAMILY_TABLES
+    assert (
+        f'tuple(row.family, file(row.vcf), file(row.ped), row.proband, {larger}, blindedPositions(row))'
+        in FAMILY_TABLES
+    )
     separated = {name: column['separator'] for name, column in COLUMNS.items() if 'separator' in column}
     assert separated == {'repeat_vcfs': contract.SEPARATOR}
     assert f"row.repeat_vcfs.split('{contract.SEPARATOR}', -1)" in _function(FAMILY_TABLES, 'repeatVcfs')
@@ -264,6 +279,31 @@ def test_the_workflow_reads_the_vcfs_of_the_larger_variants_as_the_sheet_names_t
     assert f'return vcfs.findAll {{ vcf -> vcf }}.collectMany {{ vcf -> {beside} }}' in _function(
         FAMILY_TABLES, 'indexed'
     )
+
+
+def test_the_workflow_gives_the_file_of_the_blinded_positions_to_the_two_steps_that_read_it() -> None:
+    column = COLUMNS[contract.BLINDED]
+    assert not column['column_required']
+    assert not column['value_required']
+    # One file, or nothing for a row that names none, and a named file is looked for before the run starts.
+    named = f'return row.{contract.BLINDED} ? [file(row.{contract.BLINDED})] : []'
+    assert named in _function(FAMILY_TABLES, 'blindedPositions')
+    assert f'if (row.{contract.BLINDED} && !file(row.{contract.BLINDED}).exists()) {{\n        error(' in _function(
+        FAMILY_TABLES, 'checkFamily'
+    )
+    # The check before the Annotator and the step that writes the tables take it, under the option of the tools.
+    assert FAMILY_MODULES.count("path(blinded, stageAs: 'blinded/*')") == 2
+    assert FAMILY_MODULES.count('${blindedOption(blinded)}') == 2
+    option = '--' + contract.BLINDED.replace('_', '-')
+    assert f'collect {{ f -> "{option} ${{f}}" }}' in _function(FAMILY_MODULES, 'blindedOption')
+    for command in ('family-check', 'family-tables'):
+        assert f'case-annotation {command} ' in FAMILY_MODULES
+        assert cli.parser().parse_args([command, *_stated(command)]).blinded_positions is None
+        given = cli.parser().parse_args([command, *_stated(command), option, 'positions.json'])
+        assert given.blinded_positions == pathlib.Path('positions.json')
+    # The manifest says whether the row named one, under the column's name, and nothing else of the file.
+    described = contract.manifest_schema()['properties'][contract.BLINDED]
+    assert described['type'] == 'boolean'
 
 
 def test_the_example_sheet_meets_the_sheets_rules() -> None:
@@ -484,6 +524,10 @@ def test_a_family_of_an_including_pipeline_is_checked_as_it_arrives() -> None:
     # The entry workflow checks its sheet before the run starts. The workflow holds each family that it is given to
     # the sheet's patterns, and to the run's steps for the structural variants.
     check = _function(FAMILY_TABLES, 'checkRecord')
+    # A family has its eight values, the last of them the file of its blinded positions.
+    assert 'if (record.size() != 8) {\n        error(' in check
+    assert 'def (family, _vcf, _ped, proband, sv, cnv, _repeats, blinded) = record' in check
+    assert 'if ([blinded].flatten().size() > 1) {\n        error(' in check
     assert 'if (proband == null) {\n        error(' in check
     assert 'checkIds(family, proband)' in check
     assert 'if (!annotates_sv && (sv || cnv)) {\n        error(' in check

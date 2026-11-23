@@ -11,20 +11,22 @@
 // echtvar, upd and case-annotation, and the others case-annotation, all in the tools image (label 'tools').
 //
 // A family's structural-variant VCF, its copy-number VCF and its members' repeat VCFs are optional. A process takes
-// each as the files the sheet names with their indexes, staged in a folder of their own, or as an empty list.
+// each as the files the sheet names with their indexes, staged in a folder of their own, or as an empty list. The file
+// of a family's blinded positions is optional in the same way.
 
 // Fails unless the PED file is the family's and names every sample of its VCF, each sample can name a column of the
 // variants table (no two names, and no name and a column's of variants, sv or repeats, that differ only in case), and
 // the proband the sheet names, if any, is an individual of the PED file and a sample of the VCF, before anything is
 // annotated. The structural-variant and copy-number VCFs must hold exactly the VCF's samples, and the repeat VCFs one
-// of them each and all of them together. It is the first step of a run in the tools image, so it also refuses an
+// of them each and all of them together. The file of the family's blinded positions, where the sheet names one, must
+// be such a file. It is the first step of a run in the tools image, so it also refuses an
 // image of another release of the pipeline than the workflow's (pipeline_version), before the Annotator runs.
 process FAMILY_CHECK {
     tag "${family}"
     label 'tools'
 
     input:
-    tuple val(family), path(vcf, stageAs: 'input/*'), path(ped, stageAs: 'input/*'), val(proband), path(sv, stageAs: 'sv/*'), path(cnv, stageAs: 'cnv/*'), path(repeats, stageAs: 'repeats/*')
+    tuple val(family), path(vcf, stageAs: 'input/*'), path(ped, stageAs: 'input/*'), val(proband), path(sv, stageAs: 'sv/*'), path(cnv, stageAs: 'cnv/*'), path(repeats, stageAs: 'repeats/*'), path(blinded, stageAs: 'blinded/*')
     val pipeline_version
 
     output:
@@ -33,7 +35,7 @@ process FAMILY_CHECK {
     script:
     """
     case-annotation family-check --family ${family} --ped ${ped} --vcf ${vcf} ${probandOption(proband)} \\
-        ${structuralOptions(sv, cnv, repeats)} --pipeline-version ${pipeline_version}
+        ${structuralOptions(sv, cnv, repeats)} ${blindedOption(blinded)} --pipeline-version ${pipeline_version}
     """
 
     stub:
@@ -580,6 +582,10 @@ process ROH_UPD {
 // Every family also gets roh, its members' runs of homozygosity, and one with a child whose parents are both sequenced
 // upd, such a child's regions of uniparental disomy, both from ROH_UPD's folder of the family (segments). The stub
 // cannot read a pedigree, so it writes no upd.
+// blinded is the file of the family's blinded positions, and an empty list for a family whose row names none. With
+// it, case-annotation writes variants and sv with nothing of ClinVar in the rows that an entry reaches, and
+// prints for each entry how many rows it reached. Those lines stay in the task's log. The outputs are the files of
+// the family's folder by name, so the file itself and the log are published with none of them.
 process FAMILY_TABLES {
     tag "${family}"
     label 'tools'
@@ -589,7 +595,7 @@ process FAMILY_TABLES {
     disk 200.GB
 
     input:
-    tuple val(family), path(vcf), path(vcf_index), path(ped, stageAs: 'input/*'), val(proband), path(sv, stageAs: 'sv/*'), path(cnv, stageAs: 'cnv/*'), path(repeats, stageAs: 'repeats/*'), path(sv_alleles, stageAs: 'sv-alleles/*'), path(segments)
+    tuple val(family), path(vcf), path(vcf_index), path(ped, stageAs: 'input/*'), val(proband), path(sv, stageAs: 'sv/*'), path(cnv, stageAs: 'cnv/*'), path(repeats, stageAs: 'repeats/*'), path(blinded, stageAs: 'blinded/*'), path(sv_alleles, stageAs: 'sv-alleles/*'), path(segments)
     path tables
     path echtvar_values
     path joined_values
@@ -612,7 +618,7 @@ process FAMILY_TABLES {
     """
     case-annotation family-tables --family ${family} --ped ${ped} --vcf ${vcf} ${probandOption(proband)} \\
         ${structuralOptions(sv, cnv, repeats)} ${vcfs(sv_alleles).collect { f -> "--sv-alleles ${f}" }.join(' ')} \\
-        ${annotated} ${ranges} \\
+        ${annotated} ${ranges} ${blindedOption(blinded)} \\
         --annotation ${tables} --echtvar-values ${echtvar_values} --joined-values ${joined_values} \\
         --transcript-rules ${transcript_rules} --roh-upd ${segments} \\
         --schema-version ${schema_version} --pipeline-version ${pipeline_version} --output out --scratch /tmp
@@ -644,6 +650,11 @@ def structuralOptions(sv, cnv, repeats) {
     options += vcfs(cnv).collect { f -> "--cnv-vcf ${f}" }
     options += vcfs(repeats).collect { f -> "--repeat-vcf ${f}" }
     return options.join(' ')
+}
+
+// How case-annotation takes the file of a family's blinded positions: an option where the sheet names one.
+def blindedOption(blinded) {
+    return [blinded].flatten().collect { f -> "--blinded-positions ${f}" }.join(' ')
 }
 
 // The disk of ECHTVAR_VALUES: 50 GB for the image, the union and its annotated copy, and the size of every archive

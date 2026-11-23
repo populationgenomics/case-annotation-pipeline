@@ -148,6 +148,19 @@ jobs:
             "${larger}" "${a}" "${repeats};/src/stub/family-a.repeats-3.vcf.gz" > stub/larger.csv
           printf '%s\n%s,%s\n' "${larger}" "${a}" "${repeats};/src/stub/unindexed.vcf.gz" > stub/repeat-unindexed.csv
           printf '%s\n%s,%s\n' "${larger}" "${a}" "${repeats};" > stub/repeat-empty.csv
+          # A sheet with the optional column of the blinded positions: a family that names a file beside one that
+          # names none, and a family that names a file which does not exist.
+          touch stub/family-a.blinded-positions.json
+          printf 'family,vcf,ped,proband,blinded_positions\nfam-a,/src/stub/family-a.vcf.gz,/src/stub/family-a.ped,A3,/src/stub/family-a.blinded-positions.json\nfam-b,/src/stub/family-b.vcf.gz,/src/stub/family-b.ped,,\n' \
+            > stub/blinded.csv
+          printf 'family,vcf,ped,proband,blinded_positions\nfam-a,/src/stub/family-a.vcf.gz,/src/stub/family-a.ped,A3,/src/stub/no-such-file.json\n' \
+            > stub/blinded-missing.csv
+          # A sheet whose header has the column of the blinded positions twice.
+          printf 'family,vcf,ped,proband,blinded_positions,blinded_positions\nfam-a,/src/stub/family-a.vcf.gz,/src/stub/family-a.ped,A3,/src/stub/family-a.blinded-positions.json,\n' \
+            > stub/repeated-column.csv
+          # A sheet with a row of one comma too many, whose file of blinded positions is a ninth field.
+          printf '%s,blinded_positions\nfam-b,/src/stub/family-b.vcf.gz,/src/stub/family-b.ped,,,,,,/src/stub/family-a.blinded-positions.json\n' \
+            "${larger}" > stub/long-row.csv
           # An optional column under a misspelt name.
           printf '%s\n%s,\n' "${larger/sv_vcf/sv_vcfs}" "${a}" > stub/misspelt-column.csv
           printf "sources: [\"clin'var\"]\n" > stub/quoted-source.params.yaml
@@ -331,13 +344,27 @@ jobs:
             { echo "did not run: FAMILY_TABLES" >&2; cat strchive.log; exit 1; }
           test -L stub/strchive/annotations/fam-a/tables-0.5.0-illumina-202610/repeats.parquet
           test -L stub/strchive/annotations/fam-b/tables-0.5.0-illumina-202610/manifest.json
+          # A family whose row names a file of blinded positions and one whose row names none get their tables in one
+          # run, and the file is published with neither family's tables nor with the union.
+          family_run --families /src/stub/blinded.csv --annotated /src/stub/annotated --output_dir /src/stub/positions \
+            > blinded.log
+          for family in fam-a fam-b; do
+            grep -qF "ANNOTATE_FAMILIES:FAMILY_TABLES (${family})" blinded.log ||
+              { echo "did not run: FAMILY_TABLES (${family})" >&2; cat blinded.log; exit 1; }
+            test -L "stub/positions/annotations/${family}/tables-0.5.0-illumina-202610/variants.parquet"
+          done
+          if find stub/positions -name '*blinded*' | grep -q .; then
+            echo 'the file of the blinded positions is published' >&2
+            exit 1
+          fi
           # Refused, each with its own message: sources and a reused annotation together; neither; annotating without
           # the Annotator's params; a repeated family; a family id that is not a folder name; a reference without its
           # index; a catalog id that is not a folder name; a quote in a source; a sheet without families; a row
           # without its PED file; a sheet without the proband column; a row that ends before it; a proband that is not
           # a sample id; a reused annotation that holds none of the group; a reused annotation without its run config,
-          # which Nextflow refuses by the missing file's path; a repeat VCF without its index; an empty entry among a
-          # row's repeat VCFs; a sheet with a column that is none of a families sheet; a reused annotation without
+          # which Nextflow refuses by the missing file's path; a file of blinded positions that does not exist; a
+          # repeat VCF without its index; an empty entry among a
+          # row's repeat VCFs; a sheet with a column that is none of a families sheet; a sheet with a column twice; a row with more fields than the header has columns; a reused annotation without
           # that of the structural variants, for a group with a family that names their VCF; a release of STRchive
           # without its name and date; a name and a date without the release's file; a name that is not one of a
           # release; a date that is not written as YYYY-MM-DD; a folder of gene models without one of its files.
@@ -368,12 +395,18 @@ jobs:
           refused 'stub-group: /src/stub/annotated-other holds no out/stub-group.json.gz' "${families[@]}" \
             --annotated /src/stub/annotated-other
           refused '/src/stub/annotated-no-config/run.json' "${families[@]}" --annotated /src/stub/annotated-no-config
+          refused 'fam-a: /src/stub/no-such-file.json: no such file of blinded positions' "${sources[@]}" \
+            "${annotator[@]}" --families /src/stub/blinded-missing.csv
           refused 'fam-a: /src/stub/unindexed.vcf.gz: no .tbi beside it' "${sources[@]}" "${annotator[@]}" \
             --families /src/stub/repeat-unindexed.csv
           refused 'fam-a: an empty entry among its repeat_vcfs' "${sources[@]}" "${annotator[@]}" \
             --families /src/stub/repeat-empty.csv
           refused 'the columns [sv_vcfs] are none of a families sheet' "${sources[@]}" "${annotator[@]}" \
             --families /src/stub/misspelt-column.csv
+          refused 'the columns [blinded_positions] more than once' "${sources[@]}" "${annotator[@]}" \
+            --families /src/stub/repeated-column.csv
+          refused 'a row with more fields than the header has columns' "${sources[@]}" "${annotator[@]}" \
+            --families /src/stub/long-row.csv
           refused 'stub-group: /src/stub/annotated-no-sv holds no out/stub-group.sv.json.gz' \
             --families /src/stub/larger.csv --annotated /src/stub/annotated-no-sv
           reused=("${families[@]}" --annotated /src/stub/annotated)
@@ -415,8 +448,8 @@ jobs:
           family=(--family fam-c --proband A3)
           # The run names one of the three archives of AlphaGenome's scores, one of the eight files that are joined
           # to the alleles and a release of STRchive with its name and date, and leaves the other settings of the
-          # first two null.
-          included_run "${family[@]}" --with_sv --annotates_sv --alphagenome_avi /src/stub/alphagenome-avi.zip \
+          # first two null. Its family has a file of blinded positions.
+          included_run "${family[@]}" --with_sv --with_blinded --annotates_sv --alphagenome_avi /src/stub/alphagenome-avi.zip \
             --gencode_polya /src/stub/gencode-polya.gtf.gz --strchive /src/stub/strchive.json \
             --strchive_release v0.0.0 --strchive_release_date 2099-01-01 --output_dir /src/stub/included > included.log
           # Each of the workflow's processes runs under the workflow's name, and the including pipeline's under its own.
@@ -442,7 +475,7 @@ jobs:
           # Refused, each with its own message: a family id that is not a folder name; a family without a proband,
           # which is empty where none is designated; a structural-variant VCF in a run built without the steps of the
           # structural variants; a setting that is none of the workflow's; a setting that every run needs, given as
-          # null.
+          # null; a family with seven values in place of its eight; a family with two files of blinded positions.
           refused() {
             local message=$1
             shift
@@ -458,6 +491,10 @@ jobs:
             "${family[@]}" --with_sv
           refused 'ANNOTATE_FAMILIES takes the settings' "${family[@]}" --unknown_setting annotate
           refused 'the setting workers is null' "${family[@]}" --null_setting workers
+          refused 'fam-c: a family is tuple(family, vcf, ped, proband, sv, cnv, repeats, blinded)' "${family[@]}" \
+            --short_family
+          refused 'fam-c: a family has one file of blinded positions or none, and this one has 2' "${family[@]}" \
+            --with_blinded --second_blinded
 
   annotator:
     # Runs the Annotator's processes for real on an invented stand-in for the Annotator, in a stand-in for its image, and

@@ -44,6 +44,11 @@
       "value_required": false,
       "index_suffix": ".tbi",
       "separator": ";"
+    },
+    {
+      "name": "blinded_positions",
+      "column_required": false,
+      "value_required": false
     }
   ],
   "other_columns": "refused"

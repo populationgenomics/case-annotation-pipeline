@@ -80,6 +80,11 @@
 // none. A run without the catalogue cuts the union to the exons and has no row of that allele. A folder of gene
 // models whose record names the controls on another transcript is refused, which is what a run meets whose gene models are not as their record describes them.
 // Sites that hold an allele of the exons twice are refused before the rules are applied to them.
+// Family A's row also names a file of blinded positions, family-a.blinded-positions.json, and family B's names none:
+// the file goes through FAMILY_CHECK into FAMILY_TABLES as family_tables.nf passes it, and CHECK_BLINDED reads what
+// the two manifests say of it. The run does not name ClinVar, so no table has a column that an entry could
+// empty, and tests/test_blinded_positions.py holds the rows to the entries. A file that states another assembly
+// (blinded-other-assembly.json) is refused by the family check.
 // Refused inputs must fail, and so must Annotator outputs without the group's annotation. The case-annotation and
 // echtvar steps run in the tools image, built first. Run with Docker from the repository's root, with this folder's
 // config alone (-C), because a run from the root would otherwise read the pipeline's nextflow.config over it:
@@ -111,6 +116,7 @@ include { NORMALISE_FAMILY as NORMALISE_REF_N_AT_BASE_REFUSED } from '../../modu
 include { NORMALISE_FAMILY as NORMALISE_REF_BASE_AT_N_REFUSED } from '../../modules/family_tables'
 include { NORMALISE_FAMILY as NORMALISE_REF_BASE_AT_IUPAC_REFUSED } from '../../modules/family_tables'
 include { FAMILY_CHECK as FAMILY_CHECK_PROBAND_REFUSED } from '../../modules/family_tables'
+include { FAMILY_CHECK as FAMILY_CHECK_BLINDED_REFUSED } from '../../modules/family_tables'
 
 workflow {
     def fixture = "${projectDir}/family_tables"
@@ -136,15 +142,17 @@ workflow {
             def files = kinds.collectEntries { kind, pairs -> [kind, pairs.flatten()] }
             tuple('family-a', files.sv, files.cnv, files.repeats)
         }
-    structural = larger.mix(channel.of(tuple('family-b', [], [], [])))
+    // Each family's VCFs of its larger variants and the file of its blinded positions, which family A alone has.
+    def blinded = file("${fixture}/family-a.blinded-positions.json")
+    structural = larger.map { f, sv, cnv, repeats -> tuple(f, sv, cnv, repeats, [blinded]) }.mix(channel.of(tuple('family-b', [], [], [], [])))
 
-    checked = FAMILY_CHECK(families.join(structural), '0.5.3')
+    checked = FAMILY_CHECK(families.join(structural), '0.6.0')
     normalised = NORMALISE_FAMILY(
         families.join(checked.map { f -> [f] }).map { f, vcf, _ped, _proband -> tuple(f, vcf) },
         reference,
     )
     sv_alleles = NORMALISE_SV(
-        structural.join(checked.map { f -> [f] }).filter { _f, sv, _cnv, _repeats -> sv }.map { f, sv, _cnv, _repeats -> tuple(f, sv) },
+        structural.join(checked.map { f -> [f] }).filter { _f, sv, _cnv, _repeats, _blinded -> sv }.map { f, sv, _cnv, _repeats, _blinded -> tuple(f, sv) },
         reference,
     )
     union = UNION_SITES('union', normalised.sites.flatten().collect())
@@ -223,7 +231,7 @@ workflow {
     CHECK_RULES_WITHOUT_CATALOGUE(TRANSCRIPT_RULES_WITHOUT_CATALOGUE(union, reference, gene_models, []))
     // The union of the group's structural variants and copy-number segments, which are family A's, and its tables.
     sv_sites = SV_SITES(
-        structural.join(checked.map { f -> [f] }).filter { _f, sv, cnv, _repeats -> sv || cnv }.map { f, sv, cnv, _repeats -> tuple(f, sv, cnv) }
+        structural.join(checked.map { f -> [f] }).filter { _f, sv, cnv, _repeats, _blinded -> sv || cnv }.map { f, sv, cnv, _repeats, _blinded -> tuple(f, sv, cnv) }
     )
     sv_group = sv_sites.toList().map { cut -> svGroup(cut) }
     sv_union = SV_UNION('union', sv_group.map { g -> g.families }, sv_group.map { g -> g.sites })
@@ -240,8 +248,8 @@ workflow {
         archive,
     )
     written = FAMILY_TABLES(
-        normalised.family.join(families.map { f, _vcf, ped, proband -> [f, ped, proband] }).join(structural).join(sv_alleles, remainder: true).map { f, vcf, index, ped, proband, sv, cnv, repeats, alleles ->
-            tuple(f, vcf, index, ped, proband, sv, cnv, repeats, alleles ?: [])
+        normalised.family.join(families.map { f, _vcf, ped, proband -> [f, ped, proband] }).join(structural).join(sv_alleles, remainder: true).map { f, vcf, index, ped, proband, sv, cnv, repeats, positions, alleles ->
+            tuple(f, vcf, index, ped, proband, sv, cnv, repeats, positions, alleles ?: [])
         }.join(segments),
         tables,
         joint,
@@ -253,12 +261,17 @@ workflow {
         'v0.0.0',
         '2099-01-01',
         '0.5.0',
-        '0.5.3',
+        '0.6.0',
     )
     // What FAMILY_TABLES gives of a family: its id, variants, transcripts, roh, the manifest, the notes, and the
     // tables that only some families have.
     CHECK_TABLES(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[0], w[1], w[2], w[4], w[5]) }, archive)
     CHECK_NO_ROLES(written.filter { w -> w[0] == 'family-b' }.map { w -> w[4] })
+    // The manifest and the files of each family's folder, in the families' order.
+    CHECK_BLINDED(
+        written.toSortedList { a, b -> a[0] <=> b[0] }.map { folders -> tuple(folders.collect { w -> w[4] }, folders.collect { w -> [w[1], w[2], w[3], w[5]] + [w[6]].flatten() }.flatten()) },
+        blinded,
+    )
     CHECK_AG_GAIN(written.filter { w -> w[0] == 'family-b' }.map { w -> tuple(w[1], w[2]) })
     CHECK_JOINED(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[1], w[2], w[4]) }, polya, effects, windows, regions, scores, catalogue)
     CHECK_LARGER(written.filter { w -> w[0] == 'family-a' }.map { w -> tuple(w[1], w[4], w[6]) })
@@ -323,7 +336,7 @@ workflow {
     // has no INFO END, which the Annotator would annotate as a single base; for ROH_UPD, a trio whose VCF has no GQ,
     // and an upd that fails after it has written a region, which failing-upd stands in for (nextflow.config); a folder
     // of gene models whose record names the positive controls on a transcript that the gene models do not hold; sites
-    // with an allele of the exons twice.
+    // with an allele of the exons twice; a file of blinded positions that states another assembly.
     unprefixed = NORMALISE_UNPREFIXED_REFUSED(channel.of(tuple('unprefixed', file("${fixture}/unprefixed.vcf"))), reference)
     mismatch = NORMALISE_REF_MISMATCH_REFUSED(channel.of(tuple('mismatch', file("${fixture}/ref-mismatch.vcf"))), reference)
     repeated = NORMALISE_REPEATED_REFUSED(channel.of(tuple('repeated', file("${fixture}/repeated.vcf"))), reference)
@@ -340,16 +353,20 @@ workflow {
         reference,
     )
     other_proband = FAMILY_CHECK_PROBAND_REFUSED(
-        channel.of(tuple('family-a', file("${fixture}/family-a.vcf"), file("${fixture}/family-a.ped"), 'B3', [], [], [])),
-        '0.5.3',
+        channel.of(tuple('family-a', file("${fixture}/family-a.vcf"), file("${fixture}/family-a.ped"), 'B3', [], [], [], [])),
+        '0.6.0',
     )
     two_repeats = FAMILY_CHECK_REPEATS_REFUSED(
-        channel.of(tuple('family-a', file("${fixture}/family-a.vcf"), file("${fixture}/family-a.ped"), 'A3', [], [], [file("${fixture}/A1.repeats.vcf"), file("${fixture}/A2.repeats.vcf")])),
-        '0.5.3',
+        channel.of(tuple('family-a', file("${fixture}/family-a.vcf"), file("${fixture}/family-a.ped"), 'A3', [], [], [file("${fixture}/A1.repeats.vcf"), file("${fixture}/A2.repeats.vcf")], [])),
+        '0.6.0',
     )
     other_samples = FAMILY_CHECK_SV_SAMPLES_REFUSED(
-        channel.of(tuple('family-b', file("${fixture}/family-b.vcf"), file("${fixture}/family-b.ped"), '', [file("${fixture}/family-a.sv.vcf")], [], [])),
-        '0.5.3',
+        channel.of(tuple('family-b', file("${fixture}/family-b.vcf"), file("${fixture}/family-b.ped"), '', [file("${fixture}/family-a.sv.vcf")], [], [], [])),
+        '0.6.0',
+    )
+    other_assembly = FAMILY_CHECK_BLINDED_REFUSED(
+        channel.of(tuple('family-a', file("${fixture}/family-a.vcf"), file("${fixture}/family-a.ped"), 'A3', [], [], [], [file("${fixture}/blinded-other-assembly.json")])),
+        '0.6.0',
     )
     sv_mismatch = NORMALISE_SV_REF_MISMATCH_REFUSED(
         channel.of(tuple('sv-mismatch', [file("${fixture}/sv-ref-mismatch.vcf")])),
@@ -387,6 +404,7 @@ workflow {
             base_at_n.sites.map { _s -> 'a base as REF at an N' },
             base_at_iupac.sites.map { _s -> 'a base as REF at an IUPAC code' },
             other_proband.map { _f -> "another family's proband" },
+            other_assembly.map { _f -> 'blinded positions of another assembly' },
         )
         .toList()
         .map { accepted ->
@@ -1250,6 +1268,38 @@ members = manifest['members']
 assert {m['sample_id']: m['role'] for m in members} == {'B1': None, 'B2': None, 'B3': None}, members
 assert [m['sample_id'] for m in members if m['affected']] == ['B3'], members
 assert (manifest['strchive'], manifest['repeats_omitted_columns']) == (None, []), manifest
+EOF
+    """
+}
+
+// What the two families' folders say of the blinded positions: family A's manifest says that the run was given a file
+// and family B's that it was given none, with the same keys. No file of either folder is the file of the positions, and
+// family A's manifest holds neither the file's name nor its checksum.
+process CHECK_BLINDED {
+    input:
+    tuple path(manifests, stageAs: 'manifest-?.json'), path(files, stageAs: 'folder-?/*')
+    path blinded
+
+    script:
+    """
+    python3 - <<'EOF'
+import hashlib
+import json
+import pathlib
+
+texts = [pathlib.Path(name).read_text() for name in ('manifest-1.json', 'manifest-2.json')]
+manifests = [json.loads(text) for text in texts]
+assert [m['family'] for m in manifests] == ['family-a', 'family-b'], manifests
+assert [m['blinded_positions'] for m in manifests] == [True, False], manifests
+assert manifests[0].keys() == manifests[1].keys()
+held = pathlib.Path('${blinded}').read_bytes()
+assert json.loads(held)['small'], held
+for text in texts:
+    assert '${blinded.name}' not in text and hashlib.sha256(held).hexdigest() not in text, text
+files = sorted(path for path in pathlib.Path('.').glob('folder-*/*'))
+assert len(files) > 8, files
+assert all(path.suffix in ('.parquet', '.md') for path in files), files
+assert all(path.read_bytes() != held for path in files), files
 EOF
     """
 }

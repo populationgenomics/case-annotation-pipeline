@@ -985,6 +985,10 @@
     },
     "roh_upd": {
       "$ref": "#/$defs/RohUpdInfo"
+    },
+    "blinded_positions": {
+      "title": "Blinded Positions",
+      "type": "boolean"
     }
   },
   "required": [
@@ -1009,7 +1013,8 @@
     "sv_omitted_columns",
     "strchive",
     "repeats_omitted_columns",
-    "roh_upd"
+    "roh_upd",
+    "blinded_positions"
   ],
   "title": "FamilyManifest",
   "type": "object"
