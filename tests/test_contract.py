@@ -201,8 +201,12 @@ def test_the_sheets_columns_are_the_ones_the_workflow_reads() -> None:
         r'def unknown = rows\[0\]\.keySet\(\) - sheetColumns\(\)\n\s+if \(unknown\) \{\n\s+error\(', FAMILY_TABLES
     )
     # A column is there once: a row would hold the last of two values under one name.
-    assert 'def repeated = params.families.splitCsv()[0].countBy { name -> name }' in FAMILY_TABLES
+    assert 'def lines = params.families.splitCsv()\n' in FAMILY_TABLES
+    assert 'def repeated = lines[0].countBy { name -> name }' in FAMILY_TABLES
     assert 'if (repeated) {\n        error(' in FAMILY_TABLES
+    # A row has no field past the header's columns, which a read by the header's names would drop.
+    assert 'def longer = lines.findAll { fields -> fields.size() > lines[0].size() }' in FAMILY_TABLES
+    assert 'if (longer) {\n        error(' in FAMILY_TABLES
     read = set(re.findall(r'\brow\.(\w+)', FAMILY_TABLES)) - {'containsKey'}
     assert read == set(COLUMNS)
     assert (SHEET['format'], SHEET['header']) == ('csv', True)
