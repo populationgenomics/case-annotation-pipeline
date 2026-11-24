@@ -871,7 +871,7 @@ and 57.5% without (423 of 660, and 569 of 989).
 
 The table below takes the rows that an analysis of a family reads first: rows with such a consequence whose allele the
 proband carries and whose only value of `filters` is `PASS`. The single person's table has 54,585 of them. The trio's
-table gives the same counts for the same person, with one row more in the sixth line.
+table gives the same counts for the same person, to within one row.
 
 | gnomAD frequency | `rsids` | ClinVar value | Rows   |
 | ---------------- | ------- | ------------- | ------ |
