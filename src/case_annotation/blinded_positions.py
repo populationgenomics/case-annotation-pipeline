@@ -37,9 +37,9 @@ from case_annotation import annotation_tables, sv_annotation
 # single-base change on an insertion written one base before it. One base on either side covers both readings.
 REACH = 1
 
-# The columns that an entry empties, by table: the ClinVar columns of both. An allele keeps its dbSNP ids. An allele
-# that a population database holds nearly always has one, so a row without one would stand out among its
-# neighbours, and an id gives a reader nothing that the allele's position and bases do not give.
+# The columns that an entry empties, by table: the ClinVar columns of both. An allele keeps its dbSNP ids, because
+# nearly every allele with a gnomAD frequency has one and a row without one would stand out (docs/annotation.md,
+# Blinded positions, gives the counts).
 VARIANTS_COLUMNS = annotation_tables.SOURCE_COLUMNS['clinvar']
 SV_COLUMNS = sv_annotation.SOURCE_COLUMNS['clinvar']
 

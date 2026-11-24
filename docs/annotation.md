@@ -850,16 +850,56 @@ Everything else stays as it is.
   such: REVEL, gnomAD's MPC score and MitoTIP ([Dated sources](#dated-sources) says what each has seen). Each scores a
   possible change whether or not anyone reported it, so a score does not say that the variant has a record, while it may
   be higher because the variant has one.
-- `rsids` keeps an allele's dbSNP ids at a blinded position. An allele that a population database holds nearly always
-  has an rsID, so a row without one would stand out among its neighbours and mark the position. The id is also no extra
-  key for a reader of the tables, who can look an allele up by its chromosome, its position and its bases as well as by
-  its rsID. A newly minted rsID still says that someone reported the variant ([Dated sources](#dated-sources)), and a
-  run with blinded positions does not hide that. Whoever serves live lookups to a reader of the tables has to blind them
-  by position.
 - STRchive's ranges in `repeats` are not emptied.
 - The two unions, their tables and the Annotator's JSON keep every value, because they serve all families of the group.
   They hold what the family's tables no longer say and must not reach a reader of those tables
   ([What a run publishes](#what-a-run-publishes)).
+- `rsids` keeps an allele's dbSNP ids at a blinded position. The counts below give the reason.
+
+A blinded row that keeps its rsIDs reads like most rows of its kind, and a row that lost them could stand out. The
+following was counted on the `variants` tables of two families with catalog `202610`: one sequenced person alone, and a
+trio whose proband is that same person. A row has a gnomAD frequency here where `gnomad_joint_af`, `gnomad_genomes_af`
+or `gnomad_exomes_af` is filled, and a ClinVar value where it has a record of its allele or of another allele at its
+position.
+
+Nearly every allele with a gnomAD frequency has an rsID, and so do most alleles without such a frequency. Of the rows
+with a gnomAD frequency, 99.9% have an rsID in both tables (5,927,567 of 5,933,102 rows, and 8,604,546 of 8,616,115).
+The rows without a gnomAD frequency are 3.8% and 3.7% of all rows, and 74.9% and 73.1% of them have an rsID (174,134 of
+232,377, and 244,707 of 334,974). Among the rows whose `worst_consequence` is a change in the coding sequence,
+synonymous ones included, or one of the splice terms, the shares are 99.9% and 99.8% with a gnomAD frequency, and 64.1%
+and 57.5% without (423 of 660, and 569 of 989).
+
+The table below takes the rows that an analysis of a family reads first: rows with such a consequence whose allele the
+proband carries and whose only value of `filters` is `PASS`. The single person's table has 54,585 of them. The trio's
+table gives the same counts for the same person, with one row more in the sixth line.
+
+| gnomAD frequency | `rsids` | ClinVar value | Rows   |
+| ---------------- | ------- | ------------- | ------ |
+| filled           | filled  | yes           | 15,275 |
+| filled           | filled  | no            | 38,613 |
+| filled           | null    | yes           | 12     |
+| filled           | null    | no            | 61     |
+| null             | filled  | yes           | 42     |
+| null             | filled  | no            | 371    |
+| null             | null    | yes           | 3      |
+| null             | null    | no            | 208    |
+
+A blinded row has no ClinVar value. With its rsIDs kept, a blinded row without a gnomAD frequency has the pattern of 371
+of the 624 such rows (59%), the largest group of them, and a blinded row with a gnomAD frequency has the pattern of
+38,613 of the 53,961 such rows (72%). An rsID beside empty ClinVar columns is the usual case: of the 413 rows with an
+rsID and without a gnomAD frequency, 42 have a ClinVar value, about one in ten.
+
+If a blinded position emptied `rsids` too, a blinded row without a gnomAD frequency would have the pattern of the 208
+rows with neither an rsID nor a ClinVar value (33%), which is ordinary as well. A blinded row with a gnomAD frequency
+would have that frequency and no rsID, a pattern that 73 of the 53,961 rows have (0.14%), so emptying `rsids` would mark
+every blinded row with a gnomAD frequency.
+
+All of these counts come from the sequencing data of one family, since the single person is the trio's proband, and the
+shares can differ for another family. They also say nothing of an rsID as a key. An index of the literature can list the
+papers on a variant by its rsID, and a newly minted rsID says that someone reported the variant
+([Dated sources](#dated-sources)). A run with blinded positions hides neither, because the rule covers ClinVar's values
+alone. Whoever serves live lookups to a reader of the tables has to blind them by position, and whoever serves a search
+of the literature has to decide what it returns for an rsID.
 
 A family's folder carries no mark of the file. It holds the same files as the folder of a run without the file, its
 tables have the same columns and the same key-value metadata, and its manifest has the same keys. The manifest's values
