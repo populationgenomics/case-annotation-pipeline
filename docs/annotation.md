@@ -870,8 +870,7 @@ synonymous ones included, or one of the splice terms, the shares are 99.9% and 9
 and 57.5% without (423 of 660, and 569 of 989).
 
 The table below takes the rows that an analysis of a family reads first: rows with such a consequence whose allele the
-proband carries and whose only value of `filters` is `PASS`. The single person's table has 54,585 of them. The trio's
-table gives the same counts for the same person, to within one row.
+proband carries and whose only value of `filters` is `PASS`. The single person's table has 54,585 of them.
 
 | gnomAD frequency | `rsids` | ClinVar value | Rows   |
 | ---------------- | ------- | ------------- | ------ |
