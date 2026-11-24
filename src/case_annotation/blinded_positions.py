@@ -125,8 +125,9 @@ def _register(con: duckdb.DuckDBPyConnection, positions: BlindedPositions) -> No
 # Whether an allele `a`, with its `ref` and its `alt`, is an insertion: its ALT is its REF with more bases after it.
 # Such an allele changes no base of its REF, and the bases that it adds stand before the base after its REF. Every
 # other allele changes a base of its REF: a substitution of one base or of several, a deletion, which the tables write
-# with the base before it, and an allele that replaces bases by another number of them.
-_INSERTION = 'length(a.alt) > length(a.ref) AND starts_with(a.alt, a.ref)'
+# with the base before it, and an allele that replaces bases by another number of them. A VCF may write a base in
+# either case, so the two alleles are compared in one.
+_INSERTION = 'length(a.alt) > length(a.ref) AND starts_with(upper(a.alt), upper(a.ref))'
 
 # The last base of the footprint of an allele `a`, which begins at `a.pos`: the last base of its REF, and for an
 # insertion the base after that.

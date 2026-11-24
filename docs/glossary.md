@@ -188,8 +188,8 @@ of one of its releases.
 
 Positions that a run is given for one family, at which the family's tables hold a null in the ClinVar columns, as for a
 variant without a record. A row of `variants` is at such a position where its footprint, the bases of its `ref` and for
-an insertion the base after them, shares a base with one of the positions. The unions keep the values. Nothing in the
-family's folder says that the run was given such positions, or where they are
+an insertion the base after them, shares a base with one of the positions that were given for a small variant. The
+unions keep the values. Nothing in the family's folder says that the run was given such positions, or where they are
 ([Blinded positions](annotation.md#blinded-positions)).
 
 ### STRchive

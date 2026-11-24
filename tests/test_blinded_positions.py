@@ -384,6 +384,7 @@ _SHAPES: Mapping[str, tuple[str, str]] = {
     'a change of three bases in a row': ('ACG', 'TGA'),
     'an insertion of one base': ('A', 'AT'),
     'an insertion of two bases': ('A', 'ATT'),
+    'an insertion whose first base is written in lower case': ('a', 'AT'),
     'a deletion of one base': ('AC', 'A'),
     'a deletion of three bases': ('ACGT', 'A'),
     'two bases replaced by one, after a shared base': ('ACG', 'AT'),
@@ -394,13 +395,13 @@ _SHAPES: Mapping[str, tuple[str, str]] = {
 
 
 def _is_insertion(ref: str, alt: str) -> bool:
-    return len(alt) > len(ref) and alt.startswith(ref)
+    return len(alt) > len(ref) and alt.upper().startswith(ref.upper())
 
 
 def _begin(pos: int, ref: str, alt: str) -> int:
     """The base at which the Annotator places an allele: its `pos` after the leading bases that REF and ALT share."""
     shared = 0
-    while shared < min(len(ref), len(alt)) and ref[shared] == alt[shared]:
+    while shared < min(len(ref), len(alt)) and ref[shared].upper() == alt[shared].upper():
         shared += 1
     return pos + shared
 
@@ -482,6 +483,7 @@ def test_the_rule_takes_every_pair_that_begins_at_one_base_or_shares_a_base_of_r
     assert {
         ('an insertion of one base', 'a change of one base', entry_pos + 1),
         ('a change of one base', 'an insertion of one base', entry_pos - 1),
+        ('a change of one base', 'an insertion whose first base is written in lower case', entry_pos - 1),
         ('an insertion of two bases', 'two bases replaced by one', entry_pos + 1),
     } <= measured
     assert {

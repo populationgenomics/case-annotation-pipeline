@@ -1621,11 +1621,11 @@ A query on these columns has to allow for the following.
   nothing has no list.
 - The Annotator lists a ClinVar record on an allele where the two begin at the same base once the leading bases that
   `ref` and `alt` share are dropped: a substitution begins at its `pos`, and an insertion or a deletion at `pos + 1`. It
-  marks the record as the allele's own where the record has the allele's `pos`, `ref` and `alt`, and
-  `clinvar_other_alleles` holds every other record that it lists on the allele, the best reviewed first. An allele
-  without one has no list. An allele can have such records and none of its own, and `clinvar_classification` is then
-  null. Illumina states neither of the two rules, and [Blinded positions](annotation.md#blinded-positions) gives the
-  counts behind both.
+  marks the record as the allele's own where the record has the allele's `pos`, `ref` and `alt`, which held for all but
+  three of the 80,739 such records of one table, and `clinvar_other_alleles` holds every other record that it lists on
+  the allele, the best reviewed first. An allele without one has no list. An allele can have such records and none of
+  its own, and `clinvar_classification` is then null. Illumina states neither of the two rules, and
+  [Blinded positions](annotation.md#blinded-positions) gives the counts behind both.
 - `ref_allele` and `alt_allele` are spelt as the Annotator spells them. Illumina trims the alleles of a ClinVar record,
   and its example of an insertion has `-` as the reference allele. They do not compare with `ref` and `alt` of
   `variants`, which keep the base before an insertion or a deletion.
