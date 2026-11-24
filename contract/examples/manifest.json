@@ -1,6 +1,6 @@
 {
   "schema_version": "0.5.1",
-  "pipeline_version": "0.6.1",
+  "pipeline_version": "0.6.2",
   "family": "family-a",
   "members": [
     {

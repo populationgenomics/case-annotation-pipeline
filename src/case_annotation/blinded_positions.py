@@ -7,10 +7,11 @@ The union's tables are not changed.
 
 The file is a JSON object that states its assembly and its coordinates and holds two lists of intervals:
 
-- `small`, the reference bases of a small variant, from the first to the last base of the allele's REF as the tables
-  hold the allele: an insertion's entry is its anchor base, and a deletion's begins with its anchor base. An entry
-  empties the row of `variants` of every allele whose REF lies within REACH bases of it, and the row of `sv` of every
-  record written as a sequence whose allele does, after the normalisation of the family's VCF.
+- `small`, the footprint of a small variant: the bases of the allele's REF as the tables hold the allele, and for an
+  insertion the base after them as well. An insertion's entry is its anchor base and the next base, and a deletion's
+  begins with its anchor base. An entry empties the row of `variants` of every allele whose own footprint shares a
+  base with it, and the row of `sv` of every record written as a sequence whose allele's does, after the
+  normalisation of the family's VCF.
 - `structural`, the bases of a structural variant. An entry empties the rows of `sv` whose record it overlaps by the
   rule that the Annotator matches ClinVar's records by (sv_annotation.RECIPROCAL_OVERLAP), and no row of `variants`.
 
@@ -29,13 +30,6 @@ import pyarrow as pa
 import pydantic
 
 from case_annotation import annotation_tables, sv_annotation
-
-# How many bases beside the REF of an allele an entry of a small variant still reaches. The tables write an insertion
-# or a deletion with the base before it, and the Annotator lists ClinVar's records of other alleles "at the same
-# position" without saying which base that is for such an allele. If it is the first base that the allele changes,
-# the record of an insertion written at a position stands on a single-base change one base on, and that of a
-# single-base change on an insertion written one base before it. One base on either side covers both readings.
-REACH = 1
 
 # The columns that an entry empties, by table: the ClinVar columns of both. An allele keeps its dbSNP ids, because
 # nearly every allele with a gnomAD frequency has one and a row without one would stand out (docs/annotation.md,
@@ -128,11 +122,23 @@ def _register(con: duckdb.DuckDBPyConnection, positions: BlindedPositions) -> No
     )
 
 
-# Whether an allele `a`, with its `chrom`, its `pos` and its `ref`, lies in reach of an entry `e` of a small variant.
-_IN_REACH = (
-    "e.kind = 'small' AND e.chrom = a.chrom "
-    f'AND a.pos <= e.last_base + {REACH} AND a.pos + length(a.ref) - 1 >= e.first_base - {REACH}'
-)
+# Whether an allele `a`, with its `ref` and its `alt`, is an insertion: its ALT is its REF with more bases after it.
+# Such an allele changes no base of its REF, and the bases that it adds stand before the base after its REF. Every
+# other allele changes a base of its REF: a substitution of one base or of several, a deletion, which the tables write
+# with the base before it, and an allele that replaces bases by another number of them. A VCF may write a base in
+# either case, so the two alleles are compared in one.
+_INSERTION = 'length(a.alt) > length(a.ref) AND starts_with(upper(a.alt), upper(a.ref))'
+
+# The last base of the footprint of an allele `a`, which begins at `a.pos`: the last base of its REF, and for an
+# insertion the base after that.
+_FOOTPRINT_END = f'a.pos + length(a.ref) - 1 + CASE WHEN {_INSERTION} THEN 1 ELSE 0 END'
+
+# Whether the footprint of an allele `a`, with its `chrom`, `pos`, `ref` and `alt`, shares a base with an entry `e` of
+# a small variant. The Annotator lists a ClinVar record on an allele where the two begin at the same base once the
+# leading bases that REF and ALT share are dropped, so an insertion begins at the base after its REF and every other
+# allele at a base of its REF. An entry is the footprint of its variant, so two alleles that begin at the same base
+# share a base of their footprints. No distance is added to either (docs/annotation.md, Blinded positions).
+_SHARES_A_BASE = f"e.kind = 'small' AND e.chrom = a.chrom AND a.pos <= e.last_base AND {_FOOTPRINT_END} >= e.first_base"
 
 
 def _overlapping(pos: str, end_pos: str) -> str:
@@ -160,15 +166,16 @@ def blind_variants(con: duckdb.DuckDBPyConnection, positions: BlindedPositions |
 
     The connection has the family's `records` and the union's variants as `union_variants`. For a family with
     positions it gets `blinded_entries`, then `blinded_variants`, each allele of the family with each entry that
-    reaches it, and a view that holds the union's rows with VARIANTS_COLUMNS null for those alleles.
+    shares a base with its footprint, and a view that holds the union's rows with VARIANTS_COLUMNS null for those
+    alleles.
     """
     if positions is None:
         return 'union_variants'
     _register(con, positions)
     con.execute(
         'CREATE TEMP TABLE blinded_variants AS SELECT a.variant_id, e.kind, e.place '  # noqa: S608 (a condition of this module's own)
-        'FROM (SELECT variant_id, chrom, pos, ref FROM union_variants SEMI JOIN records USING (variant_id)) a '
-        f'JOIN blinded_entries e ON {_IN_REACH}'
+        'FROM (SELECT variant_id, chrom, pos, ref, alt FROM union_variants SEMI JOIN records USING (variant_id)) a '
+        f'JOIN blinded_entries e ON {_SHARES_A_BASE}'
     )
     con.sql(_emptied('union_variants', 'variant_id', VARIANTS_COLUMNS, 'blinded_variants')).create_view(
         'blinded_union_variants'
@@ -200,7 +207,7 @@ def blind_records(con: duckdb.DuckDBPyConnection, columns: Collection[str]) -> s
         'JOIN (SELECT sv_id, annotated_pos, annotated_end_pos FROM sv_annotated) n USING (sv_id) '
         "JOIN blinded_entries e ON e.kind = 'structural' AND e.chrom = r.chrom "
         f'AND ({_overlapping("r.pos", "r.end_pos")} OR ({annotated})) '
-        f'UNION ALL SELECT a.sv_id, e.kind, e.place FROM sv_alleles a JOIN blinded_entries e ON {_IN_REACH}'
+        f'UNION ALL SELECT a.sv_id, e.kind, e.place FROM sv_alleles a JOIN blinded_entries e ON {_SHARES_A_BASE}'
     )
     emptied = [column for column in SV_COLUMNS if column in columns]
     if not emptied:
