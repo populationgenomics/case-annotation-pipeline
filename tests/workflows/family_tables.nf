@@ -146,7 +146,7 @@ workflow {
     def blinded = file("${fixture}/family-a.blinded-positions.json")
     structural = larger.map { f, sv, cnv, repeats -> tuple(f, sv, cnv, repeats, [blinded]) }.mix(channel.of(tuple('family-b', [], [], [], [])))
 
-    checked = FAMILY_CHECK(families.join(structural), '0.6.1')
+    checked = FAMILY_CHECK(families.join(structural), '0.6.2')
     normalised = NORMALISE_FAMILY(
         families.join(checked.map { f -> [f] }).map { f, vcf, _ped, _proband -> tuple(f, vcf) },
         reference,
@@ -261,7 +261,7 @@ workflow {
         'v0.0.0',
         '2099-01-01',
         '0.5.1',
-        '0.6.1',
+        '0.6.2',
     )
     // What FAMILY_TABLES gives of a family: its id, variants, transcripts, roh, the manifest, the notes, and the
     // tables that only some families have.
@@ -354,19 +354,19 @@ workflow {
     )
     other_proband = FAMILY_CHECK_PROBAND_REFUSED(
         channel.of(tuple('family-a', file("${fixture}/family-a.vcf"), file("${fixture}/family-a.ped"), 'B3', [], [], [], [])),
-        '0.6.1',
+        '0.6.2',
     )
     two_repeats = FAMILY_CHECK_REPEATS_REFUSED(
         channel.of(tuple('family-a', file("${fixture}/family-a.vcf"), file("${fixture}/family-a.ped"), 'A3', [], [], [file("${fixture}/A1.repeats.vcf"), file("${fixture}/A2.repeats.vcf")], [])),
-        '0.6.1',
+        '0.6.2',
     )
     other_samples = FAMILY_CHECK_SV_SAMPLES_REFUSED(
         channel.of(tuple('family-b', file("${fixture}/family-b.vcf"), file("${fixture}/family-b.ped"), '', [file("${fixture}/family-a.sv.vcf")], [], [], [])),
-        '0.6.1',
+        '0.6.2',
     )
     other_assembly = FAMILY_CHECK_BLINDED_REFUSED(
         channel.of(tuple('family-a', file("${fixture}/family-a.vcf"), file("${fixture}/family-a.ped"), 'A3', [], [], [], [file("${fixture}/blinded-other-assembly.json")])),
-        '0.6.1',
+        '0.6.2',
     )
     sv_mismatch = NORMALISE_SV_REF_MISMATCH_REFUSED(
         channel.of(tuple('sv-mismatch', [file("${fixture}/sv-ref-mismatch.vcf")])),

@@ -6,6 +6,7 @@ import pathlib
 from collections.abc import Callable, Collection, Mapping, Sequence
 from typing import Any
 
+import duckdb
 import invented_sv_annotation
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -178,32 +179,56 @@ def test_the_invented_values_fill_every_column_that_an_entry_empties() -> None:
 
 
 # A family's alleles around three invented variants: a single-base change at chr1:100, at a site of two alleles; an
-# insertion written at chr2:200; and a deletion of the bases chr10:301 and chr10:302, written at chr10:300.
+# insertion written at chr2:200; and a deletion of the bases chr10:301 and chr10:302, written at chr10:300. Around
+# each are substitutions, insertions and deletions at the bases that its entry has to reach and at the nearest
+# bases that it must leave alone.
 _AROUND_THE_BASE = (
     'chr1-90-ACCCCCCCCCCC-A',
+    'chr1-98-G-GA',
     'chr1-98-G-T',
     'chr1-99-A-AT',
+    'chr1-99-A-C',
+    'chr1-99-AC-A',
+    'chr1-100-C-CA',
     'chr1-100-C-G',
     'chr1-100-C-T',
+    'chr1-100-CG-C',
     'chr1-101-G-A',
+    'chr1-101-G-GT',
+    'chr1-101-GT-G',
     'chr1-102-T-C',
 )
 _AROUND_THE_INSERTION = (
     'chr2-198-T-C',
+    'chr2-198-T-TG',
     'chr2-199-G-C',
+    'chr2-199-G-GT',
+    'chr2-199-GA-G',
     'chr2-200-A-ACC',
     'chr2-200-A-G',
+    'chr2-200-AT-A',
     'chr2-201-T-G',
+    'chr2-201-T-TA',
+    'chr2-201-TC-T',
+    'chr2-202-C-CG',
     'chr2-202-C-T',
 )
 _AROUND_THE_DELETION = (
     'chr10-296-TTT-T',
-    'chr10-297-TTT-T',
+    'chr10-297-TTA-T',
     'chr10-298-T-C',
+    'chr10-298-T-TG',
+    'chr10-299-A-AT',
     'chr10-299-A-G',
+    'chr10-300-G-T',
     'chr10-300-GCA-G',
+    'chr10-301-C-T',
+    'chr10-302-A-AG',
     'chr10-302-A-T',
+    'chr10-302-AC-A',
+    'chr10-303-C-CT',
     'chr10-303-C-G',
+    'chr10-303-CC-C',
     'chr10-304-C-G',
 )
 _ELSEWHERE = ('chrX-100-C-T',)
@@ -267,28 +292,60 @@ def _emptied(path: pathlib.Path, key: str, columns: Sequence[str]) -> set[str]:
     return emptied
 
 
-# What each entry reaches of the family's alleles: the alleles whose REF lies within a base of it.
+# What each entry reaches of the family's alleles: the alleles whose footprint shares a base with it. A footprint is
+# the bases of the allele's REF, and for an insertion the base after them too.
 _REACHED: Mapping[str, tuple[tuple[str, int, int], set[str]]] = {
     'a single base, at a site of two alleles': (
         ('chr1', 100, 100),
-        # The deletion over the base, the insertion written at the base before it, both alleles of the site, and the
-        # change of the next base.
-        {'chr1-90-ACCCCCCCCCCC-A', 'chr1-99-A-AT', 'chr1-100-C-G', 'chr1-100-C-T', 'chr1-101-G-A'},
+        # Both alleles of the site, the insertions written at the base and at the base before it, and the
+        # deletions whose REF holds the base. Not the changes of the two neighbouring bases, the insertion written
+        # at the next base or two bases before, or the deletion written at the next base.
+        {
+            'chr1-90-ACCCCCCCCCCC-A',
+            'chr1-99-A-AT',
+            'chr1-99-AC-A',
+            'chr1-100-C-CA',
+            'chr1-100-C-G',
+            'chr1-100-C-T',
+            'chr1-100-CG-C',
+        },
     ),
-    'an insertion, by its anchor base': (
-        ('chr2', 200, 200),
-        # The insertion, the other allele at its anchor base, and the changes of the bases beside the anchor.
-        {'chr2-199-G-C', 'chr2-200-A-ACC', 'chr2-200-A-G', 'chr2-201-T-G'},
-    ),
-    'an insertion, by the two bases around it': (
+    'an insertion, by its anchor base and the next base': (
         ('chr2', 200, 201),
-        {'chr2-199-G-C', 'chr2-200-A-ACC', 'chr2-200-A-G', 'chr2-201-T-G', 'chr2-202-C-T'},
+        # The insertion, the changes of its anchor base and of the base after it, the insertions written one base
+        # to either side, and the deletions whose REF holds one of the two bases. Not the change of the base before
+        # the anchor, or anything written two bases from the anchor.
+        {
+            'chr2-199-G-GT',
+            'chr2-199-GA-G',
+            'chr2-200-A-ACC',
+            'chr2-200-A-G',
+            'chr2-200-AT-A',
+            'chr2-201-T-G',
+            'chr2-201-T-TA',
+            'chr2-201-TC-T',
+        },
+    ),
+    'an insertion, by its anchor base alone': (
+        ('chr2', 200, 200),
+        # An entry without the base after the anchor leaves the alleles written at that base alone, among them
+        # the change of it.
+        {'chr2-199-G-GT', 'chr2-199-GA-G', 'chr2-200-A-ACC', 'chr2-200-A-G', 'chr2-200-AT-A'},
     ),
     'a deletion, from its anchor base to its last base': (
         ('chr10', 300, 302),
-        # The deletion, the changes of a base that it removes and of the bases beside it, and the deletion that ends
-        # at the base before it.
-        {'chr10-297-TTT-T', 'chr10-299-A-G', 'chr10-300-GCA-G', 'chr10-302-A-T', 'chr10-303-C-G'},
+        # The deletion, the changes of its anchor base and of the bases that it removes, the insertion written at
+        # the base before it, and the insertion and the deletion written at its last base. Not the alleles written
+        # at the base after its last base, the change of the base before it, or the deletion that ends there.
+        {
+            'chr10-299-A-AT',
+            'chr10-300-G-T',
+            'chr10-300-GCA-G',
+            'chr10-301-C-T',
+            'chr10-302-A-AG',
+            'chr10-302-A-T',
+            'chr10-302-AC-A',
+        },
     ),
     'a base on another chromosome than any allele': (('chr3', 100, 100), set()),
     'a base far from any allele': (('chr1', 5000, 5000), set()),
@@ -296,7 +353,9 @@ _REACHED: Mapping[str, tuple[tuple[str, int, int], set[str]]] = {
 
 
 @pytest.mark.parametrize('case', _REACHED)
-def test_an_entry_of_a_small_variant_empties_the_alleles_within_a_base_of_it(tmp_path: pathlib.Path, case: str) -> None:
+def test_an_entry_of_a_small_variant_empties_the_alleles_whose_footprint_shares_a_base_with_it(
+    tmp_path: pathlib.Path, case: str
+) -> None:
     interval, reached = _REACHED[case]
     inputs = _family(tmp_path)
     _assemble(inputs, output=tmp_path / 'plain')
@@ -316,6 +375,121 @@ def test_an_entry_of_a_small_variant_empties_the_alleles_within_a_base_of_it(tmp
     assert kept == [row for row in plain.to_pylist() if row['variant_id'] not in reached]
     assert all(row['clinvar_accession'] == f'VCV-{row["variant_id"]}' for row in kept)
     assert manifest.alleles == len(_FAMILY)
+
+
+# The shapes of an allele, each as its REF and its ALT. The bases are invented and no reference is read.
+_SHAPES: Mapping[str, tuple[str, str]] = {
+    'a change of one base': ('A', 'G'),
+    'a change of two bases in a row': ('AC', 'GT'),
+    'a change of three bases in a row': ('ACG', 'TGA'),
+    'an insertion of one base': ('A', 'AT'),
+    'an insertion of two bases': ('A', 'ATT'),
+    'a deletion of one base': ('AC', 'A'),
+    'a deletion of three bases': ('ACGT', 'A'),
+    'two bases replaced by one, after a shared base': ('ACG', 'AT'),
+    'one base replaced by two, after a shared base': ('AC', 'ATT'),
+    'two bases replaced by one': ('AC', 'G'),
+    'one base replaced by two': ('A', 'GT'),
+}
+
+
+def _is_insertion(ref: str, alt: str) -> bool:
+    return len(alt) > len(ref) and alt.startswith(ref)
+
+
+def _begin(pos: int, ref: str, alt: str) -> int:
+    """The base at which the Annotator places an allele: its `pos` after the leading bases that REF and ALT share."""
+    shared = 0
+    while shared < min(len(ref), len(alt)) and ref[shared] == alt[shared]:
+        shared += 1
+    return pos + shared
+
+
+def _footprint(pos: int, ref: str, alt: str) -> tuple[int, int]:
+    """The first and the last base of an allele's footprint, which is the entry of a file for the allele."""
+    return pos, pos + len(ref) - 1 + _is_insertion(ref, alt)
+
+
+def test_the_rule_takes_every_pair_that_begins_at_one_base_or_shares_a_base_of_ref_and_little_beyond() -> None:
+    # Measured, the Annotator lists a ClinVar record on a row where the two alleles begin at the same base. The
+    # rule must take each such pair, whichever of the two the entry is of, and each pair whose REFs share a base.
+    # It is written with footprints instead, which take one kind of pair more: an insertion with an allele whose
+    # REF begins at the base after the insertion's REF and that begins a base later itself, as another insertion,
+    # a deletion or a replacement written with the base before it does. Every pair of two shapes at up to six
+    # bases apart is compared here.
+    entry_pos = 100
+    rows = [(shape, entry_pos + offset) for shape in _SHAPES for offset in range(-6, 7)]
+    con = duckdb.connect()
+    con.register(
+        'a',
+        pa.table(
+            {
+                'shape': pa.array([shape for shape, _pos in rows]),
+                'chrom': pa.array(['chr1'] * len(rows)),
+                'pos': pa.array([pos for _shape, pos in rows], pa.int32()),
+                'ref': pa.array([_SHAPES[shape][0] for shape, _pos in rows]),
+                'alt': pa.array([_SHAPES[shape][1] for shape, _pos in rows]),
+            }
+        ),
+    )
+    footprints = {shape: _footprint(entry_pos, *allele) for shape, allele in _SHAPES.items()}
+    con.register(
+        'e',
+        pa.table(
+            {
+                'kind': pa.array(['small'] * len(footprints)),
+                'shape': pa.array(list(footprints)),
+                'chrom': pa.array(['chr1'] * len(footprints)),
+                'first_base': pa.array([first for first, _last in footprints.values()], pa.int64()),
+                'last_base': pa.array([last for _first, last in footprints.values()], pa.int64()),
+            }
+        ),
+    )
+    taken = set(
+        con.sql(f'SELECT e.shape, a.shape, a.pos FROM a JOIN e ON {blinded_positions._SHARES_A_BASE}').fetchall()  # noqa: S608 (a condition of the package's own)
+    )
+
+    def spans(pos: int, ref: str) -> range:
+        return range(pos, pos + len(ref))
+
+    def overlap(one: range, other: range) -> bool:
+        return one.start < other.stop and other.start < one.stop
+
+    def adjacent(insertion: tuple[int, str, str], other: tuple[int, str, str]) -> bool:
+        """Whether an insertion stands directly before the REF of an allele that begins a base later itself."""
+        pos, ref, alt = insertion
+        return _is_insertion(ref, alt) and other[0] == pos + len(ref) and _begin(*other) == other[0] + 1
+
+    measured, beyond, apart = set(), set(), set()
+    for entry_shape, entry_allele in _SHAPES.items():
+        entry = (entry_pos, *entry_allele)
+        for row_shape, pos in rows:
+            row = (pos, *_SHAPES[row_shape])
+            pair = (entry_shape, row_shape, pos)
+            if _begin(*entry) == _begin(*row) or overlap(spans(*entry[:2]), spans(*row[:2])):
+                measured.add(pair)
+            elif adjacent(entry, row) or adjacent(row, entry):
+                beyond.add(pair)
+            if not overlap(range(entry_pos - 1, entry_pos + len(entry[1]) + 1), spans(*row[:2])):
+                apart.add(pair)
+    assert measured <= taken
+    assert taken - measured == beyond
+    # A row whose REF lies two bases or more from the REF of the entry's variant is never taken.
+    assert apart
+    assert not apart & taken
+    # The pairs of the measurement that the REFs alone do not find, and one pair of each kind that the rule takes
+    # beyond the measured ones.
+    assert {
+        ('an insertion of one base', 'a change of one base', entry_pos + 1),
+        ('a change of one base', 'an insertion of one base', entry_pos - 1),
+        ('an insertion of two bases', 'two bases replaced by one', entry_pos + 1),
+    } <= measured
+    assert {
+        ('an insertion of one base', 'an insertion of two bases', entry_pos + 1),
+        ('an insertion of one base', 'a deletion of one base', entry_pos + 1),
+        ('a deletion of three bases', 'an insertion of one base', entry_pos - 1),
+        ('an insertion of one base', 'two bases replaced by one, after a shared base', entry_pos + 1),
+    } <= beyond
 
 
 def test_an_entry_of_a_structural_variant_empties_no_row_of_variants(tmp_path: pathlib.Path) -> None:
@@ -419,7 +593,7 @@ def test_the_step_logs_how_many_rows_each_entry_reached_and_an_entry_that_reache
     _assemble(_family(tmp_path), blinded=positions)
     # An entry by its list and its place in it, and no position.
     assert capsys.readouterr().out.splitlines() == [
-        'blinded positions: small[0]: variants 5',
+        'blinded positions: small[0]: variants 7',
         'blinded positions: small[1]: variants 0',
         'blinded positions: structural[0]: no table that it could reach',
     ]
@@ -528,7 +702,12 @@ _REACHED_RECORDS: Mapping[str, tuple[dict[str, list[tuple[str, int, int]]], set[
         {'small': [('chr2', 298, 301)]},
         {'inv:DEL:2'},
     ),
-    'a short sequence, two bases past its normalised allele': ({'small': [('chr2', 303, 303)]}, set()),
+    'a short insertion, by the base after its anchor base': ({'small': [('chr10', 8, 8)]}, {'inv:INS:1'}),
+    'a short insertion, by the base before its anchor base': ({'small': [('chr10', 6, 6)]}, set()),
+    'a short insertion, two bases past its anchor base': ({'small': [('chr10', 9, 9)]}, set()),
+    'a short deletion, by the last base of its normalised allele': ({'small': [('chr2', 301, 301)]}, {'inv:DEL:2'}),
+    'a short deletion, by the base past its normalised allele': ({'small': [('chr2', 302, 302)]}, set()),
+    'a short deletion, by the base before its normalised allele': ({'small': [('chr2', 297, 297)]}, set()),
     'a small variant inside the records matched by overlap': (
         {'small': [('chr1', 2000, 2000), ('chr1', 25_000, 25_000), ('chr10', 9000, 9000)]},
         set(),

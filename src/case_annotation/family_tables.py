@@ -764,6 +764,7 @@ _SV_ALLELES = pa.schema(
         pa.field('chrom', _STRING, nullable=False),
         pa.field('pos', _INT, nullable=False),
         pa.field('ref', _STRING, nullable=False),
+        pa.field('alt', _STRING, nullable=False),
     ]
 )
 
@@ -780,12 +781,14 @@ def read_sv_alleles(path: pathlib.Path, sequences: Collection[str]) -> pa.Table:
         for record in vcf:
             if record.id is None or record.id in alleles:
                 raise ValueError(f'{path}: {record.chrom}:{record.pos} has no ID, or the ID of another record')
+            ref, alt = annotation_tables.record_alleles(record, str(path))
             alleles[record.id] = {
                 'sv_id': record.id,
-                'variant_id': annotation_tables.record_id(record, str(path)),
+                'variant_id': annotation_tables.variant_id(record.chrom, record.pos, ref, alt),
                 'chrom': record.chrom,
                 'pos': record.pos,
-                'ref': record.ref,
+                'ref': ref,
+                'alt': alt,
             }
     if extra := sorted(alleles.keys() - set(sequences))[:5]:
         raise ValueError(f"{path}: holds records that are no sequence of the family's structural variants: {extra}")

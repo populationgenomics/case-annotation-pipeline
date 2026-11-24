@@ -468,11 +468,16 @@ def variant_id(chrom: str, pos: int, ref: str, alt: str) -> str:
     return f'{chrom}-{pos}-{ref}-{alt}'
 
 
-def record_id(record: pysam.VariantRecord, where: str) -> str:
-    """The variant id of a VCF record of one allele; a record with another number of alternate alleles fails."""
+def record_alleles(record: pysam.VariantRecord, where: str) -> tuple[str, str]:
+    """The reference and the alternate allele of a VCF record of one allele; another number of alternates fails."""
     if record.ref is None or record.alts is None or len(record.alts) != 1:
         raise ValueError(f'{where}: {record.chrom}:{record.pos} does not hold one reference and one alternate allele')
-    return variant_id(record.chrom, record.pos, record.ref, record.alts[0])
+    return record.ref, record.alts[0]
+
+
+def record_id(record: pysam.VariantRecord, where: str) -> str:
+    """The variant id of a VCF record of one allele; a record with another number of alternate alleles fails."""
+    return variant_id(record.chrom, record.pos, *record_alleles(record, where))
 
 
 def by_severity(consequences: Iterable[str]) -> list[str]:

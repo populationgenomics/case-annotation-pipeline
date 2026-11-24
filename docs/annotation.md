@@ -789,37 +789,94 @@ tables name it (`chr1` to `chr22`, `chrX`, `chrY` and `chrM`), and its first and
 both counted from 1 and both part of the interval. Either list can be empty. The file names no family: the sheet's row
 does.
 
-An entry of `small` gives the reference bases of a small variant as `variants` holds the allele after the normalisation,
-from `pos` to the last base of `ref`:
+An entry of `small` gives the footprint of a small variant. The footprint of an allele is the bases of its `ref` as
+`variants` holds the allele after the normalisation, from `pos` to the last base of `ref`, and for an insertion the base
+after them as well. An insertion is an allele whose `alt` is its `ref` with more bases after it, so its footprint is the
+base before the inserted bases and the base after them. Every other allele has the bases of its `ref` alone: a
+substitution of one base or of several bases in a row, a deletion, and an allele that replaces bases by another number
+of bases.
 
-| The variant          | Its row of `variants`                                                                  | Its entry                                     |
-| -------------------- | -------------------------------------------------------------------------------------- | --------------------------------------------- |
-| a change of one base | `chr2-1234567-C-T`                                                                     | `start` and `end` 1234567                     |
-| an insertion         | `chr2-1234567-C-CAT`, whose `ref` is the base before the inserted bases                | `start` and `end` 1234567, which is that base |
-| a deletion           | `chr7-7654321-GCA-G`, whose `ref` is the base before the deleted bases and those bases | `start` 7654321 and `end` 7654323             |
+| The variant          | Its row of `variants`                                                                  | Its entry                                                                       |
+| -------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| a change of one base | `chr2-1234567-C-T`                                                                     | `start` and `end` 1234567                                                       |
+| an insertion         | `chr2-1234567-C-CAT`, whose `ref` is the base before the inserted bases                | `start` 1234567 and `end` 1234568, the bases before and after the inserted ones |
+| a deletion           | `chr7-7654321-GCA-G`, whose `ref` is the base before the deleted bases and those bases | `start` 7654321 and `end` 7654323                                               |
 
 Such an entry empties two things.
 
 - In `variants`, it empties the ten ClinVar columns (`clinvar_accession`, `clinvar_classification`,
   `clinvar_review_status`, `clinvar_stars`, `clinvar_conditions`, `clinvar_last_evaluated`, `clinvar_last_updated`,
-  `clinvar_pubmed_ids`, `clinvar_records` and `clinvar_other_alleles`) of every row whose `ref` lies within one base of
-  the entry. Those are the rows with a `pos` of at most `end + 1` whose last base of `ref` is at least `start - 1`. They
-  are the variant itself, every other allele of its site, which the normalisation has split into rows of their own,
-  every deletion that removes one of its bases, and the alleles at the base before it and at the base after it.
+  `clinvar_pubmed_ids`, `clinvar_records` and `clinvar_other_alleles`) of every row whose own footprint shares a base
+  with the entry. Those are the rows with a `pos` of at most `end` whose footprint ends at `start` or later. They are
+  the variant itself, every other allele of its site, which the normalisation has split into rows of their own, every
+  allele whose `ref` holds one of the entry's bases, and every insertion written at the base before `start`.
 - In `sv`, it empties the eight ClinVar columns (`clinvar_accession`, `clinvar_classification`, `clinvar_review_status`,
   `clinvar_stars`, `clinvar_conditions`, `clinvar_last_evaluated`, `clinvar_overlap` and `clinvar_records`) of every
   record written as a sequence whose allele meets the same test after the normalisation of the family's VCF. That allele
   is the one that `small_variant_id` names where `variants` holds it, and the test is the same for a record whose allele
   `variants` lacks.
 
-The test reaches one base beside the entry on purpose, as a tolerance. The tables write an insertion or a deletion with
-the base before it. The Annotator lists ClinVar's records of other alleles at the position of an allele, which
-`clinvar_other_alleles` holds, and Illumina does not say which base the position of an insertion or a deletion is. If it
-is the first base that the allele changes, the record of an insertion written at one base stands on a change of the next
-base, and the record of a change of one base stands on an insertion written at the base before. One base on either side
-covers both readings, and the price is that the alleles of the two neighbouring bases lose their own records too. An
-entry that gives an insertion as the two bases around the inserted ones reaches one base further than one that gives the
-base before them, and is accepted.
+The test adds no distance to either footprint. The pipeline reads an entry as bases and does not ask which kind of
+variant it stands for: whoever writes the file gives each variant its footprint, and the pipeline gives each row its
+own. A file that gives an insertion by the base before the inserted bases alone is read like any other, and the row of a
+substitution at the next base then keeps its ClinVar values, so such a file is derived again.
+
+The footprint follows how the Annotator decides that two alleles are at the same position, which Illumina does not state
+and which was measured. The Annotator lists a ClinVar record on a row, as the allele's own or in
+`clinvar_other_alleles`, where the record's allele and the row's allele begin at the same base once the leading bases
+that `ref` and `alt` share are dropped. A substitution begins at its `pos`. An insertion or a deletion begins at
+`pos + 1`, because the tables write it with the base before it. An insertion begins at the base that its footprint adds,
+and every other allele begins at a base of its `ref`, so two alleles that begin at the same base share a base of their
+footprints.
+
+The following was counted on the `variants` tables of two families with catalog `202610`, by looking up each listed
+record in ClinVar's public file of its variants, `variant_summary.txt.gz`. The first table has 8,951,089 rows, which
+list a record of another allele 29,845 times. For 29,840 of these pairs of a row and a record, ClinVar's file gives the
+record's GRCh38 alleles.
+
+| Pairs of a row and a ClinVar record of another allele that the row lists                   | Pairs  |
+| ------------------------------------------------------------------------------------------ | ------ |
+| all                                                                                        | 29,840 |
+| the two alleles begin at the same base                                                     | 29,840 |
+| the reference bases of the two share a base                                                | 28,793 |
+| the reference bases share none, and the footprints share one: the row is an insertion's    | 652    |
+| the reference bases share none, and the footprints share one: the record is an insertion's | 395    |
+
+Each of the 1,047 pairs of the last two lines is an insertion with an allele that begins at the base after the
+insertion's `ref`, without a base written before it. That allele is a substitution of one base in 1,031 pairs and a
+substitution of several bases or a replacement in 16. The rule misses no pair. The second table has 6,165,479 rows and
+19,782 such pairs: the reference bases share a base in 19,097, the footprints alone in 685, and the rule misses none.
+
+Three more counts are of the first table.
+
+- A ClinVar record that begins at another base than a row's allele is not listed on the row, even where the reference
+  bases of the two share a base. In 4,842 pairs of a row with ClinVar values and a record, the record begins up to 59
+  bases before the row's allele and its reference bases hold the base at which that allele begins. In 2,223 pairs the
+  record begins at a later base of the row's `ref`. No row of these 7,065 pairs lists the record.
+- A record is the allele's own where it has the row's `pos`, `ref` and `alt` in ClinVar's file, which holds for 80,736
+  of the 80,739 records in `clinvar_records` of a row.
+- Of the 15,197 pairs of a row with ClinVar values and a record whose reference bases end or begin one base beside the
+  row's, 13,685 (90%) are pairs in which the row lists neither the record nor another record at the record's position. A
+  distance of one base around an entry would therefore empty mostly rows that say nothing of the variant.
+
+The rule empties more rows than the ones that list a record of the entry's variant.
+
+- A row whose footprint shares a base with the entry and whose allele begins elsewhere is emptied, although the
+  Annotator lists no record of the variant there. A substitution at the base before an inserted or a deleted stretch is
+  such a row, and so is a longer deletion over a blinded base.
+- An insertion and an allele written at the base after the insertion's `ref` share that base, whichever of the two the
+  entry is of. Where the other allele is an insertion or a deletion too, it begins one base later and the Annotator
+  lists neither on the other's row. The rule empties the row all the same.
+
+The rule does not reach a ClinVar record that covers a blinded base and begins before the entry. A deletion in ClinVar
+that removes the base of a blinded substitution and begins some bases earlier is listed on the family's rows that begin
+at the deletion's own first base. Those rows keep it unless their footprint shares a base with the entry.
+
+The measurement has limits. It is of one catalog. The two families are one sequenced person alone and a trio whose
+proband is that person, so both tables come from the sequencing data of one family. No row of either table is a
+substitution of several bases or a replacement of bases by another number of them, so such an allele was seen as the
+record of a pair and never as its row. The records of `sv` that are written as a sequence get the same footprint, and no
+count was made on `sv`.
 
 An entry of `structural` gives the bases of a structural variant or of a copy number segment, which for a row of `sv`
 run from `pos + 1` to `end_pos`. It empties the eight ClinVar columns of every row of `sv`, of either caller, that
