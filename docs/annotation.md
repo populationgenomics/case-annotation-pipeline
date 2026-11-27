@@ -2227,6 +2227,20 @@ The Annotator treats a record in one of two ways, and `annotated_as` in `sv` say
 A record annotated as a small variant keeps its row and its transcripts. Where it names a row of `variants`
 (`small_variant_id`), that row has the fuller annotation, with the scores and gnomAD's joint values.
 
+`variant_type` in `sv` is the Annotator's type of the record, and it comes from a different place for each kind.
+
+| Record          | Where its `variant_type` comes from                                                                                                                                                                                                 |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| structural      | `SVTYPE`: `deletion` for `DEL`, `insertion` for `INS`, `tandem_duplication` or `duplication` for `DUP`, `inversion` for `INV`, `translocation` for `BND`, and `copy_number_loss` or `copy_number_gain` for the two alleles of `CNV` |
+| a small variant | the two alleles alone: the Annotator trims the bases they share and gives what is left the type `SNV`, `MNV`, `insertion`, `deletion` or `delins`. It does not read `SVTYPE`                                                        |
+
+A small variant's `variant_type` can therefore be of another kind than its `sv_type`. DRAGEN's structural variant caller
+writes a deletion that also inserts bases as a record of `SVTYPE` `DEL` with the inserted bases in `ALT`. Where it
+inserts as many bases as it deletes, `REF` and `ALT` have the same length, and the record is an `MNV`, or an `SNV` if
+the two alleles differ in a single base. The conversion accepts each of the five types on a small variant of any
+`SVTYPE`. It fails for a small variant of another type, and for a structural record whose type does not belong to its
+`SVTYPE`.
+
 For a structural record the Annotator reports the entries of a source that lie on or near it. Which entries it reports
 depends on the record:
 

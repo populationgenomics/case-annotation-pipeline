@@ -828,6 +828,10 @@ The other columns of the annotation follow from the same matching:
   about one record in five. The Annotator treats such a record as a small variant: it has no match by overlap, and
   instead gnomAD's values of the allele itself in `gnomad_genomes_` and `gnomad_exomes_` and ClinVar's records of the
   allele itself, as a row of `variants` has. Where the record names a row of `variants`, that row has the scores too.
+  Its `variant_type` is the Annotator's type of its two alleles (`SNV`, `MNV`, `insertion`, `deletion` or `delins`),
+  which can be of another kind than its `sv_type`: a record of `sv_type` `DEL` that inserts as many bases as it deletes
+  is an `MNV`, or an `SNV` if one base differs
+  ([Annotating the structural variants](annotation.md#annotating-the-structural-variants)).
 - A segment that one member loses and another gains (`sv_type` `CNV`) has two alleles. Its lists hold the matches of
   both, each with its `variant_type`, and its `hgnc_ids` and `breakpoint_hgnc_ids` the genes of both. Its best match and
   `gnomad_sv_max_af` are empty, because either would be that of one allele. So are its `onekg_sv_` and `gnomad_cnv_`
