@@ -1,5 +1,5 @@
 {
-  "pipeline_version": "0.6.3",
+  "pipeline_version": "0.6.4",
   "tables_version": "0.5.1",
   "workflows": {
     "family_tables.nf": {
