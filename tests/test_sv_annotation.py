@@ -230,6 +230,43 @@ def test_a_small_variant_has_the_alleles_own_gnomad_values_and_clinvar_records()
     pa.Table.from_pylist([row], schema=sv_annotation.SV)
 
 
+# Short sequences whose alleles are another kind of variant than their SVTYPE names, each with the type that the
+# Annotator gives the alleles and the interval it trims them to. The first two are deletions that insert as many bases
+# as they delete, with one base that differs and with two.
+_ONE_BASE = invented.site('chr1\t52000\t.\tACGTACGT\tACGTTCGT\t.\t.\tSVTYPE=DEL;END=52007;SVLEN=-7')
+_TWO_BASES = invented.site('chr1\t53000\t.\tACGTACGT\tACGTTGGT\t.\t.\tSVTYPE=DEL;END=53007;SVLEN=-7')
+_FEWER_BASES = invented.site('chr1\t54000\t.\tACGTACGT\tATT\t.\t.\tSVTYPE=DEL;END=54007;SVLEN=-7')
+_MORE_BASES = invented.site('chr1\t55000\t.\tAC\tATTTT\t.\t.\tSVTYPE=INS;END=55001;SVLEN=3')
+_COPIED_BASES = invented.site('chr1\t56000\t.\tA\tACGT\t.\t.\tSVTYPE=DUP;END=56000;SVLEN=3')
+SMALL_VARIANTS: dict[str, tuple[sv_sites.Site, str, int, int]] = {
+    'a deletion with one base replaced': (_ONE_BASE, 'SNV', 52004, 52004),
+    'a deletion with two bases replaced': (_TWO_BASES, 'MNV', 53004, 53005),
+    'a deletion that inserts fewer bases': (_FEWER_BASES, 'delins', 54001, 54006),
+    'an insertion that replaces a base': (_MORE_BASES, 'delins', 55001, 55001),
+    'a duplication written as the bases it adds': (_COPIED_BASES, 'insertion', 56001, 56000),
+}
+_BY_ID |= {site.site_id: site for site, *_ in SMALL_VARIANTS.values()}
+
+
+@pytest.mark.parametrize('case', SMALL_VARIANTS)
+def test_a_small_variant_has_the_type_of_its_alleles_whatever_its_svtype(case: str) -> None:
+    site, variant_type, begin, end = SMALL_VARIANTS[case]
+    variant = {
+        'variantType': variant_type,
+        'begin': begin,
+        'end': end,
+        'gnomad': {'allAf': 0.25, 'allAc': 5, 'allAn': 20, 'allHc': 1},
+        'transcripts': [invented.transcript('ENST01.1', 'Ensembl', 'GENEA', 'ENSG01', 'intron_variant')],
+    }
+    row, transcripts = _rows(invented.position(site, variant))
+    assert (row['variant_type'], row['annotated_as']) == (variant_type, 'small_variant')
+    assert (row['annotated_pos'], row['annotated_end_pos']) == (begin - 1, end)
+    # Its sources are those of the allele itself, and its transcripts carry its type, as for any small variant.
+    assert row['gnomad_genomes_af'] == 0.25
+    assert [(t['variant_type'], t['transcript_id']) for t in transcripts] == [(variant_type, 'ENST01.1')]
+    pa.Table.from_pylist([row], schema=sv_annotation.SV)
+
+
 def _transcripts() -> list[dict[str, Any]]:
     transcript = invented.transcript
     return [
@@ -589,6 +626,14 @@ POSITIONS_REFUSED: dict[str, tuple[Callable[[], dict[str, Any]], str]] = {
         lambda: invented.position(_SHORT_DUPLICATION),
         "'tandem_duplication' of a record of SVTYPE DUP",
     ),
+    'a long sequence annotated as structural, with the type of a small variant': (
+        lambda: _with(_LONG, {'variantType': 'SNV'}),
+        "'SNV' of a record of SVTYPE DEL .* annotated as structural, is none",
+    ),
+    'a symbolic allele with the type of a small variant': (
+        lambda: _with(_DELETION, {'variantType': 'delins'}),
+        "'delins' of a record of SVTYPE DEL .* annotated as structural, is none",
+    ),
     'a symbolic allele that is not annotated as structural': (
         lambda: (
             (p := _with(_DELETION))
@@ -735,7 +780,7 @@ POSITIONS_REFUSED: dict[str, tuple[Callable[[], dict[str, Any]], str]] = {
         'no begin',
     ),
 }
-# A record that the sites accept and that the Annotator is not known to treat as a small variant.
+# A record that the sites accept, annotated as a small variant with the type of a structural one.
 _SHORT_DUPLICATION = invented.site('chr1\t60000\t.\tA\tACGT\t.\t.\tSVTYPE=DUP;END=60000')
 _BY_ID[_SHORT_DUPLICATION.site_id] = _SHORT_DUPLICATION
 

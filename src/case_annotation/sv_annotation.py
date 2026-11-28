@@ -12,7 +12,8 @@ of the small variants, and writes two tables of the union, each a folder of part
 
 The Annotator annotates a record in one of two ways. A symbolic allele, a breakend and a sequence of more than 50
 bases are structural: its sources are matched by overlap and sit on the position. A shorter sequence is a small
-variant: its sources are those of the allele itself and sit on the variant, as for the family's small variants.
+variant: its sources are those of the allele itself and sit on the variant, as for the family's small variants. The
+Annotator takes the type of a structural record from its SVTYPE and that of a small variant from its alleles alone.
 
 How it matches by overlap is not documented, and this module holds it to what its output shows. A record with an
 extent (a deletion, a duplication, an inversion, a copy-number segment) gets an entry of gnomAD, 1000 Genomes or
@@ -232,8 +233,8 @@ _DIRECTION: Mapping[str, str | None] = {
     'inversion': None,
 }
 _POINT_TYPES = frozenset({'insertion', 'translocation'})
-# The types each kind of record can have, by the record's SVTYPE and, for a copy-number segment, its allele: first as
-# a structural variant, then as a small variant.
+# The types a record can have as a structural variant, by the record's SVTYPE and, for a copy-number segment, its
+# allele.
 _STRUCTURAL_TYPES: Mapping[tuple[str, str | None], frozenset[str]] = {
     ('DEL', None): frozenset({'deletion'}),
     ('INS', None): frozenset({'insertion'}),
@@ -243,10 +244,10 @@ _STRUCTURAL_TYPES: Mapping[tuple[str, str | None], frozenset[str]] = {
     ('CNV', '<DEL>'): frozenset({'copy_number_loss'}),
     ('CNV', '<DUP>'): frozenset({'copy_number_gain'}),
 }
-_SMALL_TYPES: Mapping[str, frozenset[str]] = {
-    'DEL': frozenset({'deletion', 'delins', 'MNV'}),
-    'INS': frozenset({'insertion', 'delins'}),
-}
+# The types a record can have as a small variant, whatever its SVTYPE. The Annotator trims the bases that the two
+# alleles share and types what is left, without reading SVTYPE. A caller's deletion that inserts as many bases as it
+# deletes is therefore an MNV, or an SNV if one base differs.
+_SMALL_TYPES = frozenset({'SNV', 'MNV', 'insertion', 'deletion', 'delins'})
 # The terms of a transcript that no breakpoint of the record falls inside: one that the record takes or copies whole,
 # which a deletion written as a sequence has without completeOverlap, and one that the record lies beside.
 _NO_BREAKPOINT_TERMS = frozenset(
@@ -275,7 +276,11 @@ def _entries(held: object, where: str) -> list[Mapping[str, Any]]:
 
 
 def _variant_type(site: sv_sites.Site, variant: Mapping[str, Any], where: str) -> tuple[str, AnnotatedAs]:
-    """The Annotator's type of a site's allele and how it treated the site; a type the site cannot have fails."""
+    """The Annotator's type of a site's allele and how it treated the site; a type the site cannot have fails.
+
+    A structural record can have the types of its SVTYPE, and a small variant any type of a small variant: its type
+    says what its alleles are, which a caller can have filed under another SVTYPE.
+    """
     variant_type = _need(variant, 'variantType', where)
     sv_type = site.sv_type
     symbolic = site.alt.startswith('<') or sv_sites.is_breakend(site.alt)
@@ -285,7 +290,7 @@ def _variant_type(site: sv_sites.Site, variant: Mapping[str, Any], where: str) -
     elif symbolic:
         raise ValueError(f'{where}: the allele {site.alt} is not annotated as a structural variant')
     else:
-        allowed = _SMALL_TYPES.get(sv_type, frozenset())
+        allowed = _SMALL_TYPES
         annotated_as = 'small_variant'
     if variant_type not in allowed:
         raise ValueError(
