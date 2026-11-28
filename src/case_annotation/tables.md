@@ -1,12 +1,12 @@
 # Family tables `0.5.1`: what the tables do not show
 
+The tables hold every variant call of the family's VCFs on chr1 to chr22, X, Y and M, whatever its FILTER.
+
 Only the manifest says who the proband is.
 
 ## Rows
 
-- `variants` has one row per alternate allele that a member carries, after `bcftools norm` (split, left-aligned). It is
-  made from the family's joint VCF and has a row for every such allele on chr1 to chr22, X, Y and M, whatever its
-  FILTER. Spanning deletions (`*`) and symbolic alleles have no row.
+- `variants` has one row per alternate allele that a member carries, after `bcftools norm` (split, left-aligned).
 - `transcripts.is_mane_select` and `sv_transcripts.is_mane_select` are true on RefSeq rows only.
 - `sv` holds two callers' records: one event can be a row of each, and nothing links the two.
 - `repeats` has a row for every repeat of the catalogue, whatever the alleles.
